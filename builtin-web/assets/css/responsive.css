@@ -1,0 +1,437 @@
+/* Viewport-driven layout changes only. Base presentation stays in app.css. */
+
+.mobile-nav {
+  display: none;
+}
+
+@media (min-width: 901px) {
+  .topbar {
+    height: 82px;
+  }
+  .page-area {
+    padding-top: 18px;
+    padding-bottom: 72px;
+  }
+  .page-area:has(#settings-wifi.active) {
+    padding-bottom: 100px;
+  }
+  .settings-page {
+    margin-top: 14px;
+  }
+  .mode-section {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+  .mode-section>.panel-head {
+    min-height: 86px;
+    border-right: 1px solid var(--color-border);
+    border-bottom: 0;
+  }
+  .mode-section>.panel-head>span,
+  .mode-section>p {
+    display: none;
+  }
+  .mode-picker {
+    gap: 8px;
+    padding: 10px;
+  }
+  .mode-picker label>span {
+    min-height: 66px;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    display: block;
+  }
+  .sidebar {
+    display: none;
+  }
+  .topbar {
+    height: 82px;
+    padding: 0 18px;
+  }
+  .page-heading p {
+    font-size: 24px;
+  }
+  .page-area {
+    padding: 20px 18px 100px;
+  }
+  .page-area:has(#settings-wifi.active) {
+    padding-bottom: 180px;
+  }
+  .save-dock {
+    right: 0;
+    bottom: 86px;
+    left: 0;
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+  .endpoint-columns {
+    grid-template-columns: 1fr 1fr 1.2fr;
+  }
+  .admin-layout {
+    grid-template-columns: 1fr;
+  }
+  .conditional-layout {
+    grid-template-columns: 1fr;
+  }
+  .mobile-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    height: 72px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .mobile-nav button {
+    width: calc(100% - 16px);
+    max-width: 104px;
+    height: 60px;
+    min-width: 0;
+    display: grid;
+    align-self: center;
+    justify-self: center;
+    place-items: center;
+    align-content: center;
+    gap: 3px;
+    border-radius: 10px;
+  }
+  .mobile-nav button span {
+    font-size: 13px;
+  }
+  .mobile-nav button.active {
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+    font-weight: 750;
+  }
+  .mobile-nav button:not(.active):hover,
+  .mobile-nav button:not(.active):active {
+    background: var(--color-surface-soft);
+  }
+  .settings-tabs button {
+    min-width: 0;
+    flex: 1;
+  }
+  .capacity-stats,
+  .capacity-stats.segments-5 {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 18px;
+  }
+  .capacity-stat,
+  .capacity-stat:first-child,
+  .capacity-stat:last-child {
+    padding: 0 12px;
+  }
+  .capacity-stat:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .capacity-stat:nth-child(even) {
+    padding-right: 0;
+    border-left: 1px solid var(--color-border);
+  }
+  .capacity-stat dd {
+    font-size: 16px;
+  }
+  .notice {
+    top: 82px;
+    right: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    height: 76px;
+    padding: 0 14px;
+  }
+  .page-heading {
+    gap: 0;
+  }
+  .page-heading h1 {
+    color: var(--color-text);
+    font-size: 22px;
+    line-height: 1.1;
+    letter-spacing: -.03em;
+  }
+  .page-heading p {
+    display: none;
+  }
+  .top-actions {
+    gap: 5px;
+  }
+  .icon-button {
+    width: 44px;
+    padding: 0;
+  }
+  .icon-button>span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .menu-dropdown {
+    right: -1px;
+    width: 156px;
+  }
+  .page-area {
+    padding: 16px 14px 96px;
+  }
+  .page-area:has(#settings-wifi.active) {
+    padding-bottom: 180px;
+  }
+  .page {
+    gap: 8px;
+  }
+  .panel-head {
+    min-height: 60px;
+    flex-wrap: wrap;
+    padding: 10px 13px;
+  }
+  .panel-head>* {
+    min-width: 0;
+  }
+  .mode-status {
+    max-width: 100%;
+    flex-shrink: 1;
+    white-space: nowrap;
+  }
+  .panel-head h2 {
+    font-size: 17px;
+  }
+  .endpoint-columns {
+    grid-template-columns: 1fr;
+  }
+  .endpoint-column {
+    min-height: 90px;
+    padding: 12px 13px;
+  }
+  .endpoint-column+.endpoint-column {
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+  .endpoint-primary {
+    font-size: 18px;
+  }
+  .conditional-layout {
+    gap: 10px;
+  }
+  .storage-body {
+    padding: 14px 13px 17px;
+  }
+  .interface-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .interface-card {
+    padding: 14px 13px;
+  }
+  .interface-card+.interface-card {
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+  .detail-list.two-column {
+    grid-template-columns: 1fr;
+  }
+  .detail-list.two-column>div {
+    padding: 0 13px;
+  }
+  .detail-list.two-column>div:nth-child(even) {
+    border-left: 0;
+  }
+  .storage-overview {
+    grid-template-columns: 1fr;
+  }
+  .storage-body {
+    padding: 20px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .storage-stats>div {
+    padding: 17px 13px;
+  }
+  .storage-stats dd {
+    font-size: 15px;
+  }
+  .capacity-head-meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .capacity-content {
+    gap: 16px;
+    padding: 18px 13px 20px;
+  }
+  .settings-tabs {
+    min-height: 48px;
+    gap: 0;
+  }
+  .settings-tabs button {
+    gap: 5px;
+    font-size: 14px;
+  }
+  .mode-picker {
+    grid-template-columns: 1fr;
+    gap: 7px;
+    padding: 10px;
+  }
+  .mode-picker label>span {
+    min-height: 64px;
+    place-items: start;
+    padding: 10px 14px;
+    text-align: left;
+  }
+  .mode-section>p {
+    padding: 0 13px 12px;
+  }
+  .form-panel>label,
+  .form-panel>.form-row {
+    min-height: 72px;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 11px 13px;
+  }
+  .hostname-panel>label {
+    grid-template-columns: 94px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .form-panel .panel-head {
+    align-items: flex-start;
+  }
+  .advanced-panel summary {
+    min-height: 57px;
+    padding: 0 13px;
+  }
+  .advanced-fields {
+    grid-template-columns: 1fr;
+  }
+  .advanced-fields>label,
+  .advanced-fields>.form-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 11px 13px;
+  }
+  .advanced-fields>label+label,
+  .advanced-fields>.form-row+label {
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+  .save-dock {
+    right: 0;
+    bottom: 86px;
+    left: 0;
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+  .save-dock-inner {
+    padding-right: 13px;
+    padding-left: 13px;
+  }
+  .save-dock .button {
+    min-width: 125px;
+  }
+  .password-form>label {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 9px 13px;
+  }
+  .password-hint {
+    margin: 3px 13px;
+  }
+  .form-submit {
+    width: calc(100% - 26px);
+    margin: 10px 13px 0;
+  }
+  .danger-zone {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 17px;
+  }
+  .danger-zone>div {
+    flex-basis: calc(100% - 56px);
+  }
+  .danger-zone .button {
+    width: 100%;
+  }
+  .dialog-backdrop {
+    z-index: 90;
+  }
+  .dialog {
+    z-index: 91;
+  }
+  .login-dialog,
+  .confirm-dialog {
+    top: auto;
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+    padding: 21px;
+    transform: none;
+    border-radius: 10px;
+  }
+  .login-dialog input {
+    min-height: 44px;
+  }
+  .dialog footer .button {
+    min-height: 44px;
+  }
+  .scan-dialog {
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    display: flex;
+    flex-direction: column;
+    transform: none;
+    border-radius: 10px;
+  }
+  .scan-dialog>header {
+    min-height: 67px;
+  }
+  .scan-tools {
+    grid-template-columns: 1fr;
+    padding: 11px 13px;
+  }
+  .scan-tools .button {
+    width: 100%;
+    min-height: 44px;
+  }
+  .result-meta {
+    padding: 0 14px 10px;
+  }
+  .network-results {
+    height: auto;
+    min-height: 0;
+    flex: 1;
+  }
+  .network-option {
+    min-height: 60px;
+    padding: 8px 14px;
+  }
+  .scan-dialog>footer {
+    padding: 10px 13px 13px;
+  }
+  .scan-dialog>footer .button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 370px) {
+  .page-heading h1 {
+    max-width: 155px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .save-dock-inner>span {
+    display: none;
+  }
+  .save-dock .button {
+    width: 100%;
+  }
+}

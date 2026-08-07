@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docs"
+  short_description: "Align ESP32 specs and bilingual README files"
+  default_prompt: "Use $docs to align the relevant ESP32 project specs and bilingual README files with the current changes."

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>API client boundary test</title>
+</head>
+<body>
+  <pre id="result">WAIT</pre>
+  <script>
+    window.__formalRequests = [];
+    window.fetch = async function formalFetch(path, options = {}) {
+      window.__formalRequests.push({ path, options });
+      return new Response(JSON.stringify({
+        success: true,
+        data: { source: 'formal' },
+        message: 'ok'
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    };
+    window.__formalFetch = window.fetch;
+  </script>
+  <script src="../../builtin-web/assets/js/preview/config.js"></script>
+  <script src="../../builtin-web/assets/js/preview/mockApi.js"></script>
+  <script src="../../builtin-web/assets/js/namespace.js"></script>
+  <script src="../../builtin-web/assets/js/core/state.js"></script>
+  <script src="../../builtin-web/assets/js/core/api/client.js"></script>
+  <script src="../../builtin-web/assets/js/core/api/resources.js"></script>
+  <script src="ApiClientBoundaryTest.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Resource store test</title>
+</head>
+<body>
+  <pre id="result">WAIT</pre>
+  <script>
+    var state = {};
+    var deviceRequests = [];
+    var resources = {
+      device: { get: () => new Promise((resolve) => deviceRequests.push(resolve)) },
+      wifi: { get: async () => ({}) },
+      storage: { get: async () => ({}) },
+      auth: { get: async () => ({}) }
+    };
+  </script>
+  <script src="../../builtin-web/assets/js/core/resource-store.js"></script>
+  <script src="ResourceStoreTest.js"></script>
+</body>
+</html>
