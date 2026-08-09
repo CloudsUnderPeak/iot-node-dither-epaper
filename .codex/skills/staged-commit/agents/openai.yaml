@@ -1,0 +1,4 @@
+interface:
+  display_name: "Staged Commit"
+  short_description: "Commit staged changes with [Add]/[Modify]/[Fix] messages"
+  default_prompt: "Use $staged-commit to inspect staged changes and create a focused commit."

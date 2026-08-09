@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docs"
+  short_description: "Synchronize specs and multilingual README files"
+  default_prompt: "Use $docs to summarize changes and update project specs plus README translations."

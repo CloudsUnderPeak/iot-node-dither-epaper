@@ -1,0 +1,74 @@
+:root,
+body[data-theme="light"] {
+    /* Light theme 是預設值；token 只保留跨元件語意色，避免每個元件各自新增色票。 */
+    color-scheme: light;
+    --color-root-bg: #eef2f3;
+    --color-page-bg-start: #f7f8fa;
+    --color-page-bg-end: #e4eaed;
+    --color-text: #162024;
+    --color-text-soft: #33464d;
+    --color-muted: #65737b;
+    --color-surface: #ffffff;
+    --color-surface-alpha: rgba(255, 255, 255, 0.86);
+    --color-surface-muted: #f3f6f7;
+    --color-surface-hover: #edf2f3;
+    --color-panel-subtle: rgba(22, 32, 36, 0.06);
+    --color-header-bg: rgba(247, 248, 250, 0.92);
+    --color-loading-overlay: rgba(247, 248, 250, 0.68);
+    --color-border: rgba(22, 32, 36, 0.13);
+    --color-border-faint: rgba(22, 32, 36, 0.08);
+    --color-border-strong: rgba(22, 32, 36, 0.22);
+    --color-border-heavy: rgba(22, 32, 36, 0.42);
+    --color-shadow: rgba(15, 24, 30, 0.08);
+    --color-shadow-strong: rgba(15, 24, 30, 0.18);
+    --color-accent: #206d64;
+    --color-accent-strong: #15534d;
+    --color-accent-soft: #e4f3f0;
+    --color-on-accent: #ffffff;
+    --color-control-accent: #3f8178;
+    --color-active-icon-bg: rgba(255, 255, 255, 0.18);
+    --color-danger: #a33a32;
+    --color-danger-fill: #cf5750;
+    --color-on-danger: #ffffff;
+    --color-status-ready-fill: #258e68;
+    --color-status-busy-fill: #3d8cbd;
+    --color-scroll-thumb: rgba(101, 115, 123, 0.44);
+    --color-crop-mask: rgba(8, 12, 16, 0.32);
+}
+
+body[data-theme="dark"] {
+    /* Dark theme 覆寫同一組精簡 token，和 light theme 維持相同語意層級。 */
+    color-scheme: dark;
+    --color-root-bg: #0e1215;
+    --color-page-bg-start: #171d20;
+    --color-page-bg-end: #0e1215;
+    --color-text: #eef4f2;
+    --color-text-soft: #cbd7d4;
+    --color-muted: #9badac;
+    --color-surface: #1b2325;
+    --color-surface-alpha: rgba(27, 35, 37, 0.9);
+    --color-surface-muted: #141b1d;
+    --color-surface-hover: #263033;
+    --color-panel-subtle: rgba(238, 244, 242, 0.08);
+    --color-header-bg: rgba(18, 24, 26, 0.92);
+    --color-loading-overlay: rgba(14, 18, 21, 0.68);
+    --color-border: rgba(213, 226, 223, 0.15);
+    --color-border-faint: rgba(213, 226, 223, 0.1);
+    --color-border-strong: rgba(213, 226, 223, 0.24);
+    --color-border-heavy: rgba(213, 226, 223, 0.52);
+    --color-shadow: rgba(0, 0, 0, 0.3);
+    --color-shadow-strong: rgba(0, 0, 0, 0.48);
+    --color-accent: #58c5b6;
+    --color-accent-strong: #8ee0d5;
+    --color-accent-soft: #143b36;
+    --color-on-accent: #061514;
+    --color-control-accent: #4fb0a3;
+    --color-active-icon-bg: rgba(6, 21, 20, 0.18);
+    --color-danger: #ff8e84;
+    --color-danger-fill: #d65d55;
+    --color-on-danger: #071312;
+    --color-status-ready-fill: #4fc18d;
+    --color-status-busy-fill: #70b8df;
+    --color-scroll-thumb: rgba(155, 173, 172, 0.38);
+    --color-crop-mask: rgba(0, 0, 0, 0.58);
+}

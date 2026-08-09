@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dither Benchmark</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f4f7f8;
+            --panel: #ffffff;
+            --ink: #163334;
+            --muted: #5f7374;
+            --line: #d8e1e2;
+            --accent: #237568;
+            --accent-ink: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        main {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        h1 {
+            margin: 0 0 18px;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            align-items: end;
+        }
+
+        label {
+            display: grid;
+            gap: 5px;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 650;
+        }
+
+        select,
+        input,
+        button {
+            min-height: 36px;
+            border-radius: 6px;
+            border: 1px solid var(--line);
+            background: #fff;
+            color: var(--ink);
+            font: inherit;
+            padding: 6px 9px;
+        }
+
+        button {
+            border-color: var(--accent);
+            background: var(--accent);
+            color: var(--accent-ink);
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: wait;
+            opacity: 0.62;
+        }
+
+        .status {
+            color: var(--muted);
+            margin-top: 10px;
+            min-height: 20px;
+        }
+
+        .note {
+            color: var(--muted);
+            margin: 0 0 12px;
+        }
+
+        #benchmark-json {
+            display: none;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th,
+        td {
+            border-bottom: 1px solid var(--line);
+            padding: 8px 10px;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        th:first-child,
+        td:first-child,
+        th:nth-child(2),
+        td:nth-child(2) {
+            text-align: left;
+        }
+
+        th {
+            background: #edf3f4;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }
+
+        canvas {
+            width: 100%;
+            image-rendering: pixelated;
+            border: 1px solid var(--line);
+            background: #fff;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Dither Benchmark</h1>
+
+        <section class="panel">
+            <p class="note">Internal benchmark tool. Add <code>?autorun=1</code> for headless JSON output.</p>
+            <div class="controls">
+                <label>
+                    Image
+                    <select id="image-kind">
+                        <option value="gradient">Gradient + Shapes</option>
+                        <option value="noise">Photo-like Noise</option>
+                        <option value="bands">Flat Color Bands</option>
+                    </select>
+                </label>
+                <label>
+                    Width
+                    <input id="width" type="number" min="64" max="1600" step="16" value="800">
+                </label>
+                <label>
+                    Height
+                    <input id="height" type="number" min="64" max="1600" step="16" value="480">
+                </label>
+                <label>
+                    Iterations
+                    <input id="iterations" type="number" min="1" max="30" step="1" value="5">
+                </label>
+                <label>
+                    Warm-up
+                    <input id="warmup" type="number" min="0" max="10" step="1" value="1">
+                </label>
+                <label>
+                    Palette Mapping
+                    <select id="mapping">
+                        <option value="all">All</option>
+                        <option value="nearest-color">Nearest Color</option>
+                        <option value="pair-mix">Pair Mix</option>
+                        <option value="tri-mix">Tri Mix</option>
+                    </select>
+                </label>
+                <label>
+                    Palette
+                    <select id="palette">
+                        <option value="e6">E6 Color E-Paper</option>
+                        <option value="gameboy">Game Boy</option>
+                        <option value="sixteen">16-color Synthetic</option>
+                    </select>
+                </label>
+                <button id="run" type="button">Run Benchmark</button>
+            </div>
+            <div id="status" class="status">Ready.</div>
+        </section>
+
+        <section class="panel preview-grid">
+            <div>
+                <strong>Input</strong>
+                <canvas id="input-preview" width="400" height="240"></canvas>
+            </div>
+            <div>
+                <strong>Last Output</strong>
+                <canvas id="output-preview" width="400" height="240"></canvas>
+            </div>
+        </section>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Algorithm</th>
+                    <th>Mapping</th>
+                    <th>Avg ms</th>
+                    <th>Min ms</th>
+                    <th>Max ms</th>
+                    <th>Runs</th>
+                    <th>Pixels/ms</th>
+                    <th>Backend</th>
+                    <th>Checksum</th>
+                </tr>
+            </thead>
+            <tbody id="results"></tbody>
+        </table>
+
+        <pre id="benchmark-json"></pre>
+    </main>
+
+    <script src="../../src/namespace.js"></script>
+    <script src="../../src/i18n/en.js"></script>
+    <script src="../../src/core/color/color-utils.js"></script>
+    <script src="../../src/core/color/palette-utils.js"></script>
+    <script src="../../src/pages/dither-editor/constants.js"></script>
+    <script src="../../src/pages/dither-editor/config/color-distance-metrics.js"></script>
+    <script src="../../src/pages/dither-editor/config/palette-mapping-modes.js"></script>
+    <script src="../../src/pages/dither-editor/dither/dither-algorithm-registry.js"></script>
+    <script src="../../src/pages/dither-editor/config/dither-algorithms.js"></script>
+    <script src="../../src/pages/dither-editor/dither/dither-matrices.js"></script>
+    <script src="../../src/pages/dither-editor/dither/palette-mapping.js"></script>
+    <script src="../../src/pages/dither-editor/gpu/gl-helpers.js"></script>
+    <script src="../../src/pages/dither-editor/gpu/threshold-dither-processor.js"></script>
+    <script src="../../src/pages/dither-editor/dither/error-diffusion.js"></script>
+    <script src="../../src/pages/dither-editor/dither/ordered-dither.js"></script>
+    <script src="../../src/pages/dither-editor/dither/pattern-dither.js"></script>
+    <script src="../../src/pages/dither-editor/dither/dot-diffusion.js"></script>
+    <script>
+        (function () {
+            var registry = window.DitherApp.pages.ditherEditor.ditherAlgorithmRegistry;
+            var runButton = document.getElementById('run');
+            var status = document.getElementById('status');
+            var results = document.getElementById('results');
+            var inputPreview = document.getElementById('input-preview');
+            var outputPreview = document.getElementById('output-preview');
+            var benchmarkJson = document.getElementById('benchmark-json');
+
+            var palettes = {
+                e6: [
+                    { r: 0, g: 0, b: 0 },
+                    { r: 255, g: 255, b: 255 },
+                    { r: 0, g: 128, b: 0 },
+                    { r: 0, g: 0, b: 255 },
+                    { r: 255, g: 0, b: 0 },
+                    { r: 255, g: 255, b: 0 }
+                ],
+                gameboy: [
+                    { r: 15, g: 56, b: 15 },
+                    { r: 48, g: 98, b: 48 },
+                    { r: 139, g: 172, b: 15 },
+                    { r: 155, g: 188, b: 15 }
+                ],
+                sixteen: [
+                    { r: 0, g: 0, b: 0 },
+                    { r: 255, g: 255, b: 255 },
+                    { r: 255, g: 0, b: 0 },
+                    { r: 0, g: 255, b: 0 },
+                    { r: 0, g: 0, b: 255 },
+                    { r: 255, g: 255, b: 0 },
+                    { r: 255, g: 0, b: 255 },
+                    { r: 0, g: 255, b: 255 },
+                    { r: 128, g: 0, b: 0 },
+                    { r: 0, g: 128, b: 0 },
+                    { r: 0, g: 0, b: 128 },
+                    { r: 128, g: 128, b: 0 },
+                    { r: 128, g: 0, b: 128 },
+                    { r: 0, g: 128, b: 128 },
+                    { r: 192, g: 192, b: 192 },
+                    { r: 96, g: 96, b: 96 }
+                ]
+            };
+
+            function numberInput(id, fallback) {
+                var value = Number(document.getElementById(id).value);
+                return Number.isFinite(value) ? value : fallback;
+            }
+
+            function queryNumber(params, id, fallback) {
+                var value = Number(params.get(id));
+                return Number.isFinite(value) ? value : fallback;
+            }
+
+            function mulberry32(seed) {
+                return function random() {
+                    var t = seed += 0x6D2B79F5;
+                    t = Math.imul(t ^ (t >>> 15), t | 1);
+                    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+                    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+                };
+            }
+
+            function clampByte(value) {
+                return value < 0 ? 0 : (value > 255 ? 255 : value);
+            }
+
+            function createImageData(width, height, kind) {
+                var imageData = new ImageData(width, height);
+                var data = imageData.data;
+                var rng = mulberry32(0xD17A);
+                for (var y = 0; y < height; y += 1) {
+                    for (var x = 0; x < width; x += 1) {
+                        var index = (y * width + x) * 4;
+                        var nx = x / Math.max(1, width - 1);
+                        var ny = y / Math.max(1, height - 1);
+                        var r;
+                        var g;
+                        var b;
+
+                        if (kind === 'noise') {
+                            var wave = Math.sin(nx * 18) * 24 + Math.cos(ny * 15) * 20;
+                            var grain = (rng() - 0.5) * 70;
+                            r = 155 + wave + grain + nx * 55;
+                            g = 140 + wave * 0.7 + grain * 0.8 + ny * 45;
+                            b = 125 + wave * 0.5 + grain * 0.6 + (1 - nx) * 65;
+                        } else if (kind === 'bands') {
+                            var band = Math.floor(nx * 8);
+                            r = band % 3 === 0 ? 232 : (band % 3 === 1 ? 80 : 34);
+                            g = band % 4 < 2 ? 210 : 74;
+                            b = band % 5 < 2 ? 72 : 198;
+                            if ((x + y) % 37 < 3) {
+                                r *= 0.7;
+                                g *= 0.7;
+                                b *= 0.7;
+                            }
+                        } else {
+                            var dx = nx - 0.54;
+                            var dy = ny - 0.48;
+                            var circle = dx * dx + dy * dy < 0.08 ? 85 : 0;
+                            r = nx * 255;
+                            g = ny * 220 + circle;
+                            b = (1 - nx) * 190 + (1 - ny) * 60;
+                        }
+
+                        data[index] = clampByte(r);
+                        data[index + 1] = clampByte(g);
+                        data[index + 2] = clampByte(b);
+                        data[index + 3] = 255;
+                    }
+                }
+                return imageData;
+            }
+
+            function drawPreview(canvas, imageData) {
+                canvas.width = imageData.width;
+                canvas.height = imageData.height;
+                canvas.getContext('2d').putImageData(imageData, 0, 0);
+            }
+
+            function selectedMappings() {
+                var value = document.getElementById('mapping').value;
+                if (value !== 'all') {
+                    return [value];
+                }
+                return ['nearest-color', 'pair-mix', 'tri-mix'];
+            }
+
+            function mappingsFromValue(value) {
+                if (value && value !== 'all') {
+                    return [value];
+                }
+                return ['nearest-color', 'pair-mix', 'tri-mix'];
+            }
+
+            function optionsFor(algorithm, palette, mapping) {
+                var errorStrength = 100;
+                var options = {
+                    matrixId: algorithm.matrixId,
+                    palette: palette,
+                    paletteMapping: mapping,
+                    colorDistance: 'euclidean-bt709',
+                    ditherBackend: window.__DITHER_BENCHMARK_BACKEND__ || 'auto',
+                    serpentine: Boolean(algorithm.supportsSerpentine),
+                    errorStrength: errorStrength
+                };
+                if (algorithm.supportsThresholdStrength) {
+                    options.thresholdScale = (algorithm.thresholdScale || 70) * errorStrength / 100;
+                    options.thresholdStrength = errorStrength / 100;
+                }
+                if (algorithm.supportsDotDensity) {
+                    options.dotDensity = errorStrength / 100;
+                }
+                return options;
+            }
+
+            function runOne(imageData, algorithm, options) {
+                var started = performance.now();
+                var output = registry.run(imageData, algorithm, options);
+                var thresholdProcessor = window.DitherApp.pages.ditherEditor.thresholdDitherProcessor;
+                return {
+                    output: output,
+                    duration: performance.now() - started,
+                    backend: thresholdProcessor ? thresholdProcessor.lastRunBackend() : 'cpu'
+                };
+            }
+
+            function checksum(imageData) {
+                var data = imageData.data;
+                var hash = 2166136261;
+                for (var i = 0; i < data.length; i += 1) {
+                    hash ^= data[i];
+                    hash = Math.imul(hash, 16777619);
+                }
+                return (hash >>> 0).toString(16).padStart(8, '0');
+            }
+
+            function appendResult(row) {
+                var tr = document.createElement('tr');
+                [
+                    row.algorithm,
+                    row.mapping,
+                    row.avg.toFixed(2),
+                    row.min.toFixed(2),
+                    row.max.toFixed(2),
+                    String(row.runs),
+                    row.pixelsPerMs.toFixed(0),
+                    row.backend,
+                    row.checksum
+                ].forEach(function (text) {
+                    var td = document.createElement('td');
+                    td.textContent = text;
+                    tr.appendChild(td);
+                });
+                results.appendChild(tr);
+            }
+
+            function selectedAlgorithms(filter) {
+                var algorithms = registry.list();
+                if (!filter || filter === 'all') {
+                    return algorithms;
+                }
+                return algorithms.filter(function (algorithm) {
+                    return algorithm.id === filter;
+                });
+            }
+
+            function collectSettingsFromUi() {
+                return {
+                    width: Math.max(64, Math.min(1600, numberInput('width', 800) | 0)),
+                    height: Math.max(64, Math.min(1600, numberInput('height', 480) | 0)),
+                    iterations: Math.max(1, Math.min(30, numberInput('iterations', 5) | 0)),
+                    warmup: Math.max(0, Math.min(10, numberInput('warmup', 1) | 0)),
+                    imageKind: document.getElementById('image-kind').value,
+                    paletteId: document.getElementById('palette').value,
+                    mappingId: document.getElementById('mapping').value,
+                    algorithmId: 'all',
+                    backend: 'auto'
+                };
+            }
+
+            function collectSettingsFromQuery() {
+                var params = new URLSearchParams(window.location.search);
+                return {
+                    width: Math.max(64, Math.min(1600, queryNumber(params, 'width', 800) | 0)),
+                    height: Math.max(64, Math.min(1600, queryNumber(params, 'height', 480) | 0)),
+                    iterations: Math.max(1, Math.min(30, queryNumber(params, 'iterations', 5) | 0)),
+                    warmup: Math.max(0, Math.min(10, queryNumber(params, 'warmup', 1) | 0)),
+                    imageKind: params.get('image') || 'gradient',
+                    paletteId: params.get('palette') || 'e6',
+                    mappingId: params.get('mapping') || 'all',
+                    algorithmId: params.get('algorithm') || 'all',
+                    backend: params.get('backend') || 'auto'
+                };
+            }
+
+            function runBenchmark(settings, renderRows) {
+                var palette = palettes[settings.paletteId] || palettes.e6;
+                var mappings = mappingsFromValue(settings.mappingId);
+                var imageData = createImageData(settings.width, settings.height, settings.imageKind);
+                var algorithms = selectedAlgorithms(settings.algorithmId);
+                var lastOutput = imageData;
+                var rows = [];
+                window.__DITHER_BENCHMARK_BACKEND__ = settings.backend;
+
+                algorithms.forEach(function (algorithm) {
+                    mappings.forEach(function (mapping) {
+                        var options = optionsFor(algorithm, palette, mapping);
+                        var durations = [];
+                        var backend = 'cpu';
+                        for (var w = 0; w < settings.warmup; w += 1) {
+                            runOne(imageData, algorithm, options);
+                        }
+                        for (var i = 0; i < settings.iterations; i += 1) {
+                            var result = runOne(imageData, algorithm, options);
+                            durations.push(result.duration);
+                            backend = result.backend;
+                            lastOutput = result.output;
+                        }
+                        var total = durations.reduce(function (sum, value) {
+                            return sum + value;
+                        }, 0);
+                        var min = Math.min.apply(Math, durations);
+                        var max = Math.max.apply(Math, durations);
+                        var avg = total / durations.length;
+                        var row = {
+                            algorithm: algorithm.id,
+                            mapping: mapping,
+                            avg: avg,
+                            min: min,
+                            max: max,
+                            runs: durations.length,
+                            pixelsPerMs: settings.width * settings.height / avg,
+                            backend: backend,
+                            checksum: checksum(lastOutput)
+                        };
+                        rows.push(row);
+                        if (renderRows) {
+                            appendResult(row);
+                        }
+                    });
+                });
+
+                return {
+                    settings: settings,
+                    rows: rows,
+                    lastOutput: lastOutput,
+                    input: imageData
+                };
+            }
+
+            function benchmark() {
+                var settings = collectSettingsFromUi();
+
+                runButton.disabled = true;
+                results.textContent = '';
+                status.textContent = 'Running...';
+
+                setTimeout(function () {
+                    try {
+                        var benchmarkResult = runBenchmark(settings, true);
+                        drawPreview(inputPreview, benchmarkResult.input);
+                        drawPreview(outputPreview, benchmarkResult.lastOutput);
+                        status.textContent = 'Done. Results are in milliseconds; lower is faster.';
+                    } catch (error) {
+                        status.textContent = 'Error: ' + (error && error.message ? error.message : error);
+                        throw error;
+                    } finally {
+                        runButton.disabled = false;
+                    }
+                }, 30);
+            }
+
+            runButton.addEventListener('click', benchmark);
+            registry.assertRegistered();
+            if (new URLSearchParams(window.location.search).get('autorun') === '1') {
+                try {
+                    var autorunResult = runBenchmark(collectSettingsFromQuery(), false);
+                    benchmarkJson.textContent = JSON.stringify({
+                        settings: autorunResult.settings,
+                        rows: autorunResult.rows
+                    }, null, 2);
+                } catch (error) {
+                    benchmarkJson.textContent = JSON.stringify({
+                        error: error && error.message ? error.message : String(error)
+                    }, null, 2);
+                }
+                document.body.setAttribute('data-benchmark-complete', 'true');
+            }
+        })();
+    </script>
+</body>
+</html>
