@@ -279,13 +279,24 @@ Captive portal detection endpoints 皆為 `GET`、不需登入，在 AP active �
     "mac_address": "AA:BB:CC:DD:EE:FF",
     "hostname": "esp32-device",
     "config_state": "persisted",
-    "config_recovery_reason": "none"
+    "config_recovery_reason": "none",
+    "power": {
+      "battery": {
+        "voltage_mv": 3980,
+        "sample_age_ms": 42,
+        "estimated_percent": 83
+      }
+    }
   },
   "message": "ok"
 }
 ```
 
 `config_state` 可能為 `persisted`、`factory_defaults_created` 或 `recovery_defaults`。只有 recovery path 會讓 `config_recovery_reason` 不是 `none`；目前可能為 `unsupported_schema`、`storage_error` 或 `invalid_persisted_config`，且不包含設定值或其他敏感內容。
+
+`power.battery.voltage_mv` 是 FireBeetle 2 ESP32-C6 GPIO0 經板載分壓還原後的校正 mV，`sample_age_ms` 是 cached sample 的 monotonic age。`estimated_percent` 是由單節鋰電池電壓曲線推算的整數 `0`–`100`，不是 fuel-gauge 量測；電壓不在可估計範圍時為 `null`。尚未取得完整 ADC sample 時三個欄位都為 `null`，但 endpoint 仍回 `200`。
+
+此板載 ADC 無法判斷電池是否存在、供電來源或是否充電；即使未接電池，充電電路也可能讓 ADC 讀到電壓。因此本 resource 不提供 `charge_state`、`charging`、`battery_present` 或 `power_source`，非 null 電壓或百分比也不得解讀為已確認安裝電池或正在充電。
 
 ## Web
 

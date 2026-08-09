@@ -32,6 +32,7 @@ IOT-Node-Bedrock 將這些共通需求整理成可重用的基石平台。你可
 - **友善的第一次設定**：預設 AP、captive portal 與清楚的 Wi-Fi 設定流程，降低新手門檻。
 - **不容易失聯**：STA 連線失敗或中斷時，可啟用 fallback AP 保留管理入口。
 - **不只設定 Wi-Fi**：可查看裝置狀態、調整 hostname、管理登入密碼與執行 factory reset。
+- **可延伸的電池 API**：FireBeetle 目標板會透過 `/api/device` 回報板載 ADC 電壓與估算電量百分比，不猜測是否安裝電池或正在充電。
 - **中英文介面**：內建 English 與繁體中文，可即時切換。
 - **為整合而設計**：網頁、REST API 與 serial console 共用同一套行為，方便產品客製與自動化。
 - **前端可替換**：管理頁與韌體包在同一個 app image，仍可換成自己的品牌、版面與產品功能。

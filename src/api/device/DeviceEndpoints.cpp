@@ -6,8 +6,10 @@
 
 namespace DeviceEndpoints {
 
-Api::Response get(const ConfigService &configService) {
+Api::Response get(const ConfigService &configService,
+                  const BatteryMonitor &batteryMonitor) {
   const DeviceConfig config = configService.snapshot();
+  const BatterySnapshot batterySnapshot = batteryMonitor.snapshot(millis());
   const uint32_t heapTotal = ESP.getHeapSize();
   const uint32_t heapFree = ESP.getFreeHeap();
   const uint32_t heapUsedPercent = heapTotal > 0 ? ((heapTotal - heapFree) * 100U) / heapTotal : 0;
@@ -29,6 +31,20 @@ Api::Response get(const ConfigService &configService) {
   data["hostname"] = config.hostname;
   data["config_state"] = configStartupStateToString(configService.startupState());
   data["config_recovery_reason"] = configRecoveryReasonToString(configService.recoveryReason());
+  JsonObject power = data["power"].to<JsonObject>();
+  JsonObject battery = power["battery"].to<JsonObject>();
+  if (batterySnapshot.sampleValid) {
+    battery["voltage_mv"] = batterySnapshot.voltageMilliVolts;
+    battery["sample_age_ms"] = batterySnapshot.sampleAgeMs;
+  } else {
+    battery["voltage_mv"] = nullptr;
+    battery["sample_age_ms"] = nullptr;
+  }
+  if (batterySnapshot.estimate.available) {
+    battery["estimated_percent"] = batterySnapshot.estimate.percent;
+  } else {
+    battery["estimated_percent"] = nullptr;
+  }
   return Api::ok(Api::json(data));
 }
 

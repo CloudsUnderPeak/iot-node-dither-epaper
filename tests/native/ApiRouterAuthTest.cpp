@@ -23,6 +23,7 @@ struct RouterFixture {
   AuthService auth;
   RuntimeActionScheduler runtime;
   EpaperService epaper;
+  BatteryMonitor battery;
   ApiRouter router;
 
   RouterFixture() {
@@ -38,6 +39,7 @@ struct RouterFixture {
         auth,
         runtime,
         epaper,
+        battery,
     };
     expect(router.begin(deps).ok(),
            "router should initialize with complete dependencies");
@@ -285,6 +287,35 @@ void testEpaperPublicContract() {
          "serial e-paper download must reject the raw transport");
 }
 
+void testDeviceBatteryContract() {
+  RouterFixture fixture;
+  fixture.battery.current.sampleValid = true;
+  fixture.battery.current.voltageMilliVolts = 3980;
+  fixture.battery.current.estimate.available = true;
+  fixture.battery.current.estimate.percent = 83;
+  fixture.battery.current.sampleAgeMs = 42;
+
+  const Api::Response response = fixture.router.dispatch(
+      requestFor(Api::Method::Get, "/api/device"));
+  const std::string data = response.data.c_str();
+  expect(response.statusCode == 200 &&
+             data.find("\"power\":{\"battery\":{") != std::string::npos &&
+             data.find("\"voltage_mv\":3980") != std::string::npos &&
+             data.find("\"sample_age_ms\":42") != std::string::npos &&
+             data.find("\"estimated_percent\":83") != std::string::npos &&
+             data.find("charge_state") == std::string::npos &&
+             data.find("charging") == std::string::npos,
+         "device resource should expose voltage estimate without charging claims");
+
+  fixture.battery.current = {};
+  const std::string unavailable = fixture.router.dispatch(
+      requestFor(Api::Method::Get, "/api/device")).data.c_str();
+  expect(unavailable.find("\"voltage_mv\":null") != std::string::npos &&
+             unavailable.find("\"sample_age_ms\":null") != std::string::npos &&
+             unavailable.find("\"estimated_percent\":null") != std::string::npos,
+         "device resource should keep a stable null shape before a valid sample");
+}
+
 void testUnknownRoutesRemainNotFound() {
   RouterFixture fixture;
   for (const char *token : {"", "invalid-token", "valid-token"}) {
@@ -301,6 +332,7 @@ int main() {
   testWebIdentityMatchesAcrossTransports();
   testDynamicFileAuthorizationAndTransport();
   testEpaperPublicContract();
+  testDeviceBatteryContract();
   testUnknownRoutesRemainNotFound();
   if (failures != 0) {
     std::cerr << failures << " API router authorization test(s) failed\n";

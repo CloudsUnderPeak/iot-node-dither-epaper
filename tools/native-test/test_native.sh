@@ -61,6 +61,15 @@ g++ -std=c++17 -Wall -Wextra -Werror -pthread \
 
 "$build_dir/hardware-resource-test"
 
+g++ -std=c++17 -Wall -Wextra -Werror -pthread \
+  -I"$project_dir/tests/native/stubs" \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/BatteryMonitorTest.cpp" \
+  "$project_dir/src/modules/power/BatteryMonitor.cpp" \
+  -o "$build_dir/battery-monitor-test"
+
+"$build_dir/battery-monitor-test"
+
 g++ -std=c++17 -Wall -Wextra -Werror \
   -I"$project_dir/src" \
   "$project_dir/tests/native/EpdDriverTest.cpp" \

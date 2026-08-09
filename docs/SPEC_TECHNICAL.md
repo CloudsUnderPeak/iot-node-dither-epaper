@@ -31,7 +31,7 @@ Arduino loop <──────────────────────
 | `api/ApiRouter.*` | 透過 `ApiRouterDeps` 一次接收必備 reference；單一 static route catalogue 列出 method、完整 URL／parameter pattern、matcher、HTTP binding、direct handler 與明確 public exception，未標註 access 的 route 結構上預設需要授權。 |
 | `api/shared/*` | Transport-neutral types、response/JSON serialization 與 JSON reader。 |
 | `api/alive/*` | `GET /api/alive`。 |
-| `api/device/*` | `GET /api/device`。 |
+| `api/device/*` | `GET /api/device`；組合 config、晶片資訊與 cached battery snapshot。 |
 | `api/web/*` | `GET /api/web`；把 build-time Web identity 映射為公開 response。 |
 | `api/storage/*` | `GET /api/storage` 與 user-file list／delete response mapping。 |
 | `api/auth/*` | `/api/auth` 與 `/api/auth/*` endpoints。 |
@@ -54,9 +54,10 @@ Arduino loop <──────────────────────
 | `modules/storage/UserFilePolicy.*` | User-file 公開檔名、MIME、strict size、single Range 與 opaque cursor 的 pure policy。 |
 | `modules/storage/StorageLifecycle.*` | 預設 NVS 中的獨立 partition 初始化旗標、reset intent 與 early-boot erase／format 協調。 |
 | `modules/storage/StorageCapacity.h` | User upload quota 的 value／保留量／對齊計算。 |
-| `board/BoardProfile.h`、`board/profiles/FireBeetle2Esp32C6Profile.h` | Build-time board/chip、可用 GPIO、bus route 與 e-paper pin map；以 `static_assert` 阻止重複、禁止或未審查腳位。 |
+| `board/BoardProfile.h`、`board/profiles/FireBeetle2Esp32C6Profile.h` | Build-time board/chip、可用 GPIO、bus route、battery divider 與 e-paper pin map；以 `static_assert` 阻止重複、禁止或未審查腳位。 |
 | `modules/hardware/PinRegistry.*` | Fixed-size owner/role claim table；exclusive GPIO 衝突 fail startup，shared bus pin 只可由 bus owner claim。 |
 | `modules/hardware/SpiBus.*` | `SPIClass` lifecycle、固定 SCK/MOSI route、mutex 與 transaction ownership；device driver 不得自行 `SPI.begin/end`。 |
+| `modules/power/BatteryMonitor.*`、`modules/power/ArduinoBatteryAdc.*` | GPIO0 calibrated ADC adapter、固定樣本 median、單節鋰電池粗略百分比曲線與跨 task cached snapshot；不推測電池存在或充電狀態。 |
 | `modules/epaper/EpaperImageFormat.*` | 純函式與 streaming validator；解析固定 40-byte `EPDIMG` header、little-endian 欄位、generation、CRC32 與六色 nibble。 |
 | `modules/epaper/EpaperFrameSource.*` | File／white／palette 的無 framebuffer streaming source；動態來源依 offset 直接產生 packed bytes。 |
 | `modules/epaper/EpaperCooldown.*` | 180 秒 wrap-safe monotonic gate；倒數到期仍要求 persistent marker 清除成功才釋放。 |
@@ -157,9 +158,18 @@ Arduino loop <──────────────────────
 | SPI bus | `SpiBus` mutex與唯一 lifecycle owner；BUSY wait 不持有 transaction。 |
 | E-paper protection marker | `EpaperSafetyStore`／default NVS `epaper_meta`；write 後 read-back，failure fail closed。 |
 | Runtime activity | `RuntimeEndpoints` 唯讀組合 `EpaperService`／`RuntimeActionScheduler` cached snapshot；不作 admission gate。 |
+| Battery sample | `BatteryMonitor` critical section；loop producer 更新完整 voltage/timestamp，HTTP/serial reader 只取 cached snapshot。ADC 取樣與百分比計算不在 critical section 內。 |
 | Console staged config | `ConsoleConfigCommand`／`ConfigStaging`，只在 console runtime RAM；dirty bitset 與 fixed-size secret buffers。 |
 
 Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作。同步 scan 可能等待 Wi-Fi driver，但 STA connect/apply 本身不得用等待連線的 loop。
+
+## Battery monitoring
+
+- DFRobot FireBeetle 2 ESP32-C6 的 GPIO0 固定為板載電池分壓輸入，board profile 使用 `BatterySense{0, 2, 1}` 表達官方範例的二倍還原。GPIO0 仍為 `BoardReserved`，generic `PinRegistry` claim 必須拒絕；不得為了 ADC 將它改成一般可用 GPIO。
+- Production adapter 明確使用 12-bit resolution、`ADC_11db` 與 `analogReadMilliVolts()`。`BatteryMonitor` 每次連續讀七筆 calibrated pin mV，取 median 後依 profile divider 還原電池端 mV；boot 在 API 啟動前先發布第一筆完整 sample，之後最短每 10 秒更新，e-paper `drawing` 期間暫緩取樣。
+- 單次 ADC read failure 不發布部分結果，保留最後完整 sample。Snapshot 以 unsigned monotonic subtraction 計算 `sample_age_ms`；endpoint 不直接操作 ADC，也不因 battery sample 不可用而讓整個 device resource 失敗。
+- `estimated_percent` 使用 piecewise-linear anchors `(3300,0)`、`(3400,5)`、`(3550,25)`、`(3700,50)`、`(3870,75)`、`(4200,100)`。`2500`–`3300` mV clamp 為 `0`、`4200`–`4400` mV clamp 為 `100`，其餘範圍不提供 estimate。此值只代表 voltage-derived approximation，不是 coulomb counter 或 fuel gauge。
+- 現有硬體只提供 battery-line voltage；charger status 沒有連到可讀 GPIO。Firmware 不建立 presence／power-source／charging heuristic，API 不輸出對應欄位。未接電池時 charger 或 floating node 仍可能形成 plausible voltage，client 不得以非 null 讀值判斷已安裝電池。
 
 ## Wi-Fi runtime
 
@@ -178,7 +188,7 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 
 ## 測試、logging 與嵌入式限制
 
-- Native test 唯一入口為 `tools/native-test/test_native.sh`；目前測試 config／IPv4 validation、ConfigService 原子欄位群組更新與故障隔離、PreferencesConfigStore slot／marker fault injection、AuthService session lifecycle／concurrency、WifiManager driver/clock seam 與 timeout／IPv4／disconnect／subnet overlap／commit-finalize-rollback failure 狀態、Wi-Fi payload、response codec、HTTP JSON transport parsing、user filename／MIME／Range／cursor／inspection path、EPDIMG header／CRC／palette streaming validation、white／palette packed frame 與 wrap-safe cooldown、board restricted-pin／原子 claim／shared SPI ownership與安全 boot level、fake transport driver command／BUSY timeout／watchdog／shutdown failure、80 MHz set/read-back/restore、`epaper_meta` marker fault injection、power-only／single-refresh probe、protocol shutdown與 restart denial、e-paper hardware 早於 Serial 與其他 subsystem 且 release self-test/refresh disabled 的 source contract、e-paper/runtime 公開 route 與 reserved-file matrix、host EPDIMG/CRC/URL/raw-upload/error/wait client、console config staging、subsystem registry start order/readiness/dynamic health、ApiRouter catalogue metadata 與 exact/dynamic runtime authorization matrix、Web identity response（包含 none／null）、generated metadata、空前端 artifact protection、web preview/minifier/deterministic gzip、release partition/manifest/path/hash protection，以及 metadata-driven HTTP registration source contract。Source contract lint 不代表 HTTP adapter、filesystem 或完整 service integration coverage。
+- Native test 唯一入口為 `tools/native-test/test_native.sh`；目前測試 config／IPv4 validation、ConfigService 原子欄位群組更新與故障隔離、PreferencesConfigStore slot／marker fault injection、AuthService session lifecycle／concurrency、WifiManager driver/clock seam 與 timeout／IPv4／disconnect／subnet overlap／commit-finalize-rollback failure 狀態、Wi-Fi payload、response codec、HTTP JSON transport parsing、user filename／MIME／Range／cursor／inspection path、battery divider／median／sample cadence／estimate/null contract、EPDIMG header／CRC／palette streaming validation、white／palette packed frame 與 wrap-safe cooldown、board restricted-pin／原子 claim／shared SPI ownership與安全 boot level、fake transport driver command／BUSY timeout／watchdog／shutdown failure、80 MHz set/read-back/restore、`epaper_meta` marker fault injection、power-only／single-refresh probe、protocol shutdown與 restart denial、e-paper hardware 早於 Serial 與其他 subsystem 且 release self-test/refresh disabled 的 source contract、e-paper/runtime 公開 route 與 reserved-file matrix、host EPDIMG/CRC/URL/raw-upload/error/wait client、console config staging、subsystem registry start order/readiness/dynamic health、ApiRouter catalogue metadata 與 exact/dynamic runtime authorization matrix、Web identity response（包含 none／null）、generated metadata、空前端 artifact protection、web preview/minifier/deterministic gzip、release partition/manifest/path/hash protection，以及 metadata-driven HTTP registration source contract。Source contract lint 不代表 HTTP adapter、filesystem 或完整 service integration coverage。
 - Firmware runtime 變更至少對既有 verified production `build/latest/web/` 執行 `make esp`；需同時重建預設產品 frontend 時執行 `make build` 或 `make build WEB=user`，builtin 使用 `make build WEB=builtin`，API-only firmware 使用 `make build WEB=none`。
 - `user-web-project/` 是預設 frontend source，`user-web/` 是其 gzip-only generated import；`builtin-web/` 保存可明確選用的內建管理頁。`tools/web-build/` 負責 user import lifecycle、frontend selection／processing及 `WEB=none` 的已驗證空 production web；`tools/release-build/` 只消費 production web 並管理 generated header、binary、manifest、`firmware.img` 與快照。
 - `user-web-project/` 以 `embedded-web-dithering` remote 的 `six-color-epaper` branch 作為 `--squash` Git subtree；它不是 submodule。`make user-web pull` 必須由乾淨 worktree 拉取並建立 subtree merge commit；`make user-web push` 只接受已提交的 prefix 變更並透過本機設定的 SSH push URL 推送。同步後一律以 `make build WEB=user` 重建 nested frontend、重新匯入並檢查 app partition；不得手動複製或編輯 `user-web/`。

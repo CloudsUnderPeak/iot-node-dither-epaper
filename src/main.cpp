@@ -27,6 +27,8 @@
 #include "modules/console/ConsoleShell.h"
 #include "modules/http/ApiServer.h"
 #include "modules/mdns/MdnsService.h"
+#include "modules/power/ArduinoBatteryAdc.h"
+#include "modules/power/BatteryMonitor.h"
 #include "modules/storage/EmbeddedWebAssets.h"
 #include "modules/storage/FlashStorage.h"
 #include "modules/storage/StorageLifecycle.h"
@@ -68,6 +70,8 @@ EpaperPowerProbe epaperPowerProbe;
 EpaperRefreshProbe epaperRefreshProbe;
 EpaperPaletteFrameSource epaperPaletteFrame;
 EpaperService epaperService;
+ArduinoBatteryAdc batteryAdc;
+BatteryMonitor batteryMonitor;
 ArduinoPreferencesBackend configBackend;
 PreferencesConfigStore configStore(configBackend);
 ConfigService configService(configStore);
@@ -235,6 +239,24 @@ bool userdataHealthy() {
   return userDataStorage.mounted();
 }
 
+Result startBatteryMonitor() {
+  return batteryMonitor.begin(&batteryAdc, millis());
+}
+
+bool batteryMonitorHealthy() {
+  return batteryMonitor.ready();
+}
+
+void reportBatteryMonitor(const Result &) {
+  const BatterySnapshot snapshot = batteryMonitor.snapshot(millis());
+  Serial.printf("battery: pin=%d, voltage_mv=%u, estimated_percent=%d\n",
+                Board::ActiveProfile::kBatterySense.pin,
+                static_cast<unsigned>(snapshot.voltageMilliVolts),
+                snapshot.estimate.available
+                    ? static_cast<int>(snapshot.estimate.percent)
+                    : -1);
+}
+
 void reportUserdata(const Result &) {
   const UploadCapacity capacity = userDataStorage.uploadCapacity();
   Serial.printf(
@@ -381,6 +403,7 @@ Result startApiRouter() {
       authService,
       runtimeActions,
       epaperService,
+      batteryMonitor,
   };
   return apiRouter.begin(deps);
 }
@@ -407,6 +430,7 @@ enum SubsystemIndex : size_t {
   kEpaperHardwareSubsystem,
   kUserdataSubsystem,
   kEpaperServiceSubsystem,
+  kBatterySubsystem,
   kConfigSubsystem,
   kWifiSubsystem,
   kAssetsSubsystem,
@@ -427,6 +451,8 @@ Subsystem subsystems[] = {
      reportEpaperHardware},
     {"userdata", startUserdata, userdataHealthy, reportUserdata},
     {"epaper", startEpaperService, epaperServiceHealthy},
+    {"battery", startBatteryMonitor, batteryMonitorHealthy,
+     reportBatteryMonitor},
     {"config", startConfig, configHealthy, reportConfig},
     {"wifi", startWifi, wifiSubsystemHealthy, reportWifi},
     {"assets", startAssets, nullptr, reportAssets},
@@ -485,6 +511,9 @@ void printHeartbeat() {
       epaperService.ready()
           ? epaperService.snapshot(millis()).retryAfterSeconds
           : epaperCooldown.retryAfterSeconds(millis()));
+  const BatterySnapshot battery = batteryMonitor.snapshot(millis());
+  printHeartbeatField(
+      "battery_mv", battery.sampleValid ? battery.voltageMilliVolts : 0);
   printHeartbeatField(
       "config_state",
       configStartupStateToString(configService.startupState()));
@@ -557,6 +586,13 @@ void loop() {
 
   const uint32_t now = millis();
   if (epaperService.ready()) epaperService.poll(now);
+  const bool epaperDrawing =
+      epaperService.ready() &&
+      epaperService.snapshot(now).state == EpaperServiceState::Drawing;
+  if (!epaperDrawing &&
+      subsystemHealthy(subsystems[kBatterySubsystem])) {
+    batteryMonitor.poll(now);
+  }
   if (epaperCooldown.elapsed(now)) {
     const bool markerCleared = epaperSafetyStore.clear();
     epaperCooldown.releaseIfElapsed(now, markerCleared);

@@ -11,6 +11,7 @@
 #include "modules/auth/AuthService.h"
 #include "modules/config/ConfigService.h"
 #include "modules/epaper/EpaperService.h"
+#include "modules/power/BatteryMonitor.h"
 #include "modules/runtime/RuntimeActionScheduler.h"
 #include "modules/storage/EmbeddedWebAssets.h"
 #include "modules/storage/FlashStorage.h"
@@ -31,6 +32,7 @@ struct ApiRouterDeps {
   AuthService &authService;
   RuntimeActionScheduler &runtime;
   EpaperService &epaperService;
+  BatteryMonitor &batteryMonitor;
 };
 
 // Lists every REST/serial URL and delegates directly to the matching endpoint.
@@ -143,6 +145,7 @@ class ApiRouter {
   AuthService *authService_ = nullptr;
   RuntimeActionScheduler *runtimeActions_ = nullptr;
   EpaperService *epaperService_ = nullptr;
+  BatteryMonitor *batteryMonitor_ = nullptr;
   AuthEndpoints authEndpoints_;
   WifiEndpoints wifiEndpoints_;
   SystemEndpoints systemEndpoints_;

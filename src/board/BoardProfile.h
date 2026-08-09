@@ -27,6 +27,12 @@ struct I2cRoute {
   int8_t scl = kNoPin;
 };
 
+struct BatterySense {
+  int8_t pin = kNoPin;
+  uint8_t dividerNumerator = 1;
+  uint8_t dividerDenominator = 1;
+};
+
 struct EpaperPins {
   int8_t cs = kNoPin;
   int8_t dc = kNoPin;

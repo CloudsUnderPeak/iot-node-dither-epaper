@@ -42,6 +42,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 ## 狀態查詢與 REST-first 操作
 
 - `GET /api/device`、`GET /api/web`、`GET /api/storage`、`GET /api/wifi`、`GET /api/auth`、全部 e-paper 專用 endpoint 與 `GET /api/runtime/status` 公開；Wi-Fi scan／connect、auth session 與 generic user-file endpoint（包含 list／download）需要有效 Bearer token。
+- 電池狀態沿用公開唯讀的 `GET /api/device`，在既有裝置資訊內回報 GPIO0 板載分壓量得的電池電壓與由單節鋰電池電壓曲線推算的估計百分比，不另設 `/api/power`。本功能不修改硬體，無法辨識是否安裝電池、外部電源或充電狀態；response 不提供 `charge_state`、`charging`、`battery_present` 或 `power_source`，也不得用電壓變化推測並宣稱正在充電。
 - `GET /api/web` 只回報目前 app image 的 Web 狀態：包入前端時為 `builtin`／`user` 來源與實際輸出檔案樹 SHA-256；明確以 `WEB=none` 建置時為 `source: "none"` 與 `sha256: null`。不公開 version、檔案數量、payload 大小或 user source hash。非 null hash 用於對照 release manifest 與辨識 Web bundle 是否為預期版本，不代表整包 firmware image hash。
 - `GET /api/storage` 回報完整 flash partition、1984 KiB `app0` 的整包韌體／前端／剩餘容量、32 KiB `user_nvs`，以及獨立 `userdata` 的可上傳容量。前端若存在就是目前 app image 的一部分，不占用獨立 filesystem partition；`WEB=none` 回報 `frontend_bundled: false` 與零 frontend payload。
 - `user.capacity.available_bytes` 必須等於 `user.limits.max_upload_bytes`，代表以當下狀態可接受的單一新檔 payload 上限。計算先保留 64 KiB，再向下對齊 4 KiB allocation unit；前端直接把這個數字呈現為可用空間，不加入模糊化的免責文字。

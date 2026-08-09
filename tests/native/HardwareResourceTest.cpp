@@ -23,6 +23,7 @@ void resetNativePins() {
 void testBoardProfile() {
   const Board::SpiRoute spi = Board::ActiveProfile::kSpi;
   const Board::EpaperPins epaper = Board::ActiveProfile::kEpaper;
+  const Board::BatterySense battery = Board::ActiveProfile::kBatterySense;
   expect(spi.sck == 23 && spi.mosi == 22 && spi.miso == Board::kNoPin,
          "profile should expose the explicit write-only SPI route");
   expect(epaper.cs == 18 && epaper.dc == 1 && epaper.reset == 14 && epaper.busy == 21,
@@ -30,6 +31,9 @@ void testBoardProfile() {
   expect(Board::ActiveProfile::kEpaperSpiHz == 4000000 &&
              Board::ActiveProfile::kEpaperSpiMode == 0,
          "profile should fix the conservative 4 MHz SPI mode 0 device settings");
+  expect(battery.pin == 0 && battery.dividerNumerator == 2 &&
+             battery.dividerDenominator == 1,
+         "profile should expose the reviewed DFR1075 battery divider route");
 
   for (int pin : {4, 5, 8, 9, 15}) {
     expect(Board::ActiveProfile::pinDisposition(pin) == Board::PinDisposition::Strapping,

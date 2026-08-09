@@ -114,3 +114,9 @@ class NativeEsp {
 };
 
 inline NativeEsp ESP;
+
+inline uint32_t nativeMillis = 0;
+
+inline uint32_t millis() {
+  return nativeMillis;
+}

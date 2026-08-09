@@ -15,6 +15,9 @@ struct FireBeetle2Esp32C6Profile {
   // deliberately write-only so GPIO21 remains exclusively available for BUSY.
   static constexpr SpiRoute kSpi{23, 22, kNoPin};
   static constexpr I2cRoute kI2c{19, 20};
+  // DFRobot's DFR1075 battery example reads GPIO0 and doubles the calibrated
+  // ADC pin voltage to account for the onboard divider.
+  static constexpr BatterySense kBatterySense{0, 2, 1};
   static constexpr EpaperPins kEpaper{18, 1, 14, 21};
 
   static constexpr uint32_t kEpaperSpiHz = 4000000;
@@ -31,7 +34,7 @@ struct FireBeetle2Esp32C6Profile {
     }
     if (pin == 12 || pin == 13) return PinDisposition::UsbJtag;
     // GPIO0 is hard-wired to battery-voltage measurement on DFR1075.
-    if (pin == 0) return PinDisposition::BoardReserved;
+    if (pin == kBatterySense.pin) return PinDisposition::BoardReserved;
     // ESP32-C6FH4 has in-package flash; GPIO10/11 are not bonded out.
     if (pin == 10 || pin == 11) return PinDisposition::NotExposed;
     return PinDisposition::Available;
@@ -59,6 +62,13 @@ static_assert(FireBeetle2Esp32C6Profile::kSpi.miso == kNoPin,
               "e-paper SPI must remain write-only; GPIO21 is BUSY");
 static_assert(FireBeetle2Esp32C6Profile::kEpaper.busy == 21,
               "GPIO21 is reserved for the e-paper BUSY input");
+static_assert(FireBeetle2Esp32C6Profile::kBatterySense.pin == 0 &&
+                  FireBeetle2Esp32C6Profile::kBatterySense.dividerNumerator == 2 &&
+                  FireBeetle2Esp32C6Profile::kBatterySense.dividerDenominator == 1 &&
+                  FireBeetle2Esp32C6Profile::pinDisposition(
+                      FireBeetle2Esp32C6Profile::kBatterySense.pin) ==
+                      PinDisposition::BoardReserved,
+              "DFR1075 battery ADC must remain a dedicated board function");
 static_assert(FireBeetle2Esp32C6Profile::usable(
                   FireBeetle2Esp32C6Profile::kSpi.sck) &&
                   FireBeetle2Esp32C6Profile::usable(

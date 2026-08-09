@@ -14,7 +14,8 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
      HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
     {Api::Method::Get, "/api/device",
      +[](ApiRouter &router, const Api::Request &, const char *) {
-       return DeviceEndpoints::get(*router.configService_);
+       return DeviceEndpoints::get(*router.configService_,
+                                   *router.batteryMonitor_);
      },
      HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
     {Api::Method::Get, "/api/web",
@@ -188,6 +189,7 @@ Result ApiRouter::begin(const ApiRouterDeps &deps) {
   authService_ = &deps.authService;
   runtimeActions_ = &deps.runtime;
   epaperService_ = &deps.epaperService;
+  batteryMonitor_ = &deps.batteryMonitor;
 
   Result result = authEndpoints_.begin(
       &deps.configService, &deps.authService, &deps.runtime);
