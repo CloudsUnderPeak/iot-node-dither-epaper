@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Dither Render</title>
+    <style>
+        body {
+            margin: 0;
+            font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        main {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        canvas {
+            max-width: 100%;
+            border: 1px solid #d8e1e2;
+            image-rendering: pixelated;
+        }
+
+        #render-json {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Dither Render</h1>
+        <canvas id="preview" width="800" height="480"></canvas>
+        <pre id="render-json"></pre>
+    </main>
+
+    <script src="../../src/namespace.js"></script>
+    <script src="../../src/i18n/en.js"></script>
+    <script src="../../src/core/color/color-utils.js"></script>
+    <script src="../../src/core/color/palette-utils.js"></script>
+    <script src="../../src/pages/dither-editor/constants.js"></script>
+    <script src="../../src/pages/dither-editor/config/color-distance-metrics.js"></script>
+    <script src="../../src/pages/dither-editor/config/palette-mapping-modes.js"></script>
+    <script src="../../src/pages/dither-editor/dither/dither-algorithm-registry.js"></script>
+    <script src="../../src/pages/dither-editor/config/dither-algorithms.js"></script>
+    <script src="../../src/pages/dither-editor/dither/dither-matrices.js"></script>
+    <script src="../../src/pages/dither-editor/dither/palette-mapping.js"></script>
+    <script src="../../src/pages/dither-editor/gpu/gl-helpers.js"></script>
+    <script src="../../src/pages/dither-editor/gpu/threshold-dither-processor.js"></script>
+    <script src="../../src/pages/dither-editor/dither/error-diffusion.js"></script>
+    <script src="../../src/pages/dither-editor/dither/ordered-dither.js"></script>
+    <script src="../../src/pages/dither-editor/dither/pattern-dither.js"></script>
+    <script src="../../src/pages/dither-editor/dither/dot-diffusion.js"></script>
+    <script>
+        (function () {
+            var registry = window.DitherApp.pages.ditherEditor.ditherAlgorithmRegistry;
+            var canvas = document.getElementById('preview');
+            var renderJson = document.getElementById('render-json');
+
+            var palettes = {
+                e6: [
+                    { r: 0, g: 0, b: 0 },
+                    { r: 255, g: 255, b: 255 },
+                    { r: 0, g: 128, b: 0 },
+                    { r: 0, g: 0, b: 255 },
+                    { r: 255, g: 0, b: 0 },
+                    { r: 255, g: 255, b: 0 }
+                ],
+                gameboy: [
+                    { r: 15, g: 56, b: 15 },
+                    { r: 48, g: 98, b: 48 },
+                    { r: 139, g: 172, b: 15 },
+                    { r: 155, g: 188, b: 15 }
+                ],
+                sixteen: [
+                    { r: 0, g: 0, b: 0 },
+                    { r: 255, g: 255, b: 255 },
+                    { r: 255, g: 0, b: 0 },
+                    { r: 0, g: 255, b: 0 },
+                    { r: 0, g: 0, b: 255 },
+                    { r: 255, g: 255, b: 0 },
+                    { r: 255, g: 0, b: 255 },
+                    { r: 0, g: 255, b: 255 },
+                    { r: 128, g: 0, b: 0 },
+                    { r: 0, g: 128, b: 0 },
+                    { r: 0, g: 0, b: 128 },
+                    { r: 128, g: 128, b: 0 },
+                    { r: 128, g: 0, b: 128 },
+                    { r: 0, g: 128, b: 128 },
+                    { r: 192, g: 192, b: 192 },
+                    { r: 96, g: 96, b: 96 }
+                ]
+            };
+
+            function numberParam(params, id, fallback) {
+                var value = Number(params.get(id));
+                return Number.isFinite(value) ? value : fallback;
+            }
+
+            function mulberry32(seed) {
+                return function random() {
+                    var t = seed += 0x6D2B79F5;
+                    t = Math.imul(t ^ (t >>> 15), t | 1);
+                    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+                    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+                };
+            }
+
+            function clampByte(value) {
+                return value < 0 ? 0 : (value > 255 ? 255 : value);
+            }
+
+            function createImageData(width, height, kind) {
+                var imageData = new ImageData(width, height);
+                var data = imageData.data;
+                var rng = mulberry32(0xD17A);
+                for (var y = 0; y < height; y += 1) {
+                    for (var x = 0; x < width; x += 1) {
+                        var index = (y * width + x) * 4;
+                        var nx = x / Math.max(1, width - 1);
+                        var ny = y / Math.max(1, height - 1);
+                        var r;
+                        var g;
+                        var b;
+
+                        if (kind === 'noise') {
+                            var wave = Math.sin(nx * 18) * 24 + Math.cos(ny * 15) * 20;
+                            var grain = (rng() - 0.5) * 70;
+                            r = 155 + wave + grain + nx * 55;
+                            g = 140 + wave * 0.7 + grain * 0.8 + ny * 45;
+                            b = 125 + wave * 0.5 + grain * 0.6 + (1 - nx) * 65;
+                        } else if (kind === 'bands') {
+                            var band = Math.floor(nx * 8);
+                            r = band % 3 === 0 ? 232 : (band % 3 === 1 ? 80 : 34);
+                            g = band % 4 < 2 ? 210 : 74;
+                            b = band % 5 < 2 ? 72 : 198;
+                            if ((x + y) % 37 < 3) {
+                                r *= 0.7;
+                                g *= 0.7;
+                                b *= 0.7;
+                            }
+                        } else {
+                            var dx = nx - 0.54;
+                            var dy = ny - 0.48;
+                            var circle = dx * dx + dy * dy < 0.08 ? 85 : 0;
+                            r = nx * 255;
+                            g = ny * 220 + circle;
+                            b = (1 - nx) * 190 + (1 - ny) * 60;
+                        }
+
+                        data[index] = clampByte(r);
+                        data[index + 1] = clampByte(g);
+                        data[index + 2] = clampByte(b);
+                        data[index + 3] = 255;
+                    }
+                }
+                return imageData;
+            }
+
+            function loadInputImageData(url) {
+                return new Promise(function (resolve, reject) {
+                    var image = new Image();
+                    image.onload = function () {
+                        var inputCanvas = document.createElement('canvas');
+                        inputCanvas.width = image.naturalWidth || image.width;
+                        inputCanvas.height = image.naturalHeight || image.height;
+                        var ctx = inputCanvas.getContext('2d', { willReadFrequently: true });
+                        ctx.drawImage(image, 0, 0);
+                        resolve(ctx.getImageData(0, 0, inputCanvas.width, inputCanvas.height));
+                    };
+                    image.onerror = function () {
+                        reject(new Error('Failed to load input image.'));
+                    };
+                    image.src = url;
+                });
+            }
+
+            function parsePalette(value, fallback) {
+                if (!value) {
+                    return fallback;
+                }
+                var colors = value.split(',').map(function (hex) {
+                    var normalized = hex.trim().replace(/^#/, '');
+                    if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+                        throw new Error('Invalid color: ' + hex);
+                    }
+                    return {
+                        r: parseInt(normalized.slice(0, 2), 16),
+                        g: parseInt(normalized.slice(2, 4), 16),
+                        b: parseInt(normalized.slice(4, 6), 16)
+                    };
+                });
+                if (!colors.length) {
+                    throw new Error('Custom palette cannot be empty.');
+                }
+                return colors;
+            }
+
+            function settingsFromQuery() {
+                var params = new URLSearchParams(window.location.search);
+                var paletteId = params.get('palette') || 'e6';
+                var palette = palettes[paletteId] || palettes.e6;
+                return {
+                    input: params.get('input') || '',
+                    source: params.get('source') || 'gradient',
+                    width: Math.max(1, Math.min(4096, numberParam(params, 'width', 800) | 0)),
+                    height: Math.max(1, Math.min(4096, numberParam(params, 'height', 480) | 0)),
+                    algorithm: params.get('algorithm') || 'bayer-8',
+                    mapping: params.get('mapping') || 'nearest-color',
+                    colorDistance: params.get('colorDistance') || 'euclidean-bt709',
+                    backend: params.get('backend') || 'auto',
+                    errorStrength: numberParam(params, 'errorStrength', 100),
+                    serpentine: params.get('serpentine') === '1',
+                    paletteId: paletteId,
+                    palette: parsePalette(params.get('colors'), palette)
+                };
+            }
+
+            function checksum(imageData) {
+                var data = imageData.data;
+                var hash = 2166136261;
+                for (var i = 0; i < data.length; i += 1) {
+                    hash ^= data[i];
+                    hash = Math.imul(hash, 16777619);
+                }
+                return (hash >>> 0).toString(16).padStart(8, '0');
+            }
+
+            function drawImageData(imageData) {
+                canvas.width = imageData.width;
+                canvas.height = imageData.height;
+                canvas.getContext('2d').putImageData(imageData, 0, 0);
+                return canvas.toDataURL('image/png');
+            }
+
+            function thresholdScaleFor(algorithm, errorStrength) {
+                if (!algorithm.supportsThresholdStrength) {
+                    return null;
+                }
+                return (algorithm.thresholdScale || 70) * errorStrength / 100;
+            }
+
+            function dotDensityFor(algorithm, errorStrength) {
+                if (!algorithm.supportsDotDensity) {
+                    return null;
+                }
+                return errorStrength / 100;
+            }
+
+            function render(settings) {
+                var inputPromise = settings.input
+                    ? loadInputImageData(settings.input)
+                    : Promise.resolve(createImageData(settings.width, settings.height, settings.source));
+
+                return inputPromise.then(function (imageData) {
+                    var algorithm = registry.get(settings.algorithm);
+                    if (!algorithm) {
+                        throw new Error('Unknown dither algorithm: ' + settings.algorithm);
+                    }
+                    var started = performance.now();
+                    var options = {
+                        matrixId: algorithm.matrixId,
+                        palette: settings.palette,
+                        paletteMapping: settings.mapping,
+                        colorDistance: settings.colorDistance,
+                        ditherBackend: settings.backend,
+                        serpentine: algorithm.supportsSerpentine ? settings.serpentine : false,
+                        errorStrength: settings.errorStrength
+                    };
+                    var thresholdScale = thresholdScaleFor(algorithm, settings.errorStrength);
+                    if (thresholdScale !== null) {
+                        options.thresholdScale = thresholdScale;
+                        options.thresholdStrength = settings.errorStrength / 100;
+                    }
+                    var dotDensity = dotDensityFor(algorithm, settings.errorStrength);
+                    if (dotDensity !== null) {
+                        options.dotDensity = dotDensity;
+                    }
+                    var output = registry.run(imageData, algorithm, options);
+                    var thresholdProcessor = window.DitherApp.pages.ditherEditor.thresholdDitherProcessor;
+                    return {
+                        width: output.width,
+                        height: output.height,
+                        algorithm: algorithm.id,
+                        mapping: settings.mapping,
+                        palette: settings.paletteId,
+                        backend: thresholdProcessor ? thresholdProcessor.lastRunBackend() : 'cpu',
+                        duration: performance.now() - started,
+                        checksum: checksum(output),
+                        dataUrl: drawImageData(output)
+                    };
+                });
+            }
+
+            registry.assertRegistered();
+            if (new URLSearchParams(window.location.search).get('autorun') === '1') {
+                render(settingsFromQuery()).then(function (result) {
+                    renderJson.textContent = JSON.stringify(result);
+                    document.body.setAttribute('data-render-complete', 'true');
+                }).catch(function (error) {
+                    renderJson.textContent = JSON.stringify({
+                        error: error && error.message ? error.message : String(error)
+                    });
+                    document.body.setAttribute('data-render-complete', 'true');
+                });
+            }
+        })();
+    </script>
+</body>
+</html>

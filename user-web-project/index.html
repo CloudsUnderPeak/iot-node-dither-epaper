@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dither Image Editor</title>
+    <link rel="icon" href="assets/icons/app/favicon.ico" sizes="any">
+    <link rel="stylesheet" href="assets/styles/base.css">
+    <link rel="stylesheet" href="assets/styles/layout.css">
+    <link rel="stylesheet" href="assets/styles/components.css">
+    <link rel="stylesheet" href="assets/styles/themes.css">
+    <link rel="stylesheet" href="assets/styles/device.css">
+    <script>
+        (function (app) {
+            var state = 'loading';
+            var progress = 5;
+            var resourceTotal = 0;
+            var resourceSettled = 0;
+            var copy = {
+                loading: 'Loading...',
+                error: 'App could not be loaded.',
+                reload: 'Reload'
+            };
+            var timeoutId = window.setTimeout(function () {
+                fail();
+            }, 60000);
+
+            function elements() {
+                return {
+                    overlay: document.getElementById('app-loading'),
+                    appNode: document.getElementById('app'),
+                    message: document.getElementById('app-loading-message'),
+                    progress: document.getElementById('app-loading-progress'),
+                    progressBar: document.getElementById('app-loading-progress-bar'),
+                    reload: document.getElementById('app-loading-reload')
+                };
+            }
+
+            function bindReload(button) {
+                if (!button || button.getAttribute('data-bound') === 'true') {
+                    return;
+                }
+                button.setAttribute('data-bound', 'true');
+                button.addEventListener('click', function () {
+                    window.location.reload();
+                });
+            }
+
+            function render() {
+                var refs = elements();
+                if (!refs.overlay || !refs.appNode) {
+                    return;
+                }
+                bindReload(refs.reload);
+                if (state === 'ready') {
+                    refs.overlay.hidden = true;
+                    refs.overlay.setAttribute('data-state', 'ready');
+                    refs.overlay.setAttribute('aria-busy', 'false');
+                    refs.appNode.removeAttribute('inert');
+                    refs.appNode.removeAttribute('aria-hidden');
+                    document.body.classList.remove('is-app-loading');
+                    return;
+                }
+                document.body.classList.add('is-app-loading');
+                refs.appNode.setAttribute('inert', '');
+                refs.appNode.setAttribute('aria-hidden', 'true');
+                refs.overlay.hidden = false;
+                refs.overlay.setAttribute('data-state', state);
+                refs.overlay.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
+                refs.overlay.setAttribute('role', state === 'error' ? 'alert' : 'status');
+                refs.message.textContent = state === 'error'
+                    ? copy.error
+                    : copy.loading + ' ' + progress + '%';
+                refs.progress.hidden = state !== 'loading';
+                refs.progressBar.style.width = progress + '%';
+                refs.progress.setAttribute('aria-valuenow', String(progress));
+                refs.reload.textContent = copy.reload;
+                refs.reload.hidden = state !== 'error';
+                if (state === 'error') {
+                    refs.reload.focus();
+                }
+            }
+
+            function setCopy(nextCopy) {
+                copy = Object.assign(copy, nextCopy || {});
+                render();
+            }
+
+            function setProgress(nextProgress) {
+                if (state !== 'loading') {
+                    return;
+                }
+                progress = Math.max(progress, Math.min(100, Math.round(nextProgress)));
+                render();
+            }
+
+            function registerResource() {
+                resourceTotal += 1;
+                setProgress(10);
+            }
+
+            function settleResource() {
+                resourceSettled = Math.min(resourceSettled + 1, resourceTotal);
+                setProgress(10 + Math.min(50, resourceSettled));
+            }
+
+            function fail() {
+                if (state !== 'loading') {
+                    return;
+                }
+                state = 'error';
+                window.clearTimeout(timeoutId);
+                render();
+            }
+
+            function complete() {
+                if (state !== 'loading') {
+                    return;
+                }
+                setProgress(100);
+                state = 'ready';
+                window.clearTimeout(timeoutId);
+                render();
+            }
+
+            app.startupGate = {
+                complete: complete,
+                fail: fail,
+                registerResource: registerResource,
+                settleResource: settleResource,
+                setCopy: setCopy,
+                setProgress: setProgress,
+                state: function currentState() {
+                    return state;
+                }
+            };
+
+            window.addEventListener('error', function (event) {
+                var target = event.target;
+                if (
+                    !target
+                    || target === window
+                    || target.tagName === 'SCRIPT'
+                    || (target.tagName === 'LINK' && target.rel === 'stylesheet')
+                ) {
+                    fail();
+                }
+            }, true);
+            window.addEventListener('unhandledrejection', fail);
+            document.addEventListener('DOMContentLoaded', render, { once: true });
+        })(window.DitherApp = window.DitherApp || {});
+    </script>
+</head>
+<body class="is-app-loading">
+    <div
+        id="app-loading"
+        class="app-loading-overlay"
+        data-state="loading"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+    >
+        <div class="app-loading-content">
+            <span class="app-loading-spinner" aria-hidden="true"></span>
+            <div id="app-loading-message" class="app-loading-message">Loading... 5%</div>
+            <div
+                id="app-loading-progress"
+                class="app-loading-progress"
+                role="progressbar"
+                aria-labelledby="app-loading-message"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="5"
+            >
+                <span id="app-loading-progress-bar" class="app-loading-progress-bar" style="width: 5%"></span>
+            </div>
+            <button id="app-loading-reload" class="secondary-button" type="button" hidden>Reload</button>
+        </div>
+    </div>
+    <div id="app" class="app-shell" inert aria-hidden="true">
+        <!-- app-shell 只提供 SPA 外殼；各頁內容會由 JavaScript 掛到 #page-host。 -->
+        <header class="app-header">
+            <div class="app-title">Dither Image Editor</div>
+            <div class="app-header-actions">
+                <div id="app-status" class="app-status is-busy" title="Loading..." aria-label="Loading..."></div>
+                <button id="app-menu-button" class="icon-button app-menu-button button-with-icon" type="button" aria-label="Menu">
+                    <span class="svg-icon app-menu-button-icon" data-svg-icon="assets/icons/editor/menu.svg"></span>
+                    <span>Menu</span>
+                </button>
+            </div>
+        </header>
+        <main id="page-host" class="page-host"></main>
+    </div>
+
+    <!-- 先載入全域 namespace 與 core，再載入各頁 entry，最後由 main 啟動 app shell。 -->
+    <script defer src="src/namespace.js"></script>
+    <script defer src="src/i18n/en.js"></script>
+    <script defer src="src/i18n/zh-TW.js"></script>
+    <script defer src="src/i18n/index.js"></script>
+    <script defer src="src/utils/dom.js"></script>
+    <script defer src="src/utils/math.js"></script>
+    <script defer src="src/ui/svg-icons.js"></script>
+    <script defer src="src/core/storage/storage-keys.js"></script>
+    <script defer src="src/core/storage/settings-store.js"></script>
+    <script defer src="src/core/canvas/canvas-utils.js"></script>
+    <script defer src="src/core/color/color-utils.js"></script>
+    <script defer src="src/core/color/palette-utils.js"></script>
+    <script defer src="src/core/image/image-loader.js"></script>
+    <script defer src="src/core/image/image-exporter.js"></script>
+    <script defer src="src/ui/sortable-list.js"></script>
+    <script defer src="src/ui/modal.js"></script>
+    <script defer src="src/ui/notice.js"></script>
+    <script defer src="src/ui/password-field.js"></script>
+    <script defer src="src/ui/select-field.js"></script>
+    <script defer src="src/device/device-api.js"></script>
+    <script defer src="src/device/device-live.js"></script>
+    <script defer src="src/device/device-gate.js"></script>
+    <script defer src="src/device/device-auth.js"></script>
+    <!-- PREVIEW START: 開發/demo 用假裝置 API；正式 build 會剝除本區塊並排除 mock 檔。 -->
+    <script defer src="src/device/device-mock.js"></script>
+    <!-- PREVIEW END -->
+    <script defer src="src/app/app-state.js"></script>
+    <script defer src="src/app/project-capabilities.js"></script>
+    <script defer src="src/app/page-registry.js"></script>
+    <script defer src="src/app/page-router.js"></script>
+    <script defer src="src/app/app-menu.js"></script>
+    <script defer src="src/app/script-loader.js"></script>
+    <script defer src="src/pages/dither-editor/entry.js"></script>
+    <script defer src="src/pages/device-info/entry.js"></script>
+    <script defer src="src/pages/device-network/entry.js"></script>
+    <script defer src="src/pages/device-system/entry.js"></script>
+    <script defer src="src/pages/web-setting/entry.js"></script>
+    <script defer src="src/pages/help/entry.js"></script>
+    <script defer src="src/pages/about/entry.js"></script>
+    <script defer src="src/app/app-shell.js"></script>
+    <script defer src="src/main.js"></script>
+</body>
+</html>

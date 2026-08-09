@@ -1,0 +1,1009 @@
+/* 裝置管理頁（device-info / device-network / device-system）與共用 modal、notice 樣式。
+   依既有慣例以載入順序拆檔：本檔排在 components.css 之後，只覆蓋裝置頁需要的部分。
+   視覺語言對齊 Dither Editor：卡片用 panel-section（h2 標題列＋panel-body），
+   表單用 control-row 式左標籤密度，輸入框與字級沿用編輯器的 34px／12-14px 階。 */
+
+.device-page {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 16px;
+    color: var(--color-text);
+}
+
+/* 卡片標題列可容納右側 badge／總空間；h2 交回 flex 排版，不用 panel-section 預設內距。 */
+.device-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--color-border-faint);
+}
+
+.device-card-header h2 {
+    margin: 0;
+    padding: 0;
+    border-bottom: 0;
+    font-size: 14px;
+}
+
+.device-card-body {
+    gap: 12px;
+}
+
+.device-content {
+    display: grid;
+    gap: 12px;
+}
+
+.device-hint {
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+/* ---- 通知與離線 banner ---- */
+
+.device-notice {
+    padding: 10px 12px;
+    border: 1px solid var(--color-accent);
+    border-radius: 8px;
+    color: var(--color-accent-strong);
+    background: var(--color-accent-soft);
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.device-notice.is-error {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+    background: transparent;
+}
+
+.device-notice[hidden] {
+    display: none;
+}
+
+.device-banner {
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 1.55;
+}
+
+.device-banner.is-offline {
+    border: 1px solid var(--color-danger);
+    color: var(--color-danger);
+    background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
+.device-banner.is-standalone {
+    border: 1px solid var(--color-border-strong);
+    color: var(--color-muted);
+    background: var(--color-surface-muted);
+}
+
+.device-banner.is-recovered {
+    border: 1px solid var(--color-accent);
+    color: var(--color-accent-strong);
+    background: var(--color-accent-soft);
+}
+
+/* ---- 離線反灰：banner 之外的裝置區塊整組鎖定 ---- */
+
+.is-device-offline .device-gate {
+    opacity: 0.55;
+    filter: saturate(0.5);
+    pointer-events: none;
+    user-select: none;
+}
+
+/* ---- badge ---- */
+
+.device-badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.device-badge.is-ok {
+    color: var(--color-status-ready-fill);
+    background: color-mix(in srgb, var(--color-status-ready-fill) 14%, transparent);
+}
+
+.device-badge.is-warn {
+    color: var(--color-text-soft);
+    border-color: var(--color-border-strong);
+    background: var(--color-surface-muted);
+}
+
+.device-badge.is-err {
+    color: var(--color-danger);
+    background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+}
+
+.device-badge.is-muted {
+    color: var(--color-muted);
+    border-color: var(--color-border);
+    background: var(--color-surface-muted);
+}
+
+.device-badge.is-accent {
+    color: var(--color-accent-strong);
+    background: var(--color-accent-soft);
+}
+
+/* ---- 裝置資訊欄位與容量長條圖 ---- */
+
+.device-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px 20px;
+}
+
+.device-field {
+    display: grid;
+    gap: 3px;
+    align-content: start;
+    min-width: 0;
+}
+
+/* 欄位標籤與編輯器 control-row 的 label 同階（12px／650／muted）。 */
+.device-field-label {
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.device-field-value {
+    font-size: 14px;
+    font-weight: 650;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.capacity-bar {
+    display: flex;
+    height: 12px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--color-border-faint);
+    background: var(--color-surface-muted);
+}
+
+.capacity-seg {
+    display: block;
+    height: 100%;
+    flex-grow: 0;
+    flex-shrink: 0;
+}
+
+/* 分段之間以底色細線隔開（builtin-web 同款），任何配色下邊界都清楚。 */
+.capacity-seg + .capacity-seg {
+    border-left: 1px solid var(--color-surface);
+}
+
+/* 比照 builtin-web capacity-stats：每分段一欄（標籤在上、數值在下），欄間以直線分隔，
+   長標籤（例如「可供燒錄空間」的英文）在欄內換行，不會把整列圖例擠歪。 */
+.capacity-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin: 0;
+}
+
+.capacity-stats.segments-5 {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.capacity-stat {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    padding: 0 14px;
+}
+
+.capacity-stat:first-child {
+    padding-left: 0;
+}
+
+.capacity-stat:last-child {
+    padding-right: 0;
+}
+
+.capacity-stat + .capacity-stat {
+    border-left: 1px solid var(--color-border);
+}
+
+.capacity-stat-label {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.capacity-stat-value {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 卡片標題旁的總空間＝各分段之和，也就是長條圖的 100% 基準。 */
+.capacity-total {
+    display: inline-flex;
+    gap: 7px;
+    align-items: baseline;
+}
+
+.capacity-total-label {
+    color: var(--color-muted);
+    font-size: 12px;
+}
+
+.capacity-total-value {
+    font-size: 13px;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+.capacity-chip {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex: 0 0 auto;
+}
+
+/* 容量圖沿用編輯器語彙的兩個色相（accent teal #206d64／status-busy 藍 #3d8cbd），
+   只做「分得開相鄰分段」的最小偏移：同色相上鋸齒排列明度並補足彩度下限，
+   通過色盲模擬（protan/deutan ΔE ≥ 8）與一般視覺（ΔE ≥ 15）的相鄰色差驗證。
+   分段色是圖表專用色階；color-5（可用空間）維持中性底色。 */
+.capacity-color-1 { background: #08569a; }
+.capacity-color-2 { background: #058461; }
+.capacity-color-3 { background: #5795cc; }
+.capacity-color-4 { background: #49c6a7; }
+.capacity-color-5 { background: color-mix(in srgb, var(--color-muted) 28%, var(--color-surface)); }
+
+body[data-theme="dark"] .capacity-color-1 { background: #1f62a4; }
+body[data-theme="dark"] .capacity-color-2 { background: #04865d; }
+body[data-theme="dark"] .capacity-color-3 { background: #5483bb; }
+body[data-theme="dark"] .capacity-color-4 { background: #30a981; }
+
+/* ---- 表單 ---- */
+
+.device-fieldset {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    border: 0;
+    padding: 0;
+    min-width: 0;
+}
+
+/* 對齊編輯器 control-row：左標籤欄＋右控制欄；裝置頁標籤較長，欄寬放大到 130px。 */
+.device-form-row {
+    display: grid;
+    grid-template-columns: 130px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+}
+
+.device-form-label {
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.device-input {
+    width: 100%;
+    min-width: 0;
+    min-height: 34px;
+    padding: 6px 8px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 6px;
+    color: var(--color-text);
+    background: var(--color-surface);
+    font-size: 13px;
+}
+
+.device-input[readonly] {
+    color: var(--color-muted);
+    background: var(--color-surface-muted);
+}
+
+.device-input-with-action {
+    display: flex;
+    gap: 8px;
+}
+
+.device-input-with-action .device-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.device-input-with-action > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.device-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.device-rule-hint {
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-accent-soft);
+    color: var(--color-text-soft);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* 顯示/隱藏切換疊在輸入框內右側，不另外佔一個按鈕欄位。 */
+.password-field {
+    position: relative;
+    display: block;
+    min-width: 0;
+}
+
+.password-field .password-input {
+    width: 100%;
+    padding-right: 38px;
+}
+
+.password-toggle {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    border: 0;
+    border-radius: 0 5px 5px 0;
+    padding: 0;
+    background: transparent;
+    /* 圖示走全站 svg-icon filter，無法用 color 調淡，因此以 opacity 表現次要層級。 */
+    opacity: 0.6;
+}
+
+.password-toggle:hover {
+    opacity: 1;
+}
+
+.password-toggle:focus-visible {
+    outline: 2px solid var(--color-accent-strong);
+    outline-offset: -2px;
+}
+
+/* 標籤與開關比照 control-row 對齊：左標籤欄＋開關靠左；只有開關本身可點擊切換。 */
+.device-toggle-row {
+    display: grid;
+    grid-template-columns: 130px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    min-height: 34px;
+}
+
+.device-toggle-row[hidden] {
+    display: none;
+}
+
+/* 進階區塊要一眼看出範圍：可見邊框＋淡底色（同編輯器 panel-subtle 層級）。 */
+.device-advanced {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: var(--color-surface-muted);
+    display: grid;
+    gap: 12px;
+}
+
+.device-advanced summary {
+    cursor: pointer;
+    color: var(--color-text);
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.device-advanced[open] summary {
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* details 的非 summary 內容會被包進 ::details-content 單一盒子，
+   對 details 設的 gap 只會作用在 summary 之後；欄位間距要由這層 wrapper 負責。 */
+.device-advanced-body {
+    display: grid;
+    gap: 12px;
+}
+
+.device-static-rows {
+    display: grid;
+    gap: 12px;
+}
+
+.device-static-rows[hidden] {
+    display: none;
+}
+
+/* ---- 鎖定卡與 danger zone ---- */
+
+.device-locked {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+    padding: 20px 16px;
+    color: var(--color-muted);
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.device-locked p {
+    margin: 0;
+}
+
+.device-locked-icon {
+    width: 26px;
+    height: 26px;
+}
+
+/* Danger zone：不可復原的操作用紅色卡片與警告徽章區隔，不與一般設定卡同色。 */
+.device-reset-card {
+    border-color: color-mix(in srgb, var(--color-danger) 42%, transparent);
+    background: color-mix(in srgb, var(--color-danger) 7%, var(--color-surface));
+}
+
+.device-reset-header {
+    justify-content: flex-start;
+    border-bottom-color: color-mix(in srgb, var(--color-danger) 24%, transparent);
+}
+
+.device-reset-card h2 {
+    color: var(--color-danger);
+}
+
+.device-reset-text {
+    margin: 0;
+    color: var(--color-text-soft);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+/* 警告徽章：紅底＋反白圖示，沿用既有 svg-icon filter，不另外調色。 */
+.device-danger-icon {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    border-radius: 6px;
+    background: var(--color-danger);
+}
+
+.device-danger-icon .svg-icon {
+    width: 16px;
+    height: 16px;
+}
+
+body[data-theme="light"] .device-danger-icon .svg-icon {
+    --svg-icon-filter: brightness(0) invert(1);
+}
+
+body[data-theme="dark"] .device-danger-icon .svg-icon {
+    --svg-icon-filter: brightness(0);
+}
+
+.device-danger-button {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+    background: var(--color-surface);
+}
+
+.device-danger-button:hover {
+    background: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface));
+}
+
+/* 確認 dialog 的送出鍵是實心紅：破壞性動作不使用一般 accent 主色鍵。 */
+.device-danger-submit {
+    border-color: var(--color-danger);
+    color: var(--color-on-danger);
+    background: var(--color-danger);
+}
+
+.device-danger-dialog {
+    justify-items: start;
+}
+
+.device-danger-dialog h2 {
+    color: var(--color-danger);
+}
+
+.device-danger-dialog .modal-actions {
+    width: 100%;
+}
+
+/* ---- Wi-Fi 表單 ---- */
+
+/* STA 與 AP 兩段用可見分隔線切開，避免整張表單讀成一長串欄位。 */
+.wifi-section {
+    display: grid;
+    gap: 12px;
+    padding-top: 14px;
+    border-top: 1px solid var(--color-border);
+}
+
+.wifi-section[hidden] {
+    display: none;
+}
+
+.wifi-section h3 {
+    margin: 0;
+    padding: 0;
+    border-bottom: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.wifi-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+/* Mode 選項比照編輯器 setting-choice：6px 圓角、選取時 accent 邊框＋accent-soft 底。 */
+.wifi-mode-option {
+    position: relative;
+    display: grid;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--color-surface);
+    cursor: pointer;
+}
+
+.wifi-mode-option input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.wifi-mode-option:has(input:checked) {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+}
+
+.wifi-mode-option:has(input:focus-visible) {
+    outline: 2px solid var(--color-accent-strong);
+    outline-offset: 2px;
+}
+
+/* 右上角三角形＝裝置目前已儲存的 mode。 */
+.wifi-mode-option.is-current::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-style: solid;
+    border-width: 0 12px 12px 0;
+    border-color: transparent var(--color-accent) transparent transparent;
+}
+
+.wifi-mode-title {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.wifi-mode-desc {
+    font-size: 12px;
+    color: var(--color-muted);
+    line-height: 1.5;
+}
+
+.save-dock {
+    position: sticky;
+    bottom: 8px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-surface);
+    box-shadow: 0 -6px 18px var(--color-shadow);
+}
+
+/* 儲存列永遠維持單列：狀態文字先縮排省略，按鈕不換行到左邊。 */
+.save-dock > .device-hint {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.save-dock .device-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+}
+
+/* ---- 網路狀態卡 ---- */
+
+/* 桌面三欄一列；mDNS 網址較長，欄寬加權讓 mono 網址維持單行。 */
+.network-status-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1.35fr);
+    gap: 14px 20px;
+}
+
+/* 每欄開頭一顆 feature icon（比照 builtin-web Interface status）；
+   icon 跨 label 與值兩列並垂直置中，右欄整塊是文字，不在 icon 下方留空。 */
+.network-status-column {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    column-gap: 10px;
+    row-gap: 2px;
+    align-content: start;
+    align-items: start;
+    min-width: 0;
+}
+
+.network-status-icon {
+    display: grid;
+    place-items: center;
+    grid-row: 1 / span 2;
+    grid-column: 1;
+    align-self: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    background: var(--color-accent-soft);
+}
+
+.network-status-icon .svg-icon {
+    width: 20px;
+    height: 20px;
+}
+
+/* icon 以全站 accent filter 上色（同 palette-add-button 的配方），light/dark 各一組。 */
+body[data-theme="light"] .network-status-icon .svg-icon {
+    --svg-icon-filter: brightness(0) saturate(100%) invert(31%) sepia(20%) saturate(1441%) hue-rotate(126deg) brightness(91%) contrast(91%);
+}
+
+body[data-theme="dark"] .network-status-icon .svg-icon {
+    --svg-icon-filter: brightness(0) saturate(100%) invert(57%) sepia(36%) saturate(674%) hue-rotate(126deg) brightness(93%) contrast(88%);
+}
+
+.network-status-column > .network-status-value,
+.network-status-column > .network-status-hint {
+    grid-column: 2;
+}
+
+/* badge 會撐高 label 列；固定最小高度讓沒有 badge 的欄位（mDNS）仍與其他欄對齊。 */
+.network-status-label {
+    display: flex;
+    gap: 7px;
+    align-items: center;
+    min-height: 22px;
+}
+
+.network-status-value {
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.4;
+    color: var(--color-accent-strong);
+    overflow-wrap: anywhere;
+}
+
+/* 說明列固定一行高度，讓三欄底部一致；沒有內容時也不塌陷。 */
+.network-status-hint {
+    min-height: 19px;
+}
+
+a.network-status-value {
+    text-decoration: underline;
+}
+
+/* ---- Modal ---- */
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    place-items: center;
+    padding: 24px 16px;
+    background: color-mix(in srgb, var(--color-text) 28%, transparent);
+}
+
+.modal-dialog {
+    width: 100%;
+    max-width: 420px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    padding: 18px 20px 20px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-surface);
+    box-shadow: 0 18px 44px var(--color-shadow-strong);
+}
+
+.device-dialog {
+    display: grid;
+    gap: 14px;
+}
+
+.device-dialog h2 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+.device-dialog p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+/* dialog 內的 form 沒有預設間距，欄位會整片黏在一起。 */
+.device-dialog-form {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 4px;
+}
+
+.modal-actions .primary-button,
+.modal-actions .secondary-button {
+    min-width: 96px;
+}
+
+/* ---- 掃描 dialog ---- */
+
+.scan-dialog {
+    max-width: 460px;
+}
+
+/* 篩選欄與再次掃描同一列。 */
+.scan-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.scan-filter {
+    position: relative;
+    min-width: 0;
+}
+
+.scan-filter-icon {
+    position: absolute;
+    top: 50%;
+    left: 10px;
+    transform: translateY(-50%);
+    opacity: 0.6;
+}
+
+.scan-filter .device-input {
+    width: 100%;
+    padding-left: 36px;
+}
+
+.scan-list {
+    display: grid;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--color-border-faint);
+    border-radius: 8px;
+}
+
+.scan-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-border-faint);
+}
+
+.scan-row:last-child {
+    border-bottom: 0;
+}
+
+.scan-ssid {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.scan-meta {
+    white-space: nowrap;
+}
+
+.scan-signal-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.scan-select-button {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+}
+
+.scan-rescan-button {
+    /* 固定寬度：cooldown 倒數與「再次掃描」互換時按鈕不變形。 */
+    width: 140px;
+    padding: 0 10px;
+    white-space: nowrap;
+}
+
+.scan-empty {
+    padding: 18px;
+    text-align: center;
+}
+
+/* ---- 開發/demo 假資料標示 ---- */
+
+.device-mock-badge {
+    padding: 3px 10px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 999px;
+    color: var(--color-text-soft);
+    background: var(--color-surface-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    cursor: help;
+}
+
+/* ---- Menu 裝置群組 ---- */
+
+.app-menu-divider {
+    margin: 6px 4px;
+    border: 0;
+    border-top: 1px solid var(--color-border-faint);
+}
+
+.app-menu-group {
+    padding: 6px 10px 2px;
+    color: var(--color-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* ---- Responsive ---- */
+
+@media (max-width: 920px) {
+    /* 手機模式 page-host 固定高度且 overflow hidden；裝置頁比照 help-page 自己捲動。 */
+    .device-page {
+        height: 100%;
+        overflow: auto;
+        padding: 12px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* 手機模式的資訊欄位與連線狀態逐項分排；每列比照表單的左標籤欄，
+       label 靠左、值用滿剩餘寬度，不留整塊空白。 */
+    .device-grid,
+    .network-status-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .device-field {
+        grid-template-columns: 130px minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+    }
+
+}
+
+@media (max-width: 700px) {
+    .wifi-mode-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* 窄螢幕 stat 改兩欄：每列第一欄不畫分隔線、不留左內距。 */
+    .capacity-stats,
+    .capacity-stats.segments-5 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        row-gap: 12px;
+    }
+
+    .capacity-stat,
+    .capacity-stat:first-child,
+    .capacity-stat:last-child {
+        padding: 0 12px;
+    }
+
+    .capacity-stat:nth-child(odd) {
+        border-left: 0;
+        padding-left: 0;
+    }
+
+    /* 觸控裝置的輸入框維持 16px，避免 iOS 聚焦時自動放大頁面。 */
+    .device-input {
+        font-size: 16px;
+    }
+
+    .modal-backdrop {
+        align-items: end;
+        padding: 0;
+    }
+
+    .modal-dialog {
+        max-width: none;
+        border-radius: 8px 8px 0 0;
+    }
+
+    /* 窄螢幕放棄狀態文字，把整列讓給兩顆按鈕平分，維持單列儲存條。 */
+    .save-dock > .device-hint {
+        display: none;
+    }
+
+    .save-dock .device-actions {
+        flex: 1 1 auto;
+        width: 100%;
+    }
+
+    .save-dock .device-actions > button {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 560px) {
+    /* 標籤欄與編輯器 control-row 一樣在窄螢幕收成上下排列。 */
+    .device-form-row {
+        grid-template-columns: 1fr;
+        gap: 5px;
+    }
+
+    .device-toggle-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+    }
+}

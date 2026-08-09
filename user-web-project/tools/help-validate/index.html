@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Help Validation</title>
+</head>
+<body>
+    <pre id="validation-json"></pre>
+
+    <script src="../../src/namespace.js"></script>
+    <script src="../../src/i18n/en.js"></script>
+    <script src="../../src/i18n/zh-TW.js"></script>
+    <script src="../../src/i18n/index.js"></script>
+    <script src="../../src/app/project-capabilities.js"></script>
+    <script src="../../src/pages/dither-editor/dither/dither-algorithm-registry.js"></script>
+    <script src="../../src/pages/dither-editor/config/dither-algorithms.js"></script>
+    <script src="../../src/pages/dither-editor/config/palette-mapping-modes.js"></script>
+    <script src="../../src/pages/dither-editor/config/color-distance-metrics.js"></script>
+    <script src="../../src/pages/dither-editor/constants.js"></script>
+    <script src="../../src/pages/help/i18n/en.js"></script>
+    <script src="../../src/pages/help/i18n/zh-TW.js"></script>
+    <script src="../../src/pages/help/content-model.js"></script>
+    <script src="../../src/pages/help/validation.js"></script>
+    <script>
+        document.getElementById('validation-json').textContent = JSON.stringify(
+            window.DitherApp.pages.help.validation.validate()
+        );
+    </script>
+</body>
+</html>
