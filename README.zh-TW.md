@@ -89,6 +89,20 @@ make deploy PORT=/dev/ttyACM0
 - 產品前端在 `user-web-project/` 開發。預設 `make build`（以及明確的
   `make build WEB=user`）會先重建該專案，再把 minify、gzip-only 的正式
   產物原子匯入被忽略的 `user-web/` 並包入 firmware。
+- `user-web-project/` 是
+  [`CloudsUnderPeak/embedded-web-dithering`](https://github.com/CloudsUnderPeak/embedded-web-dithering)
+  的 Git subtree，目前追蹤 `six-color-epaper` 分支。每個 clone 只須設定一次
+  repository-local remote，之後即可用下列 Make target 同步，不需要 submodule：
+
+  ```bash
+  git remote add embedded-web-dithering https://github.com/CloudsUnderPeak/embedded-web-dithering.git
+  git remote set-url --push embedded-web-dithering git@github.com:CloudsUnderPeak/embedded-web-dithering.git
+  ```
+
+  請先 pull 再修改；push 前只提交預計送出的 `user-web-project/` 變更。
+  `make user-web pull` 要求整個 worktree 為乾淨狀態，並建立 subtree merge commit；
+  `make user-web push` 會拒絕該 prefix 內未提交的變更、只推送已提交的 subtree
+  history，並需要 GitHub SSH 的寫入權限。
 - 需要內建管理頁時使用 `make build WEB=builtin`。`WEB=auto` 仍可消費
   既有 user import，沒有有效 import 時則退回 builtin。
 - 若要建立只提供 API 的 firmware，明確執行 `make build WEB=none`；
@@ -104,6 +118,8 @@ make build WEB=builtin                  # 內建前端加 firmware
 make build WEB=user                     # 重建使用者前端加 firmware
 make build WEB=none                     # 不含任何前端的 firmware
 make prepare-user-web                   # 只重建並匯入 user-web-project
+make user-web pull                      # 拉取 six-color-epaper subtree 分支
+make user-web push                      # 推送已提交的 subtree 專屬變更到上游
 make deploy WEB=none PORT=/dev/ttyACM0  # 建置、驗證並燒錄 API-only firmware
 make web [WEB=...] [WEB_PROCESS=...]    # 只處理前端
 make demo WEB_PROCESS=none              # 建立 build/latest/web 靜態 Demo

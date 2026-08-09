@@ -11,12 +11,16 @@ RELEASE_TOOL := tools/release-build/build_release.py
 WEB_TOOL := tools/web-build/build_web.py
 USER_WEB_PROJECT := user-web-project
 USER_WEB_LATEST := $(USER_WEB_PROJECT)/build/latest
+USER_WEB_REMOTE ?= embedded-web-dithering
+USER_WEB_BRANCH ?= six-color-epaper
+USER_WEB_ACTION := $(filter pull push,$(MAKECMDGOALS))
+USER_WEB_OTHER_GOALS := $(filter-out user-web pull push,$(MAKECMDGOALS))
 
 ifneq ($(origin COMPONENT),undefined)
 $(error COMPONENT was removed; use direct targets: make web, make demo, or make esp)
 endif
 
-.PHONY: help build prepare-user-web web demo esp verify verify-web clean all test test-web deploy flash
+.PHONY: help build prepare-user-web user-web pull push web demo esp verify verify-web clean all test test-web deploy flash
 
 help:
 	@printf '%s\n' \
@@ -25,6 +29,8 @@ help:
 		'make build WEB=user                Rebuild user web plus firmware.' \
 		'make build WEB=none                Build firmware without a frontend.' \
 		'make prepare-user-web              Rebuild and import user-web-project.' \
+		'make user-web pull                 Pull the configured user-web subtree branch.' \
+		'make user-web push                 Push committed user-web subtree changes.' \
 		'make web [WEB=...] [WEB_PROCESS=...] Build production web only.' \
 		'make demo [WEB_PROCESS=...]        Build builtin mock demo only.' \
 		'make esp                           Build firmware from current production web.' \
@@ -51,6 +57,37 @@ build:
 prepare-user-web:
 	+@$(MAKE) -C $(USER_WEB_PROJECT) --no-print-directory build
 	$(PYTHON) $(WEB_TOOL) import-user --source "$(USER_WEB_LATEST)"
+
+user-web:
+	@test -z "$(USER_WEB_OTHER_GOALS)" || { \
+		echo "Unexpected user-web arguments: $(USER_WEB_OTHER_GOALS)" >&2; \
+		echo 'Usage: make user-web pull | make user-web push' >&2; exit 2; \
+	}
+	@case "$(USER_WEB_ACTION)" in \
+		pull) \
+			git remote get-url "$(USER_WEB_REMOTE)" >/dev/null 2>&1 || { \
+				echo "Missing Git remote '$(USER_WEB_REMOTE)'; see README for setup." >&2; exit 2; \
+			}; \
+			test -z "$$(git status --porcelain --untracked-files=normal)" || { \
+				echo 'Commit, stash, or remove worktree changes before pulling the user-web subtree.' >&2; exit 2; \
+			}; \
+			git subtree pull --prefix="$(USER_WEB_PROJECT)" "$(USER_WEB_REMOTE)" "$(USER_WEB_BRANCH)" --squash ;; \
+		push) \
+			git remote get-url "$(USER_WEB_REMOTE)" >/dev/null 2>&1 || { \
+				echo "Missing Git remote '$(USER_WEB_REMOTE)'; see README for setup." >&2; exit 2; \
+			}; \
+			test -z "$$(git status --porcelain --untracked-files=normal -- "$(USER_WEB_PROJECT)")" || { \
+				echo 'Commit, stash, or remove user-web-project changes before pushing its subtree.' >&2; exit 2; \
+			}; \
+			git subtree push --prefix="$(USER_WEB_PROJECT)" "$(USER_WEB_REMOTE)" "$(USER_WEB_BRANCH)" ;; \
+		*) \
+			echo 'Usage: make user-web pull | make user-web push' >&2; exit 2 ;; \
+	esac
+
+pull push:
+	@test "$(filter user-web,$(MAKECMDGOALS))" = user-web || { \
+		echo 'Use: make user-web pull | make user-web push' >&2; exit 2; \
+	}
 
 web:
 	$(PYTHON) $(WEB_TOOL) build --target production --web "$(WEB)" --process "$(WEB_PROCESS)"

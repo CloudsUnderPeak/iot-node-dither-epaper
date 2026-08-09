@@ -5,7 +5,7 @@
 ## Source of truth 與產物邊界
 
 - 本專案內建前端的功能、結構、樣式、文案與修正一律實作在 `builtin-web/`；它是內建 console 的唯一 source of truth。
-- `user-web-project/` 是產品 frontend source；其 `make build` 產生已 minify、deterministic gzip-only 的 `build/latest/`。`user-web/` 是主專案原子匯入該產物的 generated input，只保留 tracked `.gitignore`，內容預設不納入 Git且不得人工編輯或混放檔案。
+- `user-web-project/` 是產品 frontend source，並以 `--squash` Git subtree 追蹤 `embedded-web-dithering` remote 的 `six-color-epaper` branch；它不是 submodule，目錄內不應有獨立 `.git`。其 `make build` 產生已 minify、deterministic gzip-only 的 `build/latest/`。`user-web/` 是主專案原子匯入該產物的 generated input，只保留 tracked `.gitignore`，內容預設不納入 Git且不得人工編輯或混放檔案。
 - `build/latest/web/` 與各時間戳快照內的 `web/` 都是 generated output，不是實作位置，也不得手動修改。每次只建立 web 或 demo 時會用 web-only 結構替換 `build/latest/`，因此既有 `binary/` 與 `firmware.img` 必須一併失效。
 - 處理內建前端需求時，必須先在 `builtin-web/` 完成並確認 source change；產生 `build/`、檢查產物及執行 build verification 是其後獨立階段。`build/` 仍是舊內容只代表尚未重建，source preview 以 `builtin-web/index.html` 及其 `assets/` 為準。
 
@@ -147,6 +147,8 @@ builtin-web/
 - Builtin 所有 asset 使用相對 URL且不得依賴 CDN、remote font、remote icon、analytics 或其他外部資源。User frontend 允許外部資源；本地 asset 仍須存在，hash routing 可用但不提供 history fallback。
 - 動態 mDNS URL 是連回本機裝置的功能連結，不視為外部 dependency。
 - `make prepare-user-web` 只執行 nested build 與匯入；`make web WEB=user` 只消費最近一次成功 import，不重建 `user-web-project/`。`make clean` 完整清空 `user-web/` 產物但保留 `.gitignore`，且不刪除 `user-web-project/build/` 的時間戳歷史。
+- 每個 clone 必須在本機 Git config 設定 `embedded-web-dithering` remote：fetch URL 為 `https://github.com/CloudsUnderPeak/embedded-web-dithering.git`，push URL 建議為 `git@github.com:CloudsUnderPeak/embedded-web-dithering.git`。`make user-web pull` 在乾淨 worktree 執行 `git subtree pull --prefix=user-web-project embedded-web-dithering six-color-epaper --squash`，由 Git 建立 merge commit；既有 prefix commit `babf746` 只存在於此 branch，不能以 `master` 拉取，否則會倒退既有裝置管理頁。若有衝突，僅在 `user-web-project/` 解析後完成該 merge commit。
+- `make user-web push` 只在 `user-web-project/` 無未提交變更時執行 `git subtree push --prefix=user-web-project embedded-web-dithering six-color-epaper`。`user-web` target 只接受唯一動作 `pull` 或 `push`，缺少、重複或其他動作一律拒絕。先 pull、在該 prefix 修改、審閱並以獨立 parent commit 提交，再 push；此流程只從 commit history 輸出 subtree，不會推送未提交內容，也不會推送 `user-web/` 或 `build/` generated output。分支日後若改為 `master`，須先在上游合併或 rebase 目前 subtree history，並更新 `USER_WEB_BRANCH` 與本規格，不能只覆寫預設值。
 
 ## Preview 與 mock adapter
 

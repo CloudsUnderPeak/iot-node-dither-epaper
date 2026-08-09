@@ -89,6 +89,20 @@ This repository is both a complete application you can fork and a reusable ESP32
 - Develop the product frontend in `user-web-project/`. The default `make build`
   (and explicit `make build WEB=user`) rebuilds that project, atomically imports
   its minified gzip-only release into ignored `user-web/`, and bundles it.
+- `user-web-project/` is a Git subtree of
+  [`CloudsUnderPeak/embedded-web-dithering`](https://github.com/CloudsUnderPeak/embedded-web-dithering),
+  following its `six-color-epaper` branch. Configure this repository-local remote
+  once per clone, then use the Make targets below to sync it without using a submodule:
+
+  ```bash
+  git remote add embedded-web-dithering https://github.com/CloudsUnderPeak/embedded-web-dithering.git
+  git remote set-url --push embedded-web-dithering git@github.com:CloudsUnderPeak/embedded-web-dithering.git
+  ```
+
+  Pull before editing; commit only the intended `user-web-project/` change before
+  pushing. `make user-web pull` requires a clean worktree and creates the subtree
+  merge commit. `make user-web push` rejects uncommitted changes under that prefix,
+  pushes only its committed subtree history, and requires GitHub SSH write access.
 - Use `make build WEB=builtin` when the built-in console is required. `WEB=auto`
   remains available to consume an existing user import or fall back to builtin.
 - For API-only firmware, explicitly run `make build WEB=none`. This keeps all
@@ -104,6 +118,8 @@ make build WEB=builtin                  # Built-in frontend plus firmware
 make build WEB=user                     # Rebuild user frontend plus firmware
 make build WEB=none                     # Firmware without any frontend
 make prepare-user-web                   # Rebuild/import only user-web-project
+make user-web pull                      # Pull the six-color-epaper subtree branch
+make user-web push                      # Push committed subtree-only changes upstream
 make deploy WEB=none PORT=/dev/ttyACM0  # Build, verify, and flash API-only firmware
 make web [WEB=...] [WEB_PROCESS=...]    # Process frontend only
 make demo WEB_PROCESS=none              # Static mock demo under build/latest/web

@@ -33,6 +33,12 @@ resources; local references must exist. `make web WEB=user` consumes the most
 recent import without rebuilding it, while `make prepare-user-web` performs
 only the nested build and import. `WEB=auto` never selects `none`.
 
+`user-web-project/` is synced separately as the `embedded-web-dithering` Git
+subtree on the `six-color-epaper` branch. Run `make user-web pull` before
+frontend work and `make user-web push` only after committing the intended
+subtree change; see the root README for one-time remote and SSH setup. Neither
+target treats `user-web/` as source or transfers generated release output.
+
 ## Processing
 
 - `WEB_PROCESS=auto` (default): builtin uses `minify-gzip`; user and none use
@@ -50,6 +56,8 @@ processing and only the production target.
 
 ```bash
 make prepare-user-web
+make user-web pull
+make user-web push
 make web
 make web WEB=builtin
 make web WEB=user
