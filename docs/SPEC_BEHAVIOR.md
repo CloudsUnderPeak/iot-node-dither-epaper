@@ -4,13 +4,13 @@
 
 ## 產品定位
 
-本專案是供 ESP32 IoT 裝置延伸的 Wi-Fi 與基本裝置監控基石平台。它提供通用的 AP／STA mode 設定、斷線備援、設定保存與裝置狀態查詢，讓感測器、控制器、gateway 或其他產品能在穩定的連網基礎上加入自己的硬體與軟體功能。新手不需要先理解序列埠、NVS 或 provisioning，即可連上裝置預設 AP，透過內建網頁設定 Wi-Fi 並查看基本狀態。
+本專案是供 ESP32 IoT 裝置延伸的 Wi-Fi 與基本裝置監控基石平台。它提供通用的 AP／STA mode 設定、斷線備援、設定保存與裝置狀態查詢，讓感測器、控制器、gateway 或其他產品能在穩定的連網基礎上加入自己的硬體與軟體功能。新手不需要先理解序列埠、NVS 或 provisioning，即可連上裝置預設 AP，透過裝置網頁設定 Wi-Fi 並查看基本狀態。
 
 Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套能力必須能由下列入口重用：
 
 - 使用者操作內建網頁。
 - AI 或自動化工具直接呼叫 REST API。
-- 其他 ESP32 IoT 專案複用 Wi-Fi 與基本監控 foundation，並可透過 `user-web/` 包入自己的前端。
+- 其他 ESP32 IoT 專案複用 Wi-Fi 與基本監控 foundation，並可在 `user-web-project/` 開發自己的前端，由正式 build 匯入後包進 firmware。
 
 專案同時是可直接 fork 的完整 app 與可抽出的 IoT connectivity foundation。允許為復用性保留少量架構成本，但使用 foundation 的專案應只需最低程度修改。預設值應保持通用，不長期綁定特定開發板。
 
@@ -169,8 +169,8 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 
 ## 可替換與地端運作
 
-- Firmware source 不手寫 HTML；本專案預設前端在 `builtin-web/`，使用者可直接提供 `user-web/` 靜態產物。Release build 依 `WEB`／`WEB_PROCESS` 選擇與處理後，把 raw 或 gzip 靜態資源編譯進 `app0`，與韌體一起燒錄。
-- `WEB=auto` 維持既有選擇：有效 `user-web/` 優先，空的 `user-web/` 使用 builtin；不會因使用者沒有提供前端而自動變成 API-only。只有明確指定 `WEB=none` 才建立不含任何前端的 firmware，所有 REST／serial API 仍可使用，但 `/` 與 `/index.html` 回 404 `not_found`／`frontend not bundled`。
+- Firmware source 不手寫 HTML；產品前端在 `user-web-project/` 開發，`user-web/` 只保存其 generated import，內建管理頁則在 `builtin-web/`。預設 `make build` 與明確的 `make build WEB=user` 都先重建 user frontend、完整替換 `user-web/`，再把 gzip 靜態資源編譯進 `app0` 與韌體一起燒錄。
+- 預設 `WEB=user`；明確 `WEB=builtin` 使用內建管理頁，`WEB=auto` 只在已有有效 `user-web/` import 時選 user，否則使用 builtin，且不主動重建 user frontend。只有明確指定 `WEB=none` 才建立不含任何前端的 firmware，所有 REST／serial API 仍可使用，但 `/` 與 `/index.html` 回 404 `not_found`／`frontend not bundled`。
 - 替換頁只需遵守 REST API contract，不得依賴 firmware 內部 class。
 - Builtin／user build 的 AP IP 上必須可使用設定頁與 REST API；`WEB=none` 的 AP IP 只提供 REST API。寫入 API 仍受 session 保護。
 - 裝置及內建頁面不得依賴 CDN、雲端帳號或外部網際網路才能完成設定。

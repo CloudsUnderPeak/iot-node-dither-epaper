@@ -248,6 +248,11 @@ for required in (
     'choices=("production", "demo")',
     'choices=("auto", "builtin", "user", "none")',
     'choices=("auto", "minify-gzip", "none")',
+    '"import-user"',
+    '"clean-user"',
+    "def import_user_web(",
+    "def clean_user_web(",
+    "def replace_user_web(",
     "def select_source(",
     "def publish_latest(",
     "user_web_sha256",
@@ -266,18 +271,25 @@ for forbidden in ("platformio_core_dir", "def flash_release", "create_firmware_p
         raise SystemExit(1)
 for required in (
     "\nbuild:",
+    "\nprepare-user-web:",
     "\nweb:",
     "\ndemo:",
     "\nesp:",
     "\nverify-web:",
     "$(WEB_TOOL) build",
     "$(WEB_TOOL) verify",
+    "$(WEB_TOOL) import-user",
+    "$(WEB_TOOL) clean-user",
+    "$(MAKE) -C $(USER_WEB_PROJECT)",
     "$(RELEASE_TOOL) build",
     "WEB=none",
 ):
     if required not in makefile:
         print(f"Makefile is missing split build orchestration: {required}", file=sys.stderr)
         raise SystemExit(1)
+if "WEB ?= user" not in makefile:
+    print("Makefile must default full builds to the generated user frontend", file=sys.stderr)
+    raise SystemExit(1)
 for required in (
     '--target production --web "$(WEB)" --process "$(WEB_PROCESS)"',
     "--target demo --web builtin",

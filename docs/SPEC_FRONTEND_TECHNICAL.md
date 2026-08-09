@@ -5,7 +5,7 @@
 ## Source of truth 與產物邊界
 
 - 本專案內建前端的功能、結構、樣式、文案與修正一律實作在 `builtin-web/`；它是內建 console 的唯一 source of truth。
-- `user-web/` 接受使用者直接提供、可部署的完整靜態輸出；專案不替它執行 npm、Vite、React 或其他 framework build。資料夾由 tracked `.gitignore` 保留，內容預設不納入 Git。
+- `user-web-project/` 是產品 frontend source；其 `make build` 產生已 minify、deterministic gzip-only 的 `build/latest/`。`user-web/` 是主專案原子匯入該產物的 generated input，只保留 tracked `.gitignore`，內容預設不納入 Git且不得人工編輯或混放檔案。
 - `build/latest/web/` 與各時間戳快照內的 `web/` 都是 generated output，不是實作位置，也不得手動修改。每次只建立 web 或 demo 時會用 web-only 結構替換 `build/latest/`，因此既有 `binary/` 與 `firmware.img` 必須一併失效。
 - 處理內建前端需求時，必須先在 `builtin-web/` 完成並確認 source change；產生 `build/`、檢查產物及執行 build verification 是其後獨立階段。`build/` 仍是舊內容只代表尚未重建，source preview 以 `builtin-web/index.html` 及其 `assets/` 為準。
 
@@ -139,14 +139,14 @@ builtin-web/
 ## Firmware serving
 
 - `ApiServer` 從 app image 的 generated asset table 提供 `/`、`/index.html` 與 `/assets/...`。合法的無前端狀態不建立 asset；`/` 與 `/index.html` 回 404 `not_found`／`frontend not bundled`，其他靜態路徑維持一般 404。
-- `WEB=auto|builtin|user|none` 選擇來源；`auto` 在 `user-web/index.html` 或 `index.html.gz` 存在時選 user，空的 `user-web/` 選 builtin，若已有其他檔案卻沒有有效 index 則失敗。`auto` 不會選 none；只有明確 `WEB=none` 才建立 API-only firmware。Raw 與 `.gz` 對應到同一 logical path 時必須拒絕。
-- `WEB_PROCESS=auto|minify-gzip|none` 控制處理；`auto` 對 builtin 使用 `minify-gzip`，對 user／none 使用 `none`。Builtin 與 user 都可明確覆寫；none 只接受 `auto`／`none`。Precompressed user input 只可用 `none`，指定 `minify-gzip` 時必須提供可安全處理的 raw HTML/CSS/JavaScript。
-- `tools/web-build/` 是唯一 frontend output tool。Production builtin 不論 processing mode 都移除 PREVIEW block 與 preview directory；demo 只接受 builtin 並保留 preview；none 只接受 production，並發布空的 `build/latest/web/`。完成驗證後以 private staging 原子替換 `build/latest/web/` 與 `web-manifest.json`。
+- `WEB=user|auto|builtin|none` 選擇來源，Makefile 預設為 `user`。`make build` 與 `make build WEB=user` 必須先在 `user-web-project/` 執行 `make build`，驗證其 `build/latest/` 為含 `index.html.gz` 的 gzip-only 完整網站，再原子替換 `user-web/`；nested build 或驗證失敗時不得替換既有 import。`auto` 只消費既有 import：有 `user-web/index.html` 或 `index.html.gz` 時選 user，空目錄選 builtin，若已有其他檔案卻沒有有效 index則失敗。`auto` 不會選 none；只有明確 `WEB=none` 才建立 API-only firmware。Raw 與 `.gz` 對應到同一 logical path 時必須拒絕。
+- `WEB_PROCESS=auto|minify-gzip|none` 控制主專案處理；`auto` 對 builtin 使用 `minify-gzip`，對 user／none使用 `none`。Imported user frontend 已 precompressed，只接受 `auto` 或 `none`；明確指定 `minify-gzip` 必須拒絕。Builtin 可明確覆寫，none 只接受 `auto`／`none`。
+- `tools/web-build/` 是唯一 frontend output tool，負責原子匯入／清空 `user-web/` 及建立／驗證 `build/latest/web/`。Production builtin 不論 processing mode 都移除 PREVIEW block 與 preview directory；demo 只接受 builtin 並保留 preview；none 只接受 production，並發布空的 `build/latest/web/`。完成驗證後以 private staging 原子替換對應 generated directory。
 - `tools/release-build/` 只消費 `build/latest/` 內既有、已驗證且 target 為 production 的 web。Builtin／user 產生 generated C++ asset table並編入 `firmware.bin`；none 產生 count／payload 為零的安全 sentinel 及 null runtime hash。Demo 不得成為 embedded input。
 - `ApiServer` 依 logical URL 查找 raw 或 `.gz` storage entry並依 logical 副檔名回 MIME type。只有 gzip entry 回 `Content-Encoding: gzip` 與 `Vary: Accept-Encoding`；raw entry不加 encoding。兩者都回 `Cache-Control: no-store`，`/` 對應 `/index.html`。
 - Builtin 所有 asset 使用相對 URL且不得依賴 CDN、remote font、remote icon、analytics 或其他外部資源。User frontend 允許外部資源；本地 asset 仍須存在，hash routing 可用但不提供 history fallback。
 - 動態 mDNS URL 是連回本機裝置的功能連結，不視為外部 dependency。
-- User frontend 若使用 bundler，必須先在專案外完成，放入 `user-web/` 的內容要能直接部署。
+- `make prepare-user-web` 只執行 nested build 與匯入；`make web WEB=user` 只消費最近一次成功 import，不重建 `user-web-project/`。`make clean` 完整清空 `user-web/` 產物但保留 `.gitignore`，且不刪除 `user-web-project/build/` 的時間戳歷史。
 
 ## Preview 與 mock adapter
 
@@ -187,7 +187,7 @@ builtin-web/
 ## Dependency 與輸出
 
 - 不使用前端 framework、外部 font、裝飾性 raster image 或大型視覺 dependency。
-- 內建正式資源預設使用可重現的 minify 與 deterministic gzip pipeline；可明確指定 `WEB_PROCESS=none`。User frontend 預設保留 raw／precompressed輸入，只有使用者明確指定時才執行本專案的 minify/gzip。專案持久壓縮格式只允許 gzip，不加入 `.br`、zstd、xz、bzip2 或 ZIP；firmware package 的 TAR 僅是多檔案 container。
+- 內建正式資源預設使用可重現的 minify 與 deterministic gzip pipeline；可明確指定 `WEB_PROCESS=none`。User frontend 在 `user-web-project/` build 階段完成 minify 與 deterministic gzip，主專案保留其 precompressed import，不得再次處理。專案持久壓縮格式只允許 gzip，不加入 `.br`、zstd、xz、bzip2 或 ZIP；firmware package 的 TAR 僅是多檔案 container。
 - Source formatting 不受 release payload 大小驅動；source 以直接可執行與 code review 可讀性優先。
 - 每次主要改版量測正式資源、preview 與總大小，結果寫入 `tmp/verification/` 驗證紀錄，不寫入本 SPEC。
 
@@ -196,7 +196,7 @@ builtin-web/
 - 先完成並檢查 `builtin-web/` source，再進入 build／verification 階段；不得把 `build/` 是否同步當作 source change 是否完成的判準。
 - 修改內建前端後至少執行 `make web WEB=builtin` 與 `make verify-web`；需產生可燒錄 firmware 時執行 `make esp`，完整流程使用 `make build WEB=builtin`。不得以 source directory 直接建立正式 app image。
 - Production builtin 檢查 `build/latest/web/` 不含 `assets/js/preview/`、preview script entry 或 PREVIEW marker；`minify-gzip` output 必須只有有效 `.gz`，`none` output 可為 raw。
-- User fixture 必須各驗證 default `none` 與 opt-in `minify-gzip`；不完整的 user tree、raw/gzip logical collision、無有效 index、unsafe path 或無法處理的 compressed input必須安全失敗。
+- User import 必須驗證 nested output 含 `index.html.gz`、所有檔案皆為有效 gzip、無 symbolic link、raw/gzip logical collision、unsafe path 或遺失的本地 asset reference；任何失敗都不得替換既有 `user-web/`。另須驗證 `make clean` 只保留 `user-web/.gitignore`。
 - `make verify-web` 獨立確認 processed web 與 web manifest；`make verify` 同時確認 latest production web、binary manifest、所有 image hash、flat tar.gz `firmware.img` 與 web/firmware hash 關係。歷史快照使用 `make verify IMAGE=build/<timestamp>/firmware.img`。
 - 以 `file://builtin-web/index.html`、`build/latest/web/` 的 unprocessed demo 及本機 HTTP server在 mock flag 開啟時檢查 script load/runtime error、主要 view 與 mock state，並以 `?mock=0` 確認 adapter 可明確停用。
 - 執行 `make demo WEB_PROCESS=none` 與 `make verify-web`，確認靜態 demo保留 mock flag 與 adapter；GitHub Pages workflow 變更時檢查 YAML syntax 及官方 action contract。

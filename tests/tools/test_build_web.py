@@ -35,6 +35,7 @@ class WebBuildTest(unittest.TestCase):
         (self.user / ".gitignore").write_text("*\n!.gitignore\n", encoding="utf-8")
         self.patch = mock.patch.multiple(
             web,
+            ROOT=self.root,
             BUILTIN_SOURCE=self.builtin,
             USER_SOURCE=self.user,
             BUILD_ROOT=self.build,
@@ -201,6 +202,57 @@ class WebBuildTest(unittest.TestCase):
             (self.latest / "web/index.html.gz").read_bytes(),
             compressed,
         )
+
+    def test_import_user_web_atomically_replaces_generated_tree(self):
+        source = self.root / "user-web-project/build/latest"
+        source.mkdir(parents=True)
+        (source / "index.html.gz").write_bytes(
+            gzip.compress(b'<script src="app.js"></script>', mtime=0)
+        )
+        (source / "app.js.gz").write_bytes(
+            gzip.compress(b"const ready = true;\n", mtime=0)
+        )
+        (self.user / "stale.js.gz").write_bytes(gzip.compress(b"stale", mtime=0))
+
+        web.import_user_web(str(source))
+
+        self.assertTrue((self.user / ".gitignore").is_file())
+        self.assertTrue((self.user / "index.html.gz").is_file())
+        self.assertTrue((self.user / "app.js.gz").is_file())
+        self.assertFalse((self.user / "stale.js.gz").exists())
+        self.assertEqual(list((self.root / "tmp").iterdir()), [])
+
+    def test_import_rejects_raw_file_without_replacing_previous_tree(self):
+        source = self.root / "user-web-project/build/latest"
+        source.mkdir(parents=True)
+        (source / "index.html.gz").write_bytes(
+            gzip.compress(b'<script src="app.js"></script>', mtime=0)
+        )
+        (source / "app.js").write_text("const ready = true;\n", encoding="utf-8")
+        previous = gzip.compress(b"previous", mtime=0)
+        (self.user / "index.html.gz").write_bytes(previous)
+
+        with self.assertRaisesRegex(web.WebBuildError, "gzip-only"):
+            web.import_user_web(str(source))
+
+        self.assertEqual((self.user / "index.html.gz").read_bytes(), previous)
+        self.assertFalse((self.root / "tmp").exists())
+
+    def test_clean_user_web_preserves_only_gitignore(self):
+        (self.user / "index.html.gz").write_bytes(
+            gzip.compress(b"<html></html>", mtime=0)
+        )
+        nested = self.user / "assets/app.js.gz"
+        nested.parent.mkdir()
+        nested.write_bytes(gzip.compress(b"const ready = true;", mtime=0))
+
+        web.clean_user_web()
+
+        self.assertEqual(
+            [path.name for path in self.user.iterdir()],
+            [".gitignore"],
+        )
+        self.assertEqual(list((self.root / "tmp").iterdir()), [])
 
     def test_demo_is_builtin_and_can_be_unprocessed(self):
         self.write_builtin()

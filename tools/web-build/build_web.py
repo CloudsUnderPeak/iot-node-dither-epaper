@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and verify the selected frontend under build/latest/web."""
+"""Import, build, clean, and verify frontend assets."""
 
 from __future__ import annotations
 
@@ -85,16 +85,114 @@ def main() -> int:
         help="Optionally require a specific output target.",
     )
 
+    import_parser = subparsers.add_parser(
+        "import-user",
+        help="Atomically replace user-web with a gzip-only project build.",
+    )
+    import_parser.add_argument(
+        "--source",
+        required=True,
+        help="Directory containing the built user frontend.",
+    )
+
+    subparsers.add_parser(
+        "clean-user",
+        help="Remove generated user-web content while preserving .gitignore.",
+    )
+
     args = parser.parse_args()
     try:
         if args.command == "build":
             build_web(args.web, args.processing, args.target)
-        else:
+        elif args.command == "verify":
             verify_published_web(args.target)
+        elif args.command == "import-user":
+            import_user_web(args.source)
+        else:
+            clean_user_web()
     except (WebBuildError, OSError, UnicodeError, json.JSONDecodeError) as error:
         print(f"web-build: {error}", file=sys.stderr)
         return 1
     return 0
+
+
+def import_user_web(source_value: str) -> None:
+    source = Path(source_value)
+    if not source.is_absolute():
+        source = ROOT / source
+    source = source.resolve()
+    if source == USER_SOURCE.resolve():
+        raise WebBuildError("user frontend import source must not be user-web")
+
+    validate_source_tree(source, "imported-user")
+    if not (source / "index.html.gz").is_file():
+        raise WebBuildError("imported user frontend must contain index.html.gz")
+    raw_file = next(
+        (path for path in source_files(source) if path.suffix.lower() != ".gz"),
+        None,
+    )
+    if raw_file is not None:
+        raise WebBuildError(
+            "imported user frontend must be gzip-only; "
+            f"raw file found: {display_path(raw_file)}"
+        )
+    verify_output(source, "production", "user", "none")
+    replace_user_web(source)
+    print(f"Imported user web: {display_path(source)} -> {display_path(USER_SOURCE)}")
+    print(f"Imported user files: {len(source_files(USER_SOURCE))}")
+
+
+def clean_user_web() -> None:
+    clean_stale_user_web_transactions()
+    replace_user_web(None)
+    print(f"Cleaned generated user web: {display_path(USER_SOURCE)}")
+
+
+def clean_stale_user_web_transactions() -> None:
+    transaction_root = ROOT / "tmp"
+    if not transaction_root.is_dir():
+        return
+    for path in transaction_root.glob("user-web-transaction-*"):
+        if path.is_dir() and not path.is_symlink():
+            if (path / "previous").exists():
+                raise WebBuildError(
+                    "user-web recovery data requires manual inspection: "
+                    f"{display_path(path)}"
+                )
+            shutil.rmtree(path)
+
+
+def replace_user_web(source: Path | None) -> None:
+    marker = USER_SOURCE / ".gitignore"
+    if not marker.is_file():
+        raise WebBuildError("user-web/.gitignore is missing")
+
+    transaction_root = ROOT / "tmp"
+    transaction_root.mkdir(parents=True, exist_ok=True)
+    transaction = Path(
+        tempfile.mkdtemp(prefix="user-web-transaction-", dir=transaction_root)
+    )
+    stage = transaction / "user-web"
+    backup = transaction / "previous"
+    moved_previous = False
+    published = False
+    try:
+        if source is None:
+            stage.mkdir()
+        else:
+            copy_source(source, stage, "user", "production")
+        shutil.copy2(marker, stage / ".gitignore")
+        os.replace(USER_SOURCE, backup)
+        moved_previous = True
+        os.replace(stage, USER_SOURCE)
+        published = True
+    except Exception:
+        if moved_previous and backup.exists() and not USER_SOURCE.exists():
+            os.replace(backup, USER_SOURCE)
+        raise
+    finally:
+        if transaction.exists() and (published or not backup.exists()):
+            shutil.rmtree(transaction)
 
 
 def build_web(

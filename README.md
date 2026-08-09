@@ -86,9 +86,11 @@ After flashing, connect to a Wi-Fi network named like `esp32-device-XXXX`, then 
 This repository is both a complete application you can fork and a reusable ESP32 Wi-Fi foundation:
 
 - Edit `builtin-web/` when changing this project's built-in console.
-- Put a complete, directly deployable frontend in ignored `user-web/`, then run
-  `make build WEB=user`. With the default `WEB=auto`, a valid user frontend is
-  selected automatically; otherwise the built-in console is used.
+- Develop the product frontend in `user-web-project/`. The default `make build`
+  (and explicit `make build WEB=user`) rebuilds that project, atomically imports
+  its minified gzip-only release into ignored `user-web/`, and bundles it.
+- Use `make build WEB=builtin` when the built-in console is required. `WEB=auto`
+  remains available to consume an existing user import or fall back to builtin.
 - For API-only firmware, explicitly run `make build WEB=none`. This keeps all
   REST and serial APIs but does not serve a setup page.
 - Build product features on top of the existing authentication, configuration, and REST API foundation.
@@ -97,26 +99,28 @@ This repository is both a complete application you can fork and a reusable ESP32
 Common development commands:
 
 ```bash
-make build                              # Auto-select web and build a full snapshot
+make build                              # Rebuild user web and a full firmware snapshot
 make build WEB=builtin                  # Built-in frontend plus firmware
-make build WEB=user                     # User frontend plus firmware
+make build WEB=user                     # Rebuild user frontend plus firmware
 make build WEB=none                     # Firmware without any frontend
+make prepare-user-web                   # Rebuild/import only user-web-project
 make deploy WEB=none PORT=/dev/ttyACM0  # Build, verify, and flash API-only firmware
 make web [WEB=...] [WEB_PROCESS=...]    # Process frontend only
 make demo WEB_PROCESS=none              # Static mock demo under build/latest/web
 make esp                                # Firmware from current production web
 make verify [IMAGE=build/.../firmware.img]
 make flash PORT=/dev/ttyACM0 [IMAGE=...] # Flash an existing verified snapshot
-make clean                              # Remove latest; keep timestamp snapshots
+make clean                              # Remove latest and imported user web; keep snapshots
 make clean all                          # Remove latest and timestamp snapshots
 make test                               # Build and run all automated tests
 make test-web                           # Run frontend browser contracts
 ```
 
-`WEB_PROCESS=auto` minifies and gzips the built-in frontend, while preserving a
-user frontend as supplied and selecting no processing for `WEB=none`. Set it
-explicitly to `minify-gzip` or `none` to override supported frontend builds.
-`WEB=auto` never selects the no-frontend mode.
+`user-web/` is generated and must not be edited manually. Its nested build is
+already minified and gzipped, so `WEB_PROCESS=auto` preserves it (`none`), while
+the built-in frontend resolves to `minify-gzip`. Explicitly applying
+`minify-gzip` to the precompressed user import is rejected. `WEB=auto` never
+selects the no-frontend mode.
 
 Every complete firmware build creates an immutable Taipei-time snapshot and
 replaces `latest/` with an identical real copy:

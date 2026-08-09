@@ -1,9 +1,9 @@
 # Frontend build
 
-`build_web.py` is the only frontend output tool. It selects the tracked
-`builtin-web/` console, a complete user-supplied static site under ignored
-`user-web/`, or an explicit no-frontend production state; validates it; and
-atomically replaces:
+`build_web.py` is the only frontend output tool. It imports the tracked
+`user-web-project/` release into ignored `user-web/`, selects that generated
+frontend, the tracked `builtin-web/` console, or an explicit no-frontend
+production state, validates it, and atomically replaces:
 
 ```text
 build/latest/
@@ -17,16 +17,21 @@ snapshot.
 
 ## Source selection
 
-- `WEB=auto` (default): use user web when `user-web/index.html` or
+- `WEB=user` (default from the Makefile): `make build` and
+  `make build WEB=user` first rebuild `user-web-project/`, atomically import its
+  gzip-only `build/latest/` into `user-web/`, then use that frontend.
+- `WEB=auto`: use user web when `user-web/index.html` or
   `index.html.gz` exists; otherwise use builtin web.
 - `WEB=builtin`: require and use `builtin-web/`.
 - `WEB=user`: require and use `user-web/`.
 - `WEB=none`: publish an empty production `web/` for API-only firmware.
 
-A nonempty `user-web/` without an index is an error. Raw and `.gz` files that
-map to the same logical URL are also rejected. User web may reference external
-resources; local references must exist. The tool does not run npm, Vite,
-React, or another application build. `WEB=auto` never selects `none`.
+`user-web/` is generated import state and must not be edited manually. A
+nonempty directory without an index is an error. Raw and `.gz` files that map
+to the same logical URL are also rejected. User web may reference external
+resources; local references must exist. `make web WEB=user` consumes the most
+recent import without rebuilding it, while `make prepare-user-web` performs
+only the nested build and import. `WEB=auto` never selects `none`.
 
 ## Processing
 
@@ -44,13 +49,22 @@ processing and only the production target.
 ## Commands
 
 ```bash
+make prepare-user-web
 make web
 make web WEB=builtin
 make web WEB=user
 make web WEB=none
-make web WEB=user WEB_PROCESS=minify-gzip
+make web WEB=user WEB_PROCESS=none
 make verify-web
 ```
+
+The nested project build minifies and deterministically compresses every file,
+so the imported tree must contain `index.html.gz` and gzip-only files. The main
+pipeline therefore consumes it with `WEB_PROCESS=auto` (resolved to `none`) or
+explicit `WEB_PROCESS=none`; `WEB_PROCESS=minify-gzip` rejects this
+precompressed input. `make clean` removes imported `user-web/` content while
+preserving its tracked `.gitignore`, but does not remove timestamped output
+under `user-web-project/build/`.
 
 The demo always uses builtin web and retains the mock adapter. Its normal
 default remains minify plus gzip; use unprocessed output for ordinary static

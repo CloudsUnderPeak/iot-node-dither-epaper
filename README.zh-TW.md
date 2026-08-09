@@ -64,7 +64,7 @@ Password: password
 
 ## 快速開始
 
-環境需要 GNU Make、Python 3 與 PlatformIO CLI。建立內建網頁、firmware 與可燒錄 image：
+環境需要 GNU Make、Python 3 與 PlatformIO CLI。建立產品網頁、firmware 與可燒錄 image：
 
 ```bash
 make build
@@ -85,10 +85,12 @@ make deploy PORT=/dev/ttyACM0
 
 這個 repository 同時是一個可直接 fork 的完整應用，以及可抽出的 ESP32 Wi-Fi foundation：
 
-- 修改本專案預設管理頁時，請編輯 `builtin-web/`。
-- 若要使用自己的前端，把可直接部署的完整靜態檔放進被忽略的
-  `user-web/`，再執行 `make build WEB=user`。預設 `WEB=auto` 會在
-  user frontend 有效時自動選用，否則使用內建前端。
+- 修改本專案內建管理頁時，請編輯 `builtin-web/`。
+- 產品前端在 `user-web-project/` 開發。預設 `make build`（以及明確的
+  `make build WEB=user`）會先重建該專案，再把 minify、gzip-only 的正式
+  產物原子匯入被忽略的 `user-web/` 並包入 firmware。
+- 需要內建管理頁時使用 `make build WEB=builtin`。`WEB=auto` 仍可消費
+  既有 user import，沒有有效 import 時則退回 builtin。
 - 若要建立只提供 API 的 firmware，明確執行 `make build WEB=none`；
   REST 與 serial API 仍可使用，但不提供設定頁。
 - 想加入產品功能，可沿用既有登入、設定與 REST API 基礎。
@@ -97,25 +99,27 @@ make deploy PORT=/dev/ttyACM0
 常用開發命令：
 
 ```bash
-make build                              # 自動選擇前端並建立完整快照
+make build                              # 重建 user web 與完整 firmware 快照
 make build WEB=builtin                  # 內建前端加 firmware
-make build WEB=user                     # 使用者前端加 firmware
+make build WEB=user                     # 重建使用者前端加 firmware
 make build WEB=none                     # 不含任何前端的 firmware
+make prepare-user-web                   # 只重建並匯入 user-web-project
 make deploy WEB=none PORT=/dev/ttyACM0  # 建置、驗證並燒錄 API-only firmware
 make web [WEB=...] [WEB_PROCESS=...]    # 只處理前端
 make demo WEB_PROCESS=none              # 建立 build/latest/web 靜態 Demo
 make esp                                # 由目前正式 web 建立 firmware
 make verify [IMAGE=build/.../firmware.img]
 make flash PORT=/dev/ttyACM0 [IMAGE=...] # 燒錄已驗證的既有快照
-make clean                              # 移除 latest，保留時間戳快照
+make clean                              # 移除 latest 與匯入的 user web，保留快照
 make clean all                          # 移除 latest 與所有時間戳快照
 make test                               # 建置並執行全部自動化測試
 make test-web                           # 執行前端瀏覽器契約測試
 ```
 
-`WEB_PROCESS=auto` 對內建前端預設執行 minify 與 gzip，對使用者前端則
-保留原樣，`WEB=none` 不做處理；支援前端的 build 也可明確指定
-`minify-gzip` 或 `none` 覆寫。`WEB=auto` 永遠不會自動選擇無前端模式。
+`user-web/` 是 generated output，不應手動編輯。子專案產物已完成 minify
+與 gzip，因此 `WEB_PROCESS=auto` 對它解析為 `none` 並保留原樣；內建前端
+則解析為 `minify-gzip`。對 precompressed user import 明確指定
+`minify-gzip` 會被拒絕。`WEB=auto` 永遠不會自動選擇無前端模式。
 
 每次完整 firmware build 都會建立不可變的台北時間快照，並以內容完全
 相同的實體副本替換 `latest/`：

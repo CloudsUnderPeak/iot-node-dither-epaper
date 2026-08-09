@@ -22,7 +22,7 @@ Record build, flash, filesystem upload, browser checks, and board smoke-test res
 
 Before changing the built-in setup UI, read `docs/SPEC_FRONTEND_BEHAVIOR.md` and `docs/SPEC_FRONTEND_TECHNICAL.md`; keep `builtin-web/index.html` as structure only and put styling, state, i18n, API client, views, and feature actions under `builtin-web/assets/`.
 
-For every built-in frontend change, edit only the source under `builtin-web/`. Treat `user-web/` as user-supplied input and `build/latest/web/` as generated output; never implement or repair a frontend requirement by editing generated files, and never use stale build output to judge whether the source change was made.
+For every built-in frontend change, edit only the source under `builtin-web/`. Treat `user-web-project/` as the user frontend source, `user-web/` as its generated import, and `build/latest/web/` as generated output; never implement or repair a frontend requirement by editing generated files, and never use stale build output to judge whether the source change was made.
 
 Before adding or changing REST/serial API behavior, read `docs/SPEC_API_REFERENCE.md` and `docs/SPEC_TECHNICAL.md`; keep API business logic in `ApiRouter` and use `ApiServer`/`ConsoleShell` only as adapters.
 
