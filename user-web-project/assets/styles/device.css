@@ -1,4 +1,4 @@
-/* 裝置管理頁（device-info / device-network / device-system）與共用 modal、notice 樣式。
+/* 裝置管理頁（device-info / device-network / device-system / device-epaper-test）與共用 modal、notice 樣式。
    依既有慣例以載入順序拆檔：本檔排在 components.css 之後，只覆蓋裝置頁需要的部分。
    視覺語言對齊 Dither Editor：卡片用 panel-section（h2 標題列＋panel-body），
    表單用 control-row 式左標籤密度，輸入框與字級沿用編輯器的 34px／12-14px 階。 */
@@ -41,8 +41,6 @@
 [data-tool-panel="palette"].is-target-locked { opacity: 1; }
 
 [data-tool-panel="palette"].is-target-locked .control-row { opacity: 0.72; }
-
-.epaper-test-actions { flex-wrap: wrap; margin-top: 18px; }
 
 /* 卡片標題列可容納右側 badge／總空間；h2 交回 flex 排版，不用 panel-section 預設內距。 */
 .device-card-header {

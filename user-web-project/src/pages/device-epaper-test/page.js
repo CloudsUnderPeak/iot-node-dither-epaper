@@ -6,6 +6,16 @@
         return app.i18n.t(key, replacements);
     }
 
+    function field(labelKey, valueNode) {
+        return app.utils.dom.el('div', {
+            className: 'device-field',
+            children: [
+                app.utils.dom.el('div', { className: 'device-field-label', text: t(labelKey) }),
+                valueNode
+            ]
+        });
+    }
+
     function actionButton(key, action) {
         var button = app.utils.dom.el('button', {
             className: action === 'refresh' ? 'secondary-button' : 'primary-button',
@@ -28,10 +38,16 @@
         }
         var status = snapshot.status || {};
         var stored = status.stored_image || {};
-        refs.state.textContent = t('epaperStateLabel') + ': ' + (status.state || '—');
-        refs.stored.textContent = stored.available && stored.valid
-            ? t('epaperStoredImageAvailable')
-            : t('epaperStoredImageMissing');
+        var panel = snapshot.capabilities && snapshot.capabilities.panel || {};
+        refs.panel.textContent = panel.model
+            ? t('epaperPanelSummary', {
+                model: panel.model,
+                width: panel.width,
+                height: panel.height,
+                colors: panel.colors
+            })
+            : '—';
+        refs.state.textContent = status.state || '—';
         var capabilities = snapshot.capabilities && snapshot.capabilities.capabilities || {};
         var enabled = app.device.epaper.canDraw();
         refs.buttons.white.disabled = !enabled || capabilities.white === false;
@@ -43,7 +59,7 @@
         if (snapshot.cooldownRemainingSeconds) {
             refs.cooldown.textContent = t('epaperCooldownButton', { seconds: snapshot.cooldownRemainingSeconds });
         } else {
-            refs.cooldown.textContent = '';
+            refs.cooldown.textContent = t('epaperCooldownNone');
         }
     }
 
@@ -53,11 +69,11 @@
         mount: function mount(container) {
             refs = { buttons: {} };
             refs.notice = app.ui.createNotice();
+            refs.panel = app.utils.dom.el('div', { className: 'device-field-value' });
             refs.state = app.utils.dom.el('div', { className: 'device-field-value' });
-            refs.stored = app.utils.dom.el('div', { className: 'device-hint' });
-            refs.cooldown = app.utils.dom.el('div', { className: 'device-hint' });
+            refs.cooldown = app.utils.dom.el('div', { className: 'device-field-value' });
             var actions = app.utils.dom.el('div', {
-                className: 'device-actions epaper-test-actions',
+                className: 'device-actions',
                 children: [
                     actionButton('epaperActionWhite', 'white'),
                     actionButton('epaperActionPalette', 'palette'),
@@ -67,15 +83,36 @@
             container.appendChild(app.utils.dom.el('section', {
                 className: 'device-page',
                 children: [
-                    app.utils.dom.el('h1', { text: t('deviceEpaperTestTitle') }),
-                    app.utils.dom.el('p', { className: 'device-hint', text: t('epaperTestHint') }),
                     refs.notice.node,
                     app.utils.dom.el('section', {
-                        className: 'panel-section',
-                        children: [app.utils.dom.el('div', {
-                            className: 'panel-body device-card-body',
-                            children: [refs.state, refs.stored, refs.cooldown, actions]
-                        })]
+                        className: 'panel-section device-gate',
+                        children: [
+                            app.utils.dom.el('h2', { text: t('epaperStatusCardTitle') }),
+                            app.utils.dom.el('div', {
+                                className: 'panel-body device-card-body',
+                                children: [app.utils.dom.el('div', {
+                                    className: 'device-grid',
+                                    children: [
+                                        field('epaperPanelLabel', refs.panel),
+                                        field('epaperStateLabel', refs.state),
+                                        field('epaperCooldownLabel', refs.cooldown)
+                                    ]
+                                })]
+                            })
+                        ]
+                    }),
+                    app.utils.dom.el('section', {
+                        className: 'panel-section device-gate',
+                        children: [
+                            app.utils.dom.el('h2', { text: t('epaperDiagnosticsCardTitle') }),
+                            app.utils.dom.el('div', {
+                                className: 'panel-body device-card-body',
+                                children: [
+                                    app.utils.dom.el('div', { className: 'device-hint', text: t('epaperTestHint') }),
+                                    actions
+                                ]
+                            })
+                        ]
                     })
                 ]
             }));

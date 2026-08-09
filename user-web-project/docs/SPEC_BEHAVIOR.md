@@ -11,10 +11,11 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-08-10: 「電子紙測試」更名為「面板測試」並對齊其他裝置頁版型：移除頁內重複大標題，狀態卡只顯示面板、狀態與冷卻資訊，診斷卡顯示說明與三個操作；卡片、欄位層級、間距、離線反灰與行動列均沿用裝置管理共用樣式。
 - 2026-08-09: 電子紙肉眼校色改為實體參考色模型：網頁色票與抖動皆使用面板在真實世界呈現的 `DISPLAY_COLORS`（A′）做色距、選色與誤差擴散；送出前再依固定 palette index 轉成裝置協定 `OUTPUT_COLORS`（A），使網頁 Result 與實體面板視覺對齊而不改變 EPDIMG contract。
 - 2026-08-09: E-paper 繪製／測試操作 overlay 改為沿用 App 啟動 loading 的主題遮罩、64px spinner、accent 色、文字與進度條視覺；電子紙既有的 phase 文案、獨立百分比與時間加權進度行為不變。
 - 2026-08-09: 修正 E-paper 實機操作回饋：固定色票不再顯示新增／刪除或可編輯狀態；同一個硬體 phase 的重複 status 不重設進度計時，超過預估時間仍漸近前進；cooldown 顯示實際秒數，歸零後主動密集確認 server `can_draw`。另將網頁 DISPLAY 六色與 EPDIMG OUTPUT 純六色分離，讓肉眼校色只影響畫面預覽。
-- 2026-08-09: 新增 E-paper Device Mode：`/api/alive` 與 `/api/epaper` 確認裝置能力後，Dither Editor 只允許 5:3/800×480 或 3:5/480×800、固定 E6 六色；portrait 正式輸出依實際尺寸順時針旋轉成韌體 800×480 EPDIMG，Export PNG 改為繪製到電子紙。繪製與電子紙測試 action 共用 blocking overlay、時間加權 phase progress、single-operation admission 與 180 秒 cooldown；Menu 新增電子紙測試頁，提供空白、六色測試圖與重新繪製目前圖片。
+- 2026-08-09: 新增 E-paper Device Mode：`/api/alive` 與 `/api/epaper` 確認裝置能力後，Dither Editor 只允許 5:3/800×480 或 3:5/480×800、固定 E6 六色；portrait 正式輸出依實際尺寸順時針旋轉成韌體 800×480 EPDIMG，Export PNG 改為繪製到電子紙。繪製與面板測試 action 共用 blocking overlay、時間加權 phase progress、single-operation admission 與 180 秒 cooldown；Menu 新增面板測試頁，提供空白、六色測試圖與重新繪製目前圖片。
 - 2026-07-29: 網路頁連線狀態卡的每欄開頭加上 feature icon（STA=Wi-Fi、AP=訊號、mDNS=地球，accent 底色方塊，比照 builtin-web Interface status），桌面與手機皆顯示。
 - 2026-07-29: 「系統設定」更名為「裝置設定」（英文 Device Setting），Menu 與頁名同步；假資料標示簡化為「PREVIEW」；手機模式下「裝置資訊」的裝置欄位逐項分排，每列為左標籤＋右側值（比照表單的左標籤欄）；「網路」的連線狀態逐項分排為 icon＋文字塊，不再併欄也不留空白區塊。
 - 2026-07-29: Web Setting 比照裝置頁改版為編輯器面板樣式：移除頁內大標題（頁名由 header 顯示），主題與語言改為兩張緊湊卡片（標題列＋內容區），與裝置頁同寬置中。
@@ -376,7 +377,7 @@ Acceptance:
 App 由一個固定外殼承載多個頁面：
 
 - `Dither Editor` 是預設主頁。
-- `裝置資訊`、`網路`、`裝置設定` 組成 Menu 的「裝置管理」群組；確認 e-paper capability 後，同群組另顯示「電子紙測試」。
+- `裝置資訊`、`網路`、`裝置設定` 組成 Menu 的「裝置管理」群組；確認 e-paper capability 後，同群組另顯示「面板測試」。
 - `Web Setting` 用於一般網頁設定，例如主題。
 - `Help` 用於使用說明。
 - `About` 用於產品資訊。
@@ -468,7 +469,7 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
 - 固定六色以實體面板肉眼呈現的校色值 A′ 供網頁 Result、最近色判斷與 dither 誤差擴散使用；正式繪製時依六色固定 index 轉回裝置認得的協定色 A。調整校色值應改變網頁預覽與抖動選色，但不得改變硬體 color code。
 - 原 `Export PNG` 按鈕在此模式顯示「繪製到電子紙」。繪製完成進入 cooldown 後，全頁操作鎖解除，但 action 顯示實際剩餘秒數並維持 disabled；本地倒數歸零即密集向 server 確認，`can_draw` 恢復後立即啟用。
 - 全域操作 overlay 使用 spinner、目前 phase、percentage 與 progress bar。Percentage 是前端依預估時間插值的進度提示，不是 panel telemetry；`refreshing` 是最大區間，同一 phase 的重複 polling 不可重設計時，phase 超時後仍漸近移動，server 進入 cooldown success 才顯示 100%。
-- 「電子紙測試」頁只在 session 已確認 capability 後出現在 Menu；公開且不要求登入。頁面顯示 panel/status/stored image/cooldown，並提供：
+- 「面板測試」頁只在 session 已確認 capability 後出現在 Menu；公開且不要求登入。頁名只由 app header 顯示；內容以「電子紙狀態」卡呈現 panel/status/cooldown，並以「面板診斷」卡提供：
   - 顯示空白：`POST /api/epaper/image/white`，不寫 stored image。
   - 顯示六色測試圖：`POST /api/epaper/image/palette`，不寫 stored image。
   - 重新繪製目前圖片：`POST /api/epaper/image/refresh`，stored image 不存在或無效時不可操作。
