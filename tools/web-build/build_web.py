@@ -602,7 +602,11 @@ def write_json(path: Path, value: dict) -> None:
 
 def tree_sha256(root: Path, *, ignore_gitignore: bool = False) -> str:
     digest = hashlib.sha256()
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+    files = (item for item in root.rglob("*") if item.is_file())
+    for path in sorted(
+        files,
+        key=lambda item: item.relative_to(root).as_posix().encode("utf-8"),
+    ):
         relative_path = path.relative_to(root)
         if ignore_gitignore and relative_path == Path(".gitignore"):
             continue

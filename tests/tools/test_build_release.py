@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import importlib.util
 import json
 import tarfile
@@ -405,6 +406,22 @@ class ReleaseBuildTest(unittest.TestCase):
         self.assertEqual(release.tree_sha256(left), release.tree_sha256(right))
         (right / "a.txt").write_bytes(b"changed")
         self.assertNotEqual(release.tree_sha256(left), release.tree_sha256(right))
+
+    def test_tree_hash_uses_utf8_path_order_on_every_host(self):
+        root = self.root / "case-order"
+        root.mkdir()
+        (root / "a.txt").write_bytes(b"lower")
+        (root / "Z.txt").write_bytes(b"upper")
+
+        digest = hashlib.sha256()
+        for name, content in (("Z.txt", b"upper"), ("a.txt", b"lower")):
+            relative = name.encode("utf-8")
+            digest.update(len(relative).to_bytes(4, "big"))
+            digest.update(relative)
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+
+        self.assertEqual(release.tree_sha256(root), digest.hexdigest())
 
 
 if __name__ == "__main__":
