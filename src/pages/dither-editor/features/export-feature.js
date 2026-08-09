@@ -28,6 +28,10 @@
                 ]
             });
             exportButton.addEventListener('click', function () {
+                if (app.pages.ditherEditor.targetPolicy.isEpaper(context.controller.state)) {
+                    context.controller.drawEpaper();
+                    return;
+                }
                 if (context.controller.state.status === 'exporting') {
                     context.controller.cancelExport();
                 } else {
@@ -46,7 +50,15 @@
                 return;
             }
             var exporting = context.state.status === 'exporting';
-            actionRefs.label.textContent = exporting ? ui.t('actionCancelExport') : ui.t('actionExport');
+            var epaper = app.pages.ditherEditor.targetPolicy.isEpaper(context.state);
+            var snapshot = app.device.epaper.snapshot();
+            actionRefs.label.textContent = epaper
+                ? (snapshot.cooldownRemainingSeconds
+                    ? ui.t('epaperCooldownButton', { seconds: snapshot.cooldownRemainingSeconds })
+                    : ui.t('actionDrawEpaper'))
+                : (exporting ? ui.t('actionCancelExport') : ui.t('actionExport'));
+            actionRefs.button.disabled = epaper && !app.device.epaper.canDraw();
+            actionRefs.button.setAttribute('aria-disabled', actionRefs.button.disabled ? 'true' : 'false');
             actionRefs.button.classList.toggle('is-exporting', exporting);
         },
         dispose: function dispose() {

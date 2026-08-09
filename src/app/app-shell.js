@@ -75,6 +75,7 @@
             setStatus: this.setStatus.bind(this)
         });
         this.menu = new app.app.AppMenu(this.menuButton, this.router.navigate.bind(this.router));
+        this.epaperOverlay = new app.ui.EpaperOperationOverlay();
     }
 
     // 頁面切換時更新中央標題。
@@ -96,6 +97,10 @@
         // 裝置連線狀態改變時，用最後一次頁面狀態重新合成圓點。
         app.device.live.subscribe(function () {
             renderStatus(self.statusNode, self.lastStatus);
+        });
+        app.device.epaper.subscribe(function () {
+            self.menuButton.disabled = Boolean(app.app.state.blockingOperation);
+            self.menu.render();
         });
         this.router.start('dither-editor');
     };

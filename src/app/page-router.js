@@ -29,6 +29,12 @@
     PageRouter.prototype.navigate = function navigate(route, options) {
         options = options || {};
         route = this.normalizeRoute(route);
+        if (app.app.state.blockingOperation && this.currentRoute && route !== this.currentRoute) {
+            if (options.fromHistory) {
+                this.writeHistory(this.currentRoute, true);
+            }
+            return false;
+        }
         var pageId = this.pageIdFromRoute(route);
         var page = app.app.pageRegistry.get(pageId);
         if (!page) {
@@ -59,6 +65,7 @@
         if (!options.fromHistory) {
             this.writeHistory(route, options.replace);
         }
+        return true;
     };
 
     // 瀏覽器返回/前進時不新增 history，只依當前 URL 切頁。

@@ -756,6 +756,11 @@ body.is-app-loading #app {
     cursor: pointer;
 }
 
+.palette-swatches.is-fixed-palette .palette-color-input {
+    cursor: default;
+    opacity: 1;
+}
+
 .palette-color-input::-webkit-color-swatch-wrapper {
     padding: 0;
 }

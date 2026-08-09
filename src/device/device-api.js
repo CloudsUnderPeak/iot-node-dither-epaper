@@ -54,6 +54,11 @@
         if (options.json !== undefined) {
             headers['Content-Type'] = 'application/json';
             init.body = JSON.stringify(options.json);
+        } else if (options.body !== undefined) {
+            if (options.contentType) {
+                headers['Content-Type'] = options.contentType;
+            }
+            init.body = options.body;
         }
         var timeoutId = null;
         if (typeof AbortController === 'function') {
@@ -105,11 +110,24 @@
 
     // 常見 error code 轉成使用者語言；API message 只作 fallback。
     app.device.errorText = function errorText(error) {
+        var errorKeys = {
+            epaper_busy: 'epaperErrorBusy',
+            invalid_epaper_image: 'epaperErrorInvalidImage',
+            epaper_image_not_found: 'epaperErrorImageNotFound',
+            epaper_unavailable: 'epaperErrorUnavailable',
+            storage_busy: 'epaperErrorStorageBusy',
+            storage_unavailable: 'epaperErrorStorageUnavailable',
+            insufficient_storage: 'epaperErrorInsufficientStorage',
+            storage_error: 'epaperErrorStorage'
+        };
         if (error && error.code === 'transport_error') {
             return app.i18n.t('deviceErrorUnreachable');
         }
         if (error && error.code === 'unauthorized') {
             return app.i18n.t('deviceSessionExpired');
+        }
+        if (error && errorKeys[error.code]) {
+            return app.i18n.t(errorKeys[error.code]);
         }
         if (error && error.message) {
             return error.message;
@@ -136,6 +154,29 @@
             },
             storage: function storage() {
                 return request('GET', 'api/storage', { auth: false });
+            },
+            epaperCapabilities: function epaperCapabilities() {
+                return request('GET', 'api/epaper', { auth: false, timeoutMs: 4000 });
+            },
+            epaperStatus: function epaperStatus() {
+                return request('GET', 'api/epaper/status', { auth: false, timeoutMs: 4000 });
+            },
+            epaperUpload: function epaperUpload(payload) {
+                return request('POST', 'api/epaper/image', {
+                    auth: false,
+                    body: payload,
+                    contentType: 'application/octet-stream',
+                    timeoutMs: 30000
+                });
+            },
+            epaperWhite: function epaperWhite() {
+                return request('POST', 'api/epaper/image/white', { auth: false, timeoutMs: 10000 });
+            },
+            epaperPalette: function epaperPalette() {
+                return request('POST', 'api/epaper/image/palette', { auth: false, timeoutMs: 10000 });
+            },
+            epaperRefresh: function epaperRefresh() {
+                return request('POST', 'api/epaper/image/refresh', { auth: false, timeoutMs: 10000 });
             },
             wifi: function wifi() {
                 return request('GET', 'api/wifi', { auth: false });

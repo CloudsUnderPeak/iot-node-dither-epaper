@@ -190,7 +190,10 @@
             var crop = state.settings.crop;
             var aspectRatioInput = ui.selectInput(
                 crop.aspectRatioId,
-                geometry.ratios.map(function (ratio) {
+                geometry.ratios.filter(function (ratio) {
+                    return !app.pages.ditherEditor.targetPolicy.isEpaper(state)
+                        || ratio.id === '5-3' || ratio.id === '3-5';
+                }).map(function (ratio) {
                     return { value: ratio.id, label: ratio.label };
                 }),
                 function (value) {

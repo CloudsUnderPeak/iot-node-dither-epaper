@@ -170,48 +170,65 @@
 
     function buildPaletteEditor(context) {
         // 色票本身就是可編輯控制：點圓點改色，hover/focus 才顯示刪除按鈕。
-        var swatches = app.utils.dom.el('div', { className: 'palette-swatches' });
+        var fixed = app.pages.ditherEditor.targetPolicy.isEpaper(context.state);
+        var swatches = app.utils.dom.el('div', {
+            className: 'palette-swatches' + (fixed ? ' is-fixed-palette' : '')
+        });
 
         // 重新渲染色票列，通常在新增/刪除/切 preset 後使用。
         context.renderSwatches = function renderSwatches() {
             var colors = currentPalette(context.state.settings.palette);
             app.utils.dom.clear(swatches);
             colors.forEach(function (color, index) {
+                var shownColor = fixed
+                    ? app.pages.ditherEditor.targetPolicy.displayColor(color)
+                    : color;
+                var colorAttrs = {
+                    type: 'color',
+                    value: colorToHex(shownColor),
+                    'aria-label': ui.t('labelPaletteColor') + ' ' + (index + 1)
+                };
+                if (fixed) {
+                    colorAttrs.disabled = 'disabled';
+                }
                 var colorInput = app.utils.dom.el('input', {
                     className: 'palette-color-input',
-                    attrs: {
-                        type: 'color',
-                        value: colorToHex(color),
-                        'aria-label': ui.t('labelPaletteColor') + ' ' + (index + 1)
-                    }
+                    attrs: colorAttrs
                 });
-                var removeButton = app.utils.dom.el('button', {
-                    className: 'palette-remove-button',
-                    children: [
-                        ui.svgIcon('assets/icons/editor/palette-remove.svg', { fallbackText: 'x' })
-                    ],
-                    attrs: {
-                        type: 'button',
-                        'aria-label': ui.t('actionRemovePaletteColor') + ' ' + (index + 1)
-                    }
-                });
-                colorInput.addEventListener('input', function () {
-                    colors[index] = hexToColor(colorInput.value);
-                    setCustomPalette(context, colors, { render: false, preview: false });
-                });
-                colorInput.addEventListener('change', function () {
-                    colors[index] = hexToColor(colorInput.value);
-                    setCustomPalette(context, colors, { render: false });
-                });
-                removeButton.addEventListener('click', function () {
-                    colors.splice(index, 1);
-                    setCustomPalette(context, colors);
-                });
+                var children = [colorInput];
+                if (!fixed) {
+                    var removeButton = app.utils.dom.el('button', {
+                        className: 'palette-remove-button',
+                        children: [
+                            ui.svgIcon('assets/icons/editor/palette-remove.svg', { fallbackText: 'x' })
+                        ],
+                        attrs: {
+                            type: 'button',
+                            'aria-label': ui.t('actionRemovePaletteColor') + ' ' + (index + 1)
+                        }
+                    });
+                    colorInput.addEventListener('input', function () {
+                        colors[index] = hexToColor(colorInput.value);
+                        setCustomPalette(context, colors, { render: false, preview: false });
+                    });
+                    colorInput.addEventListener('change', function () {
+                        colors[index] = hexToColor(colorInput.value);
+                        setCustomPalette(context, colors, { render: false });
+                    });
+                    removeButton.addEventListener('click', function () {
+                        colors.splice(index, 1);
+                        setCustomPalette(context, colors);
+                    });
+                    children.push(removeButton);
+                }
                 swatches.appendChild(app.utils.dom.el('span', {
                     className: 'palette-swatch',
-                    children: [colorInput, removeButton]
+                    children: children
                 }));
             });
+            if (fixed) {
+                return;
+            }
             var addButton = app.utils.dom.el('button', {
                 className: 'palette-add-button',
                 children: [

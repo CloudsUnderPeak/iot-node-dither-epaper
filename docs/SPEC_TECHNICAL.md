@@ -11,6 +11,10 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-08-09: E-paper effective palette 改為 `DISPLAY_COLORS`（A′），讓所有 palette mapper／dither processor 使用校色後的實體參考色；`target-policy.outputImageData()` 在 encoder boundary 以 exact RGB lookup 保留 palette index 並轉回 `OUTPUT_COLORS`（A），拒絕任何非六色色素。
+- 2026-08-09: `EpaperOperationOverlay` 共用 `.app-loading-content`、spinner、message、progress 與 progress-bar primitives，僅以 e-paper CSS 保留全畫面 blocking 層與獨立 percentage；避免啟動 loading 與操作 loading 的尺寸、動畫及 theme token 漂移。
+- 2026-08-09: E-paper frontend follow-up：phase progress 改為不受相同 status polling 重設的 time estimate 與 overtime asymptotic motion；cooldown local timer 在歸零後持續短輪詢至 server 離開 cooldown。`target-policy.js` 分離 immutable OUTPUT_COLORS 與人工可校正 DISPLAY_COLORS，viewport/display swatch 只套 display mapping，encoder 仍驗證純六色。
+- 2026-08-09: 實作 E-paper Device Mode。新增 e-paper capability/status/operation service、5:3/3:5 target policy、portrait clockwise normalization、EPDIMG encoder、global time-weighted progress overlay、cooldown admission 與 device e-paper test page；沿用既有 `/api/epaper*` contract。
 - 2026-07-29: `assets/icons/device/` 圖示來源對齊：`filter.svg` 與 `warning.svg` 改用 iot-node-bedrock builtin-web icon set 的原始 path（filter-funnel／warning），`lock.svg` 換成使用者提供的 SVG Repo lock-01（正規化為 24 viewBox、`stroke="currentColor"`、stroke-width 2、round cap/join、`aria-hidden`）。目前該目錄除 lock 外全部取自 builtin-web icon set。
 - 2026-07-29: 連線狀態卡新增 `.network-status-icon`（34px accent-soft 方塊＋accent filter icon），icon 以 `grid-row: 1 / span 2` 跨 label 與值兩列並垂直置中，說明列縮排在同一文字欄下，icon 下方不留空欄；新增 `assets/icons/device/signal.svg` 與 `globe.svg`（path 取自 iot-node-bedrock builtin-web icon set），STA 沿用 `wifi-strength-4.svg`；桌面與手機共用同一結構（手機單欄逐項）。`.network-status-grid` 桌面為三欄一列，欄寬加權（1 / 1.15 / 1.35）讓 mDNS 網址維持單行。移除 `.device-mono`：mDNS 網址與 hostname 預覽改用全站一般字體，等寬字只保留給 Help 的 matrix/kernel 格子。
 - 2026-07-29: `deviceSystemTitle`／`menuDeviceSystem` 文案改為「裝置設定」／"Device Setting"，`mockBadge` 簡化為 "PREVIEW"；`.device-grid` 與 `.network-status-grid` 在 920px 手機模式改為逐項單欄（移除 700/480 的併欄規則），且每列改為 130px 左標籤欄＋右側值（`.device-field` 兩欄、`.network-status-column` 的 value/hint 落在第二欄），不留整塊空白。
@@ -1009,7 +1013,7 @@ pipeline 順序也必須由 enabled features 的 `pipelineStage` 與 `pipelineOr
 
 ## ESP32 裝置整合
 
-本專案會放進 iot-node-bedrock 的 `user-web/`，由 ESP32 韌體提供同一份靜態網站；裝置管理功能已實作（裝置資訊、網路、裝置設定），Upload to Device 仍屬下一版預留。API contract 以 iot-node-bedrock `docs/SPEC_API_REFERENCE.md` 為準，本章只描述前端側的整合設計。
+本專案會放進 iot-node-bedrock 的 `user-web/`，由 ESP32 韌體提供同一份靜態網站；裝置管理與 E-paper Device Mode 均由同源 REST API 驅動。圖片處理、orientation normalization 與 EPDIMG encoding 全部在瀏覽器完成。API contract 以 iot-node-bedrock `docs/SPEC_API_REFERENCE.md` 為準，本章只描述前端側整合。
 
 ### 裝置整合層（src/device/）
 
@@ -1017,6 +1021,7 @@ pipeline 順序也必須由 enabled features 的 `pipelineStage` 與 `pipelineOr
 src/device/
   device-api.js    REST client：envelope 解析、Bearer token store、AbortController timeout、resources 目錄
   device-live.js   alive 監看：GET /api/alive 輪詢、online/offline/standalone 狀態、subscribe
+  device-epaper.js e-paper capability、cached status、single operation、phase progress、cooldown
   device-gate.js   離線反灰：banner、fieldset disable、恢復後自動刷新
   device-auth.js   認證：login dialog、session 驗證、logout、全域 401 處理、鎖定卡
 ```
@@ -1026,6 +1031,7 @@ src/device/
 - 頁面一律透過 `app.device.api.resources` 取用 endpoint，不直接呼叫 `fetch`；path 使用相對路徑（部署後與裝置 API 同源）。
 - REST envelope 固定 `{success, data, message}`；HTTP 200 但 `success !== true` 也視為錯誤。錯誤統一帶 `status`、`code`、`fields`；網路層失敗包成 `{code: 'transport_error', status: 0}`。
 - 常見 error code 由 `app.device.errorText()` 翻成使用者語言；API `message` 只作 fallback。
+- Raw EPDIMG upload 仍透過 `device-api.resources`，使用 `fetch` 的 binary body 與 `application/octet-stream`；頁面不可直接呼叫 fetch。Content-Length 由瀏覽器依固定 192,040-byte body 設定。
 
 ### 裝置連線監看（device-live）
 
@@ -1063,10 +1069,13 @@ src/device/
 - 表單皆採 `busy || !dirty || !valid` 三態儲存鈕與文字狀態列；一般成功 notice 約 2.2 秒自動消失，錯誤與需保留脈絡（重啟、斷線、rollback）的 notice 常駐。
 - 視覺語言與 Dither Editor 對齊：卡片一律使用 components.css 的 `panel-section`（h2 標題列）＋`panel-body device-card-body`；需要右側 badge／總空間的卡片改用 `device-card-header` 標題列變體。頁面不放 `h1`（頁名由 app header 顯示）。`device.css` 只保存裝置專屬樣式，顏色沿用 theme token，尺寸沿用編輯器的 34px 輸入框與 11–14px 字級階。
 
-### Device Mode 目標（Upload 預留）
+### E-paper Device Mode
 
-- 靜態網站由 ESP32 提供；圖片處理仍全部在瀏覽器端完成，ESP32 不負責 crop、resize、palette、dither 運算。
-- Upload to Device（`/api/storage/files` 或後續顯示器 endpoint）是下一版功能，不列入本版。
+- `device-live` 仍只擁有 connection truth；`device-epaper` 在 online 後 probe `GET /api/epaper`，驗證固定 800×480、EPDIMG、192,040 bytes、六個 color codes 與必要 capabilities。
+- Target state 與 connection state 分離。Capability 一旦在 session 內確認，offline 不清除 target，只禁止 operation；reconnect 後重抓 capability/status。
+- `device-epaper` 擁有 cached status、operation run id、polling、blocking state、phase progress與 cooldown deadline。Editor 與 test page 只能訂閱 snapshot及呼叫公開 operation method。
+- `app.app.state.blockingOperation` 只保存 coarse global lock reason，不保存 editor image 或 API payload。Router/Menu 在 lock 期間拒絕 navigation。
+- Static site 由 ESP32 提供；ESP32 不負責 crop、resize、palette、dither、portrait rotation 或 EPDIMG packing。
 
 ### Web Setting Page
 
@@ -1124,7 +1133,7 @@ pages/help/
 - `assets/help/*.png` 必須由 `tools/dither-render/run.py` 使用專案實際 dither scripts 產生，不手動畫假結果。比較圖使用固定 480x288 synthetic gradient、E6 palette 與畫面標示的 Algorithm / Mapping / Color Distance / Strength；輸出變更時必須重新產生對應資產並人工確認。
 - `tools/help-validate/run.py` 必須透過 headless browser 載入實際 classic scripts，驗證 capability、雙語內容、限制模板與重複 placeholder；缺少任何已註冊演算法的雙語 detail 時以非零 exit code 結束，已移除演算法殘留的不可見 detail 只報 cleanup warning。
 
-### Display Profile 預留
+### E-paper Display Profile
 
 顯示器必須透過 display profile registry 擴充，不可在 crop、resize、upload 邏輯中硬寫某一個尺寸。Profile 對使用者與程式都以像素尺寸為主，不使用 7.3 吋、13.3 吋這類實體尺寸作為主要識別。
 
@@ -1161,16 +1170,16 @@ pages/help/
 
 Device Mode 啟用 device display target 時：
 
-- display profile 必須由 ESP32 `/api/display/profile` 回傳，或由 `src/pages/dither-editor/config/display-profiles.js` 中選定。
-- crop aspect ratio 鎖定為目前 display profile 的 `aspectRatio`。
-- resize output size 鎖定為目前 display profile 的 `width` / `height`。
-- export / upload 使用 display profile。
-- Upload to Device 按鈕才可用。
-- 如果 display profile 的像素尺寸尚未確認，禁止 Upload to Device，並要求完成 profile 設定。
+- 固定 panel profile 由 ESP32 `GET /api/epaper` 回傳；local registry 只描述前端支援形狀，不可單獨宣告真裝置存在。
+- E-paper Crop ratio allowlist 固定為 landscape `5-3` 與 portrait `3-5`。
+- Landscape output 固定 800×480；portrait output 固定 480×800。Resize UI 為 read-only。
+- Effective palette 固定為 `e6-color-epaper`；Palette UI 不建立 add/remove control，color input、preset、Original size 均不可修改。`DISPLAY_COLORS` 是 pipeline 的實體參考色 A′，固定 swatch、Result viewport、palette mapping 與 dither error 都使用它；`OUTPUT_COLORS` 是 EPDIMG 協定色 A。`target-policy.outputImageData()` 必須在 encoder boundary 以 exact DISPLAY/OUTPUT RGB lookup 取得固定 palette index，再轉成 OUTPUT RGB；非六色像素必須拒絕，不可用 nearest-color 猜測硬體色碼。
+- `target-policy.js` 同時提供 UI guard、controller setting guard 與 formal pipeline 前 normalization。DOM disabled 不是安全邊界。
+- Capability 在 editor mount 後才確認時，policy 原子套用 target、增加 `uiRevision`、rebuild controls並重跑 preview。
 
-### Upload Busy UI 預留
+### E-paper Operation Overlay
 
-Upload to Device 與 display refresh 期間必須顯示 blocking overlay：
+Image upload/draw 與 white/palette/refresh action 期間必須顯示 app-shell global blocking overlay：
 
 ```text
 Uploading to device...
@@ -1185,29 +1194,28 @@ Refreshing display...
 - 禁止重複上傳。
 - 成功後解除 blocking。
 - 失敗後解除 blocking 並顯示錯誤。
-- MVP 下一版可以先不做 cancel。
+- 不提供 cancel；HTTP 202 後沒有可安全取消 physical draw 的 API contract。
+- Progress 是 time-weighted simulated percentage。每個 phase 依 expected duration 在自己的區間使用漸近曲線持續前進；相同 server phase 的輪詢不得重設 `stageStartedAt`。`refreshing` 使用最大區間 42–90%，只有 cooldown success 能到 100%。
+- Operation 完成進入 cooldown 後解除全域 lock，但所有 e-paper action 依 server `retry_after_seconds` disabled；local countdown 每 250ms 更新 deadline、只在整秒變更時 render，歸零後至少每 500ms 重查 status，直到 server 離開 cooldown 並恢復 `can_upload && can_draw`。
 
-### Device Output Encoding 預留
+### EPDIMG Output Encoding
 
-目前不寫死上傳 payload 格式，因為需依 e-paper driver 決定。
+目前裝置 contract 固定為 EPDIMG，不再保留未決 encoder format。Encoder 位於 pure core：
 
 保留 encoder 位置：
 
 ```text
 src/core/encoders/
-  png-encoder.js
-  device-output-encoder.js
+  epdimg-encoder.js
 ```
 
-Display profile 以 `outputFormat` 指定 encoder。未來可能支援：
+規則：
 
-- `png`
-- `rgb565`
-- `rgb888`
-- `indexed-palette`
-- `device-native`
-
-瀏覽器端應輸出 display-ready payload，ESP32 端盡量只接收並寫入顯示器。
+- Formal pipeline output 只接受 800×480 或 480×800。Encoder 必須直接檢查 ImageData dimensions，不依賴 UI orientation flag。
+- 800×480 原樣編碼；480×800 在六色 pipeline 完成後逐 pixel 順時針旋轉 90°，不重新 resize或 dither；其他尺寸在 API 前失敗。
+- Normalized 800×480 pixel 必須精確匹配 E6 reference RGB，mapping 固定為 black=0、white=1、yellow=2、red=3、blue=5、green=6；不可用 palette array index。
+- 每兩 pixel 打包一 byte（left high nibble、right low nibble），frame CRC32 後寫 40-byte little-endian header與 non-zero uint64 generation，總長固定 192,040 bytes。
+- `POST /api/epaper/image` 成功已同時 atomic update stored image並 queue draw，client 不得自動追加 refresh。
 
 ## 圖片處理流程與固定效果堆疊
 
@@ -1533,6 +1541,7 @@ MVP 至少：
 - `pages/device-info/`
 - `pages/device-network/`
 - `pages/device-system/`
+- `pages/device-epaper-test/`（capability 確認後顯示；white/palette/refresh 共用 e-paper operation service）
 
 預留：
 

@@ -38,7 +38,7 @@
         });
         pipeline.enabled = enabled;
 
-        return {
+        var state = {
             schemaVersion: 1,
             status: 'empty',
             mode: app.pages.ditherEditor.editorModeStateMachine.groups.SOURCE,
@@ -61,6 +61,8 @@
             pipeline: pipeline,
             settings: settings
         };
+        app.pages.ditherEditor.targetPolicy.sync(state);
+        return state;
     }
 
     app.pages.ditherEditor = app.pages.ditherEditor || {};

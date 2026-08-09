@@ -41,7 +41,8 @@
             }
         },
         // {startedAt, payload, fail} — PUT /api/wifi 的 202 safe transition。
-        transition: null
+        transition: null,
+        epaper: { operation: null, stored: false, lastSource: null }
     };
 
     var SCAN_NETWORKS = [
@@ -224,9 +225,99 @@
         };
     }
 
+    var EPAPER_DRAW_MS = 5200;
+    var EPAPER_COOLDOWN_MS = 8000;
+
+    function epaperCapabilities() {
+        return {
+            panel: { model: 'waveshare-7in3e', width: 800, height: 480, colors: 6, color_codes: [0, 1, 2, 3, 5, 6] },
+            image: { name: 'epaper-current.epd', format: 'epdimg', header_bytes: 40, frame_bytes: 192000, upload_bytes: 192040 },
+            refresh: { cpu_mhz: 80, cooldown_seconds: 180, automatic_on_boot: false },
+            capabilities: { upload: true, metadata: true, download: true, refresh: true, white: true, palette: true }
+        };
+    }
+
+    function epaperStatus() {
+        var operation = state.epaper.operation;
+        var base = {
+            state: 'idle', phase: null, busy: false, can_upload: true, can_draw: true,
+            can_download: state.epaper.stored, retry_after_seconds: 0, cpu_mhz: 160,
+            panel_state: 'sleeping', shutdown_method: 'power_off_then_deep_sleep', recovery_required: null,
+            stored_image: { available: state.epaper.stored, valid: state.epaper.stored },
+            last_operation: state.epaper.lastSource
+                ? { source: state.epaper.lastSource, result: 'success', error_code: 'none' }
+                : { source: 'none', result: 'none', error_code: 'none' },
+            last_reset_reason: 'software', brownout_detected: false, brownout_during_draw: false
+        };
+        if (!operation) {
+            return base;
+        }
+        var elapsed = Date.now() - operation.startedAt;
+        if (elapsed >= EPAPER_DRAW_MS + EPAPER_COOLDOWN_MS) {
+            state.epaper.operation = null;
+            return base;
+        }
+        base.busy = true;
+        base.can_upload = false;
+        base.can_draw = false;
+        if (elapsed >= EPAPER_DRAW_MS) {
+            base.state = 'cooldown';
+            base.retry_after_seconds = Math.ceil((EPAPER_DRAW_MS + EPAPER_COOLDOWN_MS - elapsed) / 1000);
+            return base;
+        }
+        var phases = [
+            { until: 350, state: 'queued', phase: null },
+            { until: 700, state: 'drawing', phase: 'prewake' },
+            { until: 1200, state: 'drawing', phase: 'initializing' },
+            { until: 2100, state: 'drawing', phase: 'transferring' },
+            { until: 4300, state: 'drawing', phase: 'refreshing' },
+            { until: 4650, state: 'drawing', phase: 'powering_off' },
+            { until: 4950, state: 'drawing', phase: 'sleeping' },
+            { until: EPAPER_DRAW_MS, state: 'drawing', phase: 'quiescing' }
+        ];
+        var current = phases.find(function (phase) { return elapsed < phase.until; }) || phases[phases.length - 1];
+        base.state = current.state;
+        base.phase = current.phase;
+        base.panel_state = current.state === 'queued' ? 'inactive' : 'active';
+        return base;
+    }
+
+    function beginEpaper(source) {
+        var current = epaperStatus();
+        if (!current.can_draw) {
+            return fail(409, 'epaper_busy', 'e-paper busy', { retry_after_seconds: current.retry_after_seconds });
+        }
+        state.epaper.lastSource = source;
+        state.epaper.operation = { startedAt: Date.now(), source: source };
+        return jsonResponse(202, { success: true, data: { state: 'queued' }, message: 'e-paper draw queued' });
+    }
+
     function handle(method, path, init) {
         if (path === 'api/alive' && method === 'GET') {
             return ok({});
+        }
+        if (path === 'api/epaper' && method === 'GET') {
+            return ok(epaperCapabilities());
+        }
+        if (path === 'api/epaper/status' && method === 'GET') {
+            return ok(epaperStatus());
+        }
+        if (path === 'api/epaper/image' && method === 'POST') {
+            var byteLength = init && init.body && init.body.byteLength;
+            if (byteLength !== 192040) {
+                return fail(422, 'invalid_epaper_image', 'invalid EPDIMG length');
+            }
+            state.epaper.stored = true;
+            return beginEpaper('uploaded');
+        }
+        if (path === 'api/epaper/image/white' && method === 'POST') {
+            return beginEpaper('white');
+        }
+        if (path === 'api/epaper/image/palette' && method === 'POST') {
+            return beginEpaper('palette');
+        }
+        if (path === 'api/epaper/image/refresh' && method === 'POST') {
+            return state.epaper.stored ? beginEpaper('stored') : fail(404, 'epaper_image_not_found', 'stored image not found');
         }
         if (path === 'api/device' && method === 'GET') {
             // heap 固定值：假資料不做隨機浮動，避免背景輪詢時數字自己跳動。

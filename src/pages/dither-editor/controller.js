@@ -34,6 +34,9 @@
     };
 
     function errorText(error) {
+        if (error && (error.code || error.status) && app.device.errorText) {
+            return app.device.errorText(error);
+        }
         var key = error && error.code ? ERROR_TEXT_KEYS[error.code] : null;
         if (key) {
             return app.i18n.t(key);
@@ -52,6 +55,7 @@
         this.state.originalSize = result.originalSize;
         this.state.workingSize = result.workingSize;
         this.runFeatureHook('onImageLoaded', { result: result });
+        app.pages.ditherEditor.targetPolicy.sync(this.state);
         this.state.status = 'ready';
         app.pages.ditherEditor.editorModeStateMachine.enterPrepare(this.state);
         // 新圖載入後若有 prepare 入口就直接跳到 prepare；否則進入 edit 並排正式 preview。
@@ -137,10 +141,14 @@
         if (!app.pages.ditherEditor.editorModeStateMachine.canUseSettingGroup(this.state, group)) {
             return;
         }
+        if (!app.pages.ditherEditor.targetPolicy.settingAllowed(this.state, group, key, value)) {
+            return;
+        }
         var previous = Object.assign({}, this.state.settings[group]);
         this.state.settings[group][key] = value;
         // previous 讓 feature 可以在 normalize 或 UI sync 時知道變更前狀態。
         this.runFeatureHook('onSettingChanged', { id: group, key: key, value: value, previous: previous }, { broadcast: true });
+        app.pages.ditherEditor.targetPolicy.sync(this.state);
         if (this.state.mode === app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE) {
             this.state.status = 'ready';
             this.render(this.state);
@@ -154,9 +162,13 @@
         if (!app.pages.ditherEditor.editorModeStateMachine.canUseSettingGroup(this.state, group)) {
             return;
         }
+        if (!app.pages.ditherEditor.targetPolicy.settingAllowed(this.state, group, null, null)) {
+            return;
+        }
         var previous = Object.assign({}, this.state.settings[group]);
         Object.assign(this.state.settings[group], values);
         this.runFeatureHook('onSettingChanged', { id: group, key: null, values: values, previous: previous }, { broadcast: true });
+        app.pages.ditherEditor.targetPolicy.sync(this.state);
         if (this.state.mode === app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE) {
             this.state.status = 'ready';
             this.render(this.state);
@@ -492,6 +504,54 @@
                 self.state.error = errorText(error);
                 self.render(self.state);
             });
+    };
+
+    DitherEditorController.prototype.drawEpaper = function drawEpaper() {
+        var self = this;
+        if (!this.state.sourceImageData || this.state.mode !== app.pages.ditherEditor.editorModeStateMachine.groups.EDIT) {
+            return Promise.resolve();
+        }
+        return app.device.epaper.beginOperation('upload', 'preflight')
+            .then(function (operationId) {
+                app.pages.ditherEditor.targetPolicy.normalizeBeforePipeline(self.state);
+                app.device.epaper.setClientStage(operationId, 'processing');
+                self.state.status = 'exporting';
+                self.render(self.state);
+                self.runFeatureHook('onBeforeExport', {});
+                return app.pages.ditherEditor.pipelineRunner.runAsync(self.state.sourceImageData, self.state)
+                    .then(function (imageData) {
+                        app.device.epaper.setClientStage(operationId, 'encoding');
+                        var outputImageData = app.pages.ditherEditor.targetPolicy.outputImageData(imageData);
+                        self.state.outputImageData = outputImageData;
+                        return app.core.epdimgEncoder.encode(outputImageData);
+                    })
+                    .then(function (encoded) {
+                        return app.device.epaper.submitUpload(operationId, encoded.payload);
+                    })
+                    .then(function () {
+                        self.state.status = 'exported';
+                        self.runFeatureHook('onAfterExport', {});
+                        self.render(self.state);
+                    })
+                    .catch(function (error) {
+                        app.device.epaper.failOperation(operationId, error);
+                        throw error;
+                    });
+            })
+            .catch(function (error) {
+                self.state.status = 'error';
+                self.state.error = errorText(error);
+                self.render(self.state);
+            });
+    };
+
+    DitherEditorController.prototype.syncEpaperTarget = function syncEpaperTarget() {
+        var previous = this.state.target && this.state.target.mode;
+        app.pages.ditherEditor.targetPolicy.sync(this.state);
+        if (previous !== this.state.target.mode) {
+            this.state.uiRevision = (this.state.uiRevision || 0) + 1;
+        }
+        this.render(this.state);
     };
 
     DitherEditorController.prototype.cancelExport = function cancelExport() {
