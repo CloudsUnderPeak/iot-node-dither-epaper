@@ -4,8 +4,8 @@
     // Dither Editor panel 專用的小型 UI factory。
     // 它只建立表單元件與 callback，不直接修改 editor state。
     // 取得面板顯示文字。
-    function t(key) {
-        return app.i18n.t(key);
+    function t(key, replacements) {
+        return app.i18n.t(key, replacements);
     }
 
     function svgIcon(icon, options) {

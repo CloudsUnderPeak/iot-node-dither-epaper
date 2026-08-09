@@ -10,6 +10,7 @@
     var cachedState = null;
     var pixelPreviewDrag = null;
     var previewToolbar = null;
+    var epaperUnsubscribe = null;
 
     // 取得 UI 文字，缺字串時回傳 key 方便除錯。
     function t(key) {
@@ -260,6 +261,21 @@
         });
     }
 
+    function renderTargetLocks(state) {
+        var locked = app.pages.ditherEditor.targetPolicy.isEpaper(state);
+        ['resize', 'palette'].forEach(function (id) {
+            var panel = refs.panelSectionsByTool && refs.panelSectionsByTool[id];
+            if (!panel) {
+                return;
+            }
+            panel.classList.toggle('is-target-locked', locked);
+            panel.querySelectorAll('button, input, select, textarea').forEach(function (control) {
+                control.disabled = locked;
+                control.setAttribute('aria-disabled', locked ? 'true' : 'false');
+            });
+        });
+    }
+
     function renderEmptyUpload(state) {
         if (!refs.previewStage || !refs.canvas) {
             return;
@@ -308,6 +324,12 @@
     }
 
     // Page 主渲染入口：決定要畫 original/result/crop preview，並同步 UI 狀態。
+    function imageForDisplay(state, image) {
+        return app.pages.ditherEditor.targetPolicy.isEpaper(state)
+            ? app.pages.ditherEditor.targetPolicy.displayImageData(image)
+            : image;
+    }
+
     function render(state) {
         modeMachine().normalize(state);
         ensureControlRevision(state);
@@ -334,8 +356,9 @@
             overlayRenderer.holdPendingPreviewDisplay();
             renderer.setFilter('');
         } else {
-            renderer.render(image);
-            overlayRenderer.updateCanvasDisplay(state, false, image);
+            var displayedImage = state.viewMode === 'original' ? image : imageForDisplay(state, image);
+            renderer.render(displayedImage);
+            overlayRenderer.updateCanvasDisplay(state, false, displayedImage);
             refs.lastRenderedPreviewKind = state.viewMode === 'original'
                 ? 'original'
                 : state.viewMode === 'pixel'
@@ -355,6 +378,7 @@
         overlayRenderer.renderCropOverlay(state, cropMetrics, cropVisible);
         overlayRenderer.renderPreviewTimingLabel(state, cropVisible);
         app.pages.ditherEditor.featureRegistry.dispatch('onRender', { state: state, controller: controller });
+        renderTargetLocks(state);
         if (refs.status) {
             app.app.renderStatus(refs.status, statusText(state));
         }
@@ -369,9 +393,9 @@
     function renderLivePreview(state) {
         var filter = previewFilter(state);
         if (state.viewMode !== 'original' && state.livePreview && state.livePreview.baseImageData && filter) {
-            renderer.render(state.livePreview.baseImageData);
+            renderer.render(imageForDisplay(state, state.livePreview.baseImageData));
         } else if (state.viewMode !== 'original' && !filter && state.previewImageData) {
-            renderer.render(state.previewImageData);
+            renderer.render(imageForDisplay(state, state.previewImageData));
         }
         renderer.setFilter(filter);
         overlayRenderer.renderPreviewTimingLabel(state, false);
@@ -484,6 +508,11 @@
             var state = controller.state;
             modeMachine().normalize(state);
             app.pages.ditherEditor.featureRegistry.dispatch('onMount', { state: state, controller: controller });
+            epaperUnsubscribe = app.device.epaper.subscribe(function () {
+                if (controller) {
+                    controller.syncEpaperTarget();
+                }
+            });
             rebuildControls(state);
 
             preview.appendChild(refs.previewStage);
@@ -509,6 +538,10 @@
         },
         // Router unmount 時保留 in-memory state，並清理 listener/timer/sortable。
         unmount: function unmount() {
+            if (epaperUnsubscribe) {
+                epaperUnsubscribe();
+                epaperUnsubscribe = null;
+            }
             if (refs.handleResize) {
                 window.removeEventListener('resize', refs.handleResize);
                 window.cancelAnimationFrame(refs.resizeFrame);

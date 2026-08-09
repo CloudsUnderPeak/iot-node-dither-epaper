@@ -13,6 +13,37 @@
     color: var(--color-text);
 }
 
+.epaper-operation-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: var(--color-text);
+    background: var(--color-loading-overlay);
+}
+
+.epaper-operation-overlay[hidden] { display: none; }
+
+.epaper-operation-percent {
+    display: block;
+    margin-top: -8px;
+    color: var(--color-text);
+    font-size: 18px;
+    line-height: 1.4;
+}
+
+.epaper-operation-progress-bar { width: 0; }
+.is-target-locked { opacity: 0.72; }
+
+/* 電子紙色票需保留實際預覽色，不可因 disabled opacity 改變肉眼校色結果。 */
+[data-tool-panel="palette"].is-target-locked { opacity: 1; }
+
+[data-tool-panel="palette"].is-target-locked .control-row { opacity: 0.72; }
+
+.epaper-test-actions { flex-wrap: wrap; margin-top: 18px; }
+
 /* 卡片標題列可容納右側 badge／總空間；h2 交回 flex 排版，不用 panel-section 預設內距。 */
 .device-card-header {
     display: flex;

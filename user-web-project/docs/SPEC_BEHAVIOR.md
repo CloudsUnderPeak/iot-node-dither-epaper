@@ -11,6 +11,10 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-08-09: 電子紙肉眼校色改為實體參考色模型：網頁色票與抖動皆使用面板在真實世界呈現的 `DISPLAY_COLORS`（A′）做色距、選色與誤差擴散；送出前再依固定 palette index 轉成裝置協定 `OUTPUT_COLORS`（A），使網頁 Result 與實體面板視覺對齊而不改變 EPDIMG contract。
+- 2026-08-09: E-paper 繪製／測試操作 overlay 改為沿用 App 啟動 loading 的主題遮罩、64px spinner、accent 色、文字與進度條視覺；電子紙既有的 phase 文案、獨立百分比與時間加權進度行為不變。
+- 2026-08-09: 修正 E-paper 實機操作回饋：固定色票不再顯示新增／刪除或可編輯狀態；同一個硬體 phase 的重複 status 不重設進度計時，超過預估時間仍漸近前進；cooldown 顯示實際秒數，歸零後主動密集確認 server `can_draw`。另將網頁 DISPLAY 六色與 EPDIMG OUTPUT 純六色分離，讓肉眼校色只影響畫面預覽。
+- 2026-08-09: 新增 E-paper Device Mode：`/api/alive` 與 `/api/epaper` 確認裝置能力後，Dither Editor 只允許 5:3/800×480 或 3:5/480×800、固定 E6 六色；portrait 正式輸出依實際尺寸順時針旋轉成韌體 800×480 EPDIMG，Export PNG 改為繪製到電子紙。繪製與電子紙測試 action 共用 blocking overlay、時間加權 phase progress、single-operation admission 與 180 秒 cooldown；Menu 新增電子紙測試頁，提供空白、六色測試圖與重新繪製目前圖片。
 - 2026-07-29: 網路頁連線狀態卡的每欄開頭加上 feature icon（STA=Wi-Fi、AP=訊號、mDNS=地球，accent 底色方塊，比照 builtin-web Interface status），桌面與手機皆顯示。
 - 2026-07-29: 「系統設定」更名為「裝置設定」（英文 Device Setting），Menu 與頁名同步；假資料標示簡化為「PREVIEW」；手機模式下「裝置資訊」的裝置欄位逐項分排，每列為左標籤＋右側值（比照表單的左標籤欄）；「網路」的連線狀態逐項分排為 icon＋文字塊，不再併欄也不留空白區塊。
 - 2026-07-29: Web Setting 比照裝置頁改版為編輯器面板樣式：移除頁內大標題（頁名由 header 顯示），主題與語言改為兩張緊湊卡片（標題列＋內容區），與裝置頁同寬置中。
@@ -105,15 +109,15 @@ Split From: SPEC_INDEX.md
 
 ## 產品目標
 
-建立一個可離線使用的瀏覽器圖片編輯器。使用者能在本機打開頁面，輸入圖片、調整圖片、設定 Dither 流程、預覽結果，最後輸出處理完成的 PNG。
+建立一個可離線使用、也能在支援裝置上直接驅動電子紙的瀏覽器圖片編輯器。使用者能在本機打開頁面，輸入圖片、調整圖片、設定 Dither 流程、預覽結果；standalone 時輸出 PNG，偵測到相容電子紙時改為更新固定圖片並繪製面板。
 
 核心行為：
 
-1. 使用者不需要後端服務。
-2. 使用者不需要下載遠端資源，也不需要連接外部 API。
+1. Standalone Mode 不需要後端服務；Device Mode 只連接同源 ESP32 REST API。
+2. 使用者不需要下載遠端資源；所有圖片處理仍在瀏覽器完成。
 3. 使用者可以用瀏覽器原生能力完成上傳、編輯、預覽與輸出。
 4. App 以固定順序套用會影響圖片結果的效果，避免 palette / dither 語意混亂。
-5. MVP 只交付 Standalone Mode；ESP32 Device Mode 僅作為後續方向保留。
+5. App 依 `/api/alive` 與 `/api/epaper` 自動選擇 Standalone 或 E-paper Device Mode，不提供手動偽裝裝置能力的選項。
 
 ## 使用者範圍
 
@@ -128,6 +132,8 @@ MVP 必須支援：
 - 依固定效果順序預覽結果。
 - 預覽處理前後的結果。
 - 匯出 PNG。
+- 相容裝置上以固定 E-paper profile 更新圖片並繪製。
+- 電子紙空白、六色測試圖與 stored image refresh。
 - 保留基本工作狀態與設定。
 
 MVP 不包含：
@@ -136,7 +142,7 @@ MVP 不包含：
 - 遠端圖片 URL 輸入。
 - 雲端儲存。
 - 圖層、annotation、文字工具。
-- ESP32 上傳、連線設定或 token 管理。
+- 電子紙 API 的管理員認證（現行 contract 為同網路公開操作）。
 - Preset Manager 的完整管理介面。
 
 ## 主要使用流程
@@ -150,7 +156,7 @@ MVP 不包含：
 7. `edit` group 會依 Crop 範圍與 Resize、Adjust、Palette、Dither 等設定更新 Result。
 8. App 依固定 Effects order 更新圖片處理結果。
 9. 使用者可在圖片呈現區右下角切換 Original / Result / Expand。
-10. 使用者確認結果後匯出 PNG。
+10. 使用者確認結果後：Standalone Mode 匯出 PNG；E-paper Device Mode 重新跑正式 pipeline、必要時旋轉 portrait、編碼 EPDIMG 並繪製。
 11. 使用者可切換到 Web Setting、Help 或 About，再返回編輯頁並保留目前工作狀態。
 
 ## User Stories
@@ -350,12 +356,27 @@ Acceptance:
 - The comparison slider, algorithm/mapping/distance tabs, and Color Distance palette explorer remain keyboard accessible.
 - Opening Help and returning to Dither Editor preserves the current editor session.
 
+### US-16 Draw To A Detected E-paper Device
+
+As a user with a compatible device, I want the editor to lock its output to the panel and draw it safely, so that the browser result matches the physical display without allowing conflicting operations.
+
+Acceptance:
+
+- `GET /api/alive` and a valid `GET /api/epaper` capability response switch the editor to E-paper Device Mode; an absent or unsupported endpoint leaves PNG export unchanged.
+- Crop only offers landscape 5:3 and portrait 3:5. Resize is read-only 800×480 or 480×800, and Palette is the fixed E6 six-color set.
+- The fixed palette has separate display RGB A′ and protocol RGB A values. Swatches, the Result canvas, palette mapping, and dither error use A′; the encoder boundary maps the exact palette index back to A before producing EPDIMG.
+- The formal pipeline decides orientation from the actual output dimensions. 800×480 stays unchanged; 480×800 rotates clockwise to 800×480 before EPDIMG encoding; any other size is rejected before upload.
+- The e-paper action sends one raw `POST /api/epaper/image`. The accepted upload already updates the stored image and queues draw, so the editor does not append a refresh request.
+- Processing, upload and physical draw show a blocking spinner, phase copy and simulated percentage. Percentage is weighted by expected time, with `refreshing` using the largest interval; repeated polling of the same phase must not reset its timer, and an over-time phase keeps moving asymptotically without reaching 100% before server success/cooldown.
+- While an operation is active, editing, Menu navigation and repeated action are blocked. Cooldown unlocks editing but keeps every e-paper action disabled and displays the interpolated `retry_after_seconds`. At local zero the client immediately rechecks status until the server restores `can_draw`.
+- A disconnect after HTTP 202 never causes automatic upload retry. The client waits for reconnect and confirms `/api/epaper/status` before allowing another action.
+
 ## 頁面與導覽行為
 
 App 由一個固定外殼承載多個頁面：
 
 - `Dither Editor` 是預設主頁。
-- `裝置資訊`、`網路`、`裝置設定` 組成 Menu 的「裝置管理」群組，詳見「裝置管理行為」。
+- `裝置資訊`、`網路`、`裝置設定` 組成 Menu 的「裝置管理」群組；確認 e-paper capability 後，同群組另顯示「電子紙測試」。
 - `Web Setting` 用於一般網頁設定，例如主題。
 - `Help` 用於使用說明。
 - `About` 用於產品資訊。
@@ -439,6 +460,19 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
 - 管理員密碼卡：新密碼＋確認新密碼，顯示／隱藏切換以圖示疊在輸入框右側，不佔用額外按鈕欄位；規則提示以「密碼限制：…」開頭。規則不符或兩次不一致時無法送出。成功後目前登入立即失效並要求以新密碼重新登入；AP 密碼保護開啟時，訊息明確包含裝置正在重啟。卡片內不重複提示重新登入，該資訊由儲存後的訊息負責。
 - 恢復原廠設定（danger zone）：整張卡片使用紅色邊框、淡紅底與警告徽章，與其他設定卡明顯區隔；說明必須寫明會清除所有 Wi-Fi、管理員設定與使用者檔案，且無法復原。
 - 按下「重設裝置」不直接執行，先開紅色確認 dialog（警告徽章、紅色標題、實心紅色送出鍵、預設焦點在取消）；送出期間鎖住兩個按鈕且不可用 Esc／背景關閉。成功後裝置立即重啟，本地登入立即失效並顯示常駐訊息，指示改用出廠預設的裝置 AP 重新連線並重新登入；失敗顯示錯誤訊息且不改變登入狀態。
+
+### 電子紙模式與測試頁
+
+- 裝置 alive 後才查 `/api/epaper`；只有固定 panel/image/refresh/capabilities schema 可被前端支援時，E-paper target 才在本次 session 生效。曾確認的 target 遇到暫時斷線仍保持尺寸與色票鎖定，恢復後重新同步 status。
+- Dither Editor 的 Crop ratio 只允許 Landscape 5:3（800×480）與 Portrait 3:5（480×800）。使用者仍可 pan、zoom、rotate、flip 與選 fill；Resize 不可手動輸入，Palette 不可選 preset 或編輯 swatch。
+- 固定六色以實體面板肉眼呈現的校色值 A′ 供網頁 Result、最近色判斷與 dither 誤差擴散使用；正式繪製時依六色固定 index 轉回裝置認得的協定色 A。調整校色值應改變網頁預覽與抖動選色，但不得改變硬體 color code。
+- 原 `Export PNG` 按鈕在此模式顯示「繪製到電子紙」。繪製完成進入 cooldown 後，全頁操作鎖解除，但 action 顯示實際剩餘秒數並維持 disabled；本地倒數歸零即密集向 server 確認，`can_draw` 恢復後立即啟用。
+- 全域操作 overlay 使用 spinner、目前 phase、percentage 與 progress bar。Percentage 是前端依預估時間插值的進度提示，不是 panel telemetry；`refreshing` 是最大區間，同一 phase 的重複 polling 不可重設計時，phase 超時後仍漸近移動，server 進入 cooldown success 才顯示 100%。
+- 「電子紙測試」頁只在 session 已確認 capability 後出現在 Menu；公開且不要求登入。頁面顯示 panel/status/stored image/cooldown，並提供：
+  - 顯示空白：`POST /api/epaper/image/white`，不寫 stored image。
+  - 顯示六色測試圖：`POST /api/epaper/image/palette`，不寫 stored image。
+  - 重新繪製目前圖片：`POST /api/epaper/image/refresh`，stored image 不存在或無效時不可操作。
+- 三個測試 action 不送 request body，並和 editor upload 共用 single-operation admission、overlay、status polling、錯誤處理與 180 秒 cooldown。
 
 ### 驗收重點
 
@@ -535,6 +569,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 
 - MVP 不提供 Free 自由比例。
 - 預設固定比例為 16:9。
+- E-paper Device Mode 覆蓋 standalone 預設，只顯示 5:3 與 3:5；切換時同步切換 800×480／480×800 target。
 - Crop 面板不顯示 X、Y、Width、Height 或 Lock ratio。
 - 使用者拖曳的是原圖位置，不是裁切框。
 - Crop overlay 固定代表最後輸出的裁切範圍。
@@ -555,6 +590,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 行為要求：
 
 - Width 與 Height 固定等比連動。
+- E-paper Device Mode 中 Width/Height 改為 read-only，依 Crop orientation 固定為 800×480 或 480×800。
 - 使用者調整任一尺寸時，另一個尺寸必須立即依目前比例更新。
 - 使用者在 `edit` 重新展開 Crop 並改變 crop ratio 後，Resize 的 Width / Height 欄位必須同步更新到新的 crop output ratio。
 - Width 與 Height 必須顯示在同一列。
@@ -607,6 +643,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 - Dither 啟用時，Palette 不先量化像素；Dither 以目前有效色票產生固定色點陣結果。
 - Dither 為 None 時，固定 preset 或 Custom Palette 可直接把像素映射到最近色。
 - 最近色映射使用 Dither 面板目前選擇的 Color Distance；預設為 Euclidean BT.709。
+- E-paper Device Mode 強制使用 E6 六色；不顯示新增、刪除、preset、Original Colors 或 swatch 編輯控制。色票、Result canvas、palette mapping 與 dither error 使用可校正的 DISPLAY RGB A′；encoder boundary 再依固定 palette index 精確轉成 OUTPUT RGB A，EPDIMG 不接受其他 RGB。
 
 ### Dither
 
@@ -642,6 +679,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 - Export 只在 `edit` 可操作；`source` 與 `prepare` 時必須反灰停用。
 - 匯出失敗時要給出可理解的錯誤狀態。
 - Export 不應被當成效果順序的一部分拖曳。
+- E-paper Device Mode 以「繪製到電子紙」取代 Export PNG；它重新跑完整 pipeline、依實際尺寸正規化方向、編碼 EPDIMG，並只送一次 raw upload。
 
 ## 圖片呈現區行為
 

@@ -44,6 +44,7 @@
 
     app.app.state = {
         activePageId: null,
+        blockingOperation: null,
         theme: normalizeTheme(storedSettings.theme),
         language: normalizeLanguage(storedSettings.language)
     };

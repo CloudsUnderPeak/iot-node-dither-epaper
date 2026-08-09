@@ -45,6 +45,9 @@
         addItem('device-info', app.i18n.t('menuDeviceInfo'));
         addItem('device-network', app.i18n.t('menuDeviceNetwork'));
         addItem('device-system', app.i18n.t('menuDeviceSystem'));
+        if (app.device.epaper.isSupported()) {
+            addItem('device-epaper-test', app.i18n.t('menuEpaperTest'));
+        }
 
         addDivider();
         addItem('web-setting', app.i18n.t('menuWebSetting'));
@@ -81,6 +84,10 @@
 
     // 切換選單顯示狀態；render 會在每次打開前更新選項。
     AppMenu.prototype.toggle = function toggle() {
+        if (app.app.state.blockingOperation) {
+            this.hide();
+            return;
+        }
         if (this.node.hidden) {
             this.render();
             this.node.hidden = false;
