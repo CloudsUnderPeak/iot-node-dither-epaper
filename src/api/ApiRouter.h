@@ -2,12 +2,15 @@
 
 #include "alive/AliveEndpoints.h"
 #include "auth/AuthEndpoints.h"
+#include "epaper/EpaperEndpoints.h"
+#include "runtime/RuntimeEndpoints.h"
 #include "shared/ApiTypes.h"
 #include "storage/UserFileEndpoints.h"
 #include "system/SystemEndpoints.h"
 #include "wifi/WifiEndpoints.h"
 #include "modules/auth/AuthService.h"
 #include "modules/config/ConfigService.h"
+#include "modules/epaper/EpaperService.h"
 #include "modules/runtime/RuntimeActionScheduler.h"
 #include "modules/storage/EmbeddedWebAssets.h"
 #include "modules/storage/FlashStorage.h"
@@ -27,6 +30,7 @@ struct ApiRouterDeps {
   StorageLifecycle &storageLifecycle;
   AuthService &authService;
   RuntimeActionScheduler &runtime;
+  EpaperService &epaperService;
 };
 
 // Lists every REST/serial URL and delegates directly to the matching endpoint.
@@ -43,6 +47,8 @@ class ApiRouter {
     Query,
     RawUpload,
     RawDownload,
+    EpaperRawUpload,
+    EpaperRawDownload,
   };
 
   struct RouteInfo {
@@ -91,6 +97,18 @@ class ApiRouter {
                                       uint8_t *buffer,
                                       size_t bufferLength);
   void finishFileDownload(uint32_t sessionId);
+  FileUploadStart prepareEpaperUpload(size_t contentLength);
+  Api::Response writeEpaperUpload(uint32_t sessionId,
+                                  size_t index,
+                                  const uint8_t *data,
+                                  size_t length);
+  Api::Response finishEpaperUpload(uint32_t sessionId);
+  void abortEpaperUpload(uint32_t sessionId);
+  FileDownloadStart prepareEpaperDownload(const char *rangeHeader);
+  UserDataReadResult readEpaperDownload(uint32_t sessionId,
+                                        uint8_t *buffer,
+                                        size_t bufferLength);
+  void finishEpaperDownload(uint32_t sessionId);
 
  private:
   enum class RouteAccess : uint8_t {
@@ -123,6 +141,8 @@ class ApiRouter {
   const FlashStorage *flashStorage_ = nullptr;
   UserDataStorage *userData_ = nullptr;
   AuthService *authService_ = nullptr;
+  RuntimeActionScheduler *runtimeActions_ = nullptr;
+  EpaperService *epaperService_ = nullptr;
   AuthEndpoints authEndpoints_;
   WifiEndpoints wifiEndpoints_;
   SystemEndpoints systemEndpoints_;

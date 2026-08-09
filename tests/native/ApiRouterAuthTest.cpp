@@ -22,6 +22,7 @@ struct RouterFixture {
   StorageLifecycle lifecycle;
   AuthService auth;
   RuntimeActionScheduler runtime;
+  EpaperService epaper;
   ApiRouter router;
 
   RouterFixture() {
@@ -36,6 +37,7 @@ struct RouterFixture {
         lifecycle,
         auth,
         runtime,
+        epaper,
     };
     expect(router.begin(deps).ok(),
            "router should initialize with complete dependencies");
@@ -70,6 +72,15 @@ void testExactRouteAuthorizationMatrix() {
       {Api::Method::Get, "/api/web", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Get, "/api/storage", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Get, "/api/storage/files", ApiRouter::HttpBinding::Query, ApiRouter::RouteMatch::Exact, true, 200},
+      {Api::Method::Get, "/api/epaper", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
+      {Api::Method::Get, "/api/epaper/status", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
+      {Api::Method::Post, "/api/epaper/image", ApiRouter::HttpBinding::EpaperRawUpload, ApiRouter::RouteMatch::Exact, false, 404},
+      {Api::Method::Get, "/api/epaper/image", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 404},
+      {Api::Method::Get, "/api/epaper/image/download", ApiRouter::HttpBinding::EpaperRawDownload, ApiRouter::RouteMatch::Exact, false, 404},
+      {Api::Method::Post, "/api/epaper/image/refresh", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 202},
+      {Api::Method::Post, "/api/epaper/image/white", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 202},
+      {Api::Method::Post, "/api/epaper/image/palette", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 202},
+      {Api::Method::Get, "/api/runtime/status", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Get, "/api/auth", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Post, "/api/auth/login", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, false, 400},
       {Api::Method::Post, "/api/auth/verify", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, false, 400},
@@ -224,6 +235,54 @@ void testDynamicFileAuthorizationAndTransport() {
   expect(!download.ready && download.response.statusCode == 404 &&
              fixture.userData.downloadBeginCount == 1,
          "invalid download path must not open another storage session");
+
+  upload = fixture.router.prepareFileUpload(
+      "valid-token", "/api/storage/files/epaper-current.epd", 12);
+  expect(!upload.ready && upload.response.statusCode == 403 &&
+             upload.response.data.c_str() == std::string("{\"code\":\"reserved_file\"}") &&
+             fixture.userData.uploadBeginCount == 1,
+         "generic upload must not replace the reserved e-paper image");
+  expect(fixture.router.dispatch(
+             requestFor(Api::Method::Delete,
+                        "/api/storage/files/epaper-current.epd",
+                        "valid-token", Api::Transport::Serial)).statusCode == 403,
+         "generic delete must not remove the reserved e-paper image");
+}
+
+void testEpaperPublicContract() {
+  RouterFixture fixture;
+
+  const Api::Response capabilities = fixture.router.dispatch(
+      requestFor(Api::Method::Get, "/api/epaper"));
+  const std::string capabilityData = capabilities.data.c_str();
+  expect(capabilities.statusCode == 200 &&
+             capabilityData.find("\"upload_bytes\":192040") != std::string::npos &&
+             capabilityData.find("\"cooldown_seconds\":180") != std::string::npos,
+         "e-paper capabilities must expose the fixed image and cooldown contract");
+
+  fixture.epaper.current.canDownload = true;
+  fixture.epaper.current.stored.present = true;
+  fixture.epaper.current.stored.valid = true;
+  fixture.epaper.current.lastSource = "uploaded";
+  fixture.epaper.current.lastResult = "success";
+  const Api::Response status = fixture.router.dispatch(
+      requestFor(Api::Method::Get, "/api/epaper/status"));
+  const std::string statusData = status.data.c_str();
+  expect(status.statusCode == 200 &&
+             statusData.find("\"can_download\":true") != std::string::npos &&
+             statusData.find("\"available\":true") != std::string::npos &&
+             statusData.find("\"source\":\"uploaded\"") != std::string::npos &&
+             statusData.find("\"last_reset_reason\":\"software\"") != std::string::npos,
+         "e-paper status must expose the documented cached operation fields");
+
+  expect(fixture.router.dispatch(
+             requestFor(Api::Method::Post, "/api/epaper/image", "",
+                        Api::Transport::Serial)).statusCode == 415,
+         "serial e-paper upload must reject the raw transport");
+  expect(fixture.router.dispatch(
+             requestFor(Api::Method::Get, "/api/epaper/image/download", "",
+                        Api::Transport::Serial)).statusCode == 415,
+         "serial e-paper download must reject the raw transport");
 }
 
 void testUnknownRoutesRemainNotFound() {
@@ -241,6 +300,7 @@ int main() {
   testExactRouteAuthorizationMatrix();
   testWebIdentityMatchesAcrossTransports();
   testDynamicFileAuthorizationAndTransport();
+  testEpaperPublicContract();
   testUnknownRoutesRemainNotFound();
   if (failures != 0) {
     std::cerr << failures << " API router authorization test(s) failed\n";

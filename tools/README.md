@@ -9,5 +9,6 @@ The `tools/` directory is organized into separate directories by function. Run a
 | [`web-build/`](web-build/) | Select, process, publish, and verify builtin/user production web or the builtin demo under `build/latest/web/` | `web-build/build_web.py` |
 | [`release-build/`](release-build/) | Compile current production web into firmware; snapshot, package, verify, clean, and flash latest or historical images | `release-build/build_release.py` |
 | [`serial-monitor/`](serial-monitor/) | Capture ESP32 serial output for a bounded duration | `serial-monitor/monitor_serial.py` |
+| [`epaper/`](epaper/) | Convert images to six-color EPDIMG and call the public e-paper API | `epaper/epaper_tool.py` |
 
 See the `README.md` in each function directory for requirements, options, and limitations.

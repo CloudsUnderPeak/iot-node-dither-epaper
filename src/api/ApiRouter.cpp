@@ -32,6 +32,59 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
        return UserFileEndpoints::list(request, *router.userData_);
      },
      HttpBinding::Query},
+    {Api::Method::Get, "/api/epaper",
+     +[](ApiRouter &, const Api::Request &request, const char *) {
+       return EpaperEndpoints::capabilities(request);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Get, "/api/epaper/status",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return EpaperEndpoints::status(request, *router.epaperService_);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Post, "/api/epaper/image",
+     +[](ApiRouter &, const Api::Request &request, const char *) {
+       return request.transport == Api::Transport::Serial
+                  ? EpaperEndpoints::rawTransportUnsupported()
+                  : Api::problem(404, "not_found", "not found");
+     },
+     HttpBinding::EpaperRawUpload, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Get, "/api/epaper/image",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return EpaperEndpoints::metadata(request, *router.epaperService_);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Get, "/api/epaper/image/download",
+     +[](ApiRouter &, const Api::Request &request, const char *) {
+       return request.transport == Api::Transport::Serial
+                  ? EpaperEndpoints::rawTransportUnsupported()
+                  : Api::problem(404, "not_found", "not found");
+     },
+     HttpBinding::EpaperRawDownload, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Post, "/api/epaper/image/refresh",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return EpaperEndpoints::action(
+           request, *router.epaperService_, EpaperDrawAction::Stored);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Post, "/api/epaper/image/white",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return EpaperEndpoints::action(
+           request, *router.epaperService_, EpaperDrawAction::White);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Post, "/api/epaper/image/palette",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return EpaperEndpoints::action(
+           request, *router.epaperService_, EpaperDrawAction::Palette);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Get, "/api/runtime/status",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return RuntimeEndpoints::status(
+           request, *router.epaperService_, *router.runtimeActions_);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
     {Api::Method::Get, "/api/auth",
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return router.authEndpoints_.info();
@@ -133,6 +186,8 @@ Result ApiRouter::begin(const ApiRouterDeps &deps) {
   flashStorage_ = &deps.flashStorage;
   userData_ = &deps.userData;
   authService_ = &deps.authService;
+  runtimeActions_ = &deps.runtime;
+  epaperService_ = &deps.epaperService;
 
   Result result = authEndpoints_.begin(
       &deps.configService, &deps.authService, &deps.runtime);
@@ -212,6 +267,11 @@ ApiRouter::FileUploadStart ApiRouter::prepareFileUpload(
     start.response = request.response;
     return start;
   }
+  if (strcmp(request.name, EpaperService::kImageName) == 0) {
+    start.response = Api::problem(
+        403, "reserved_file", "e-paper image is managed by /api/epaper/image");
+    return start;
+  }
   const UserDataUploadBegin storageStart =
       userData_->beginUpload(request.name, contentLength);
   start.maxUploadBytes = storageStart.maxUploadBytes;
@@ -287,6 +347,92 @@ UserDataReadResult ApiRouter::readFileDownload(uint32_t sessionId,
 
 void ApiRouter::finishFileDownload(uint32_t sessionId) {
   userData_->finishDownload(sessionId);
+}
+
+ApiRouter::FileUploadStart ApiRouter::prepareEpaperUpload(
+    size_t contentLength) {
+  FileUploadStart start;
+  const EpaperServiceResult result = epaperService_->beginUpload(contentLength);
+  if (!result.ok()) {
+    start.response = EpaperEndpoints::fromServiceResult(
+        result, epaperService_->snapshot().retryAfterSeconds);
+    return start;
+  }
+  start.ready = true;
+  start.sessionId = result.sessionId;
+  start.maxUploadBytes = EpaperImageFormat::kImageBytes;
+  start.response = Api::ok("{}");
+  return start;
+}
+
+Api::Response ApiRouter::writeEpaperUpload(uint32_t sessionId,
+                                           size_t index,
+                                           const uint8_t *data,
+                                           size_t length) {
+  return EpaperEndpoints::fromServiceResult(
+      epaperService_->writeUpload(sessionId, index, data, length));
+}
+
+Api::Response ApiRouter::finishEpaperUpload(uint32_t sessionId) {
+  const EpaperServiceResult result = epaperService_->finishUpload(sessionId);
+  if (!result.ok()) return EpaperEndpoints::fromServiceResult(result);
+  JsonDocument data;
+  data["state"] = "queued";
+  return Api::accepted(Api::json(data), "e-paper image uploaded and draw queued");
+}
+
+void ApiRouter::abortEpaperUpload(uint32_t sessionId) {
+  epaperService_->abortUpload(sessionId);
+}
+
+ApiRouter::FileDownloadStart ApiRouter::prepareEpaperDownload(
+    const char *rangeHeader) {
+  FileDownloadStart start;
+  const EpaperStoredImageMetadata stored = epaperService_->snapshot().stored;
+  if (!stored.present) {
+    start.response = Api::problem(404, "epaper_image_not_found",
+                                  "stored e-paper image not found");
+    return start;
+  }
+  if (!stored.valid) {
+    JsonDocument data;
+    data["code"] = "invalid_epaper_image";
+    data["reason"] = EpaperImageFormat::errorCode(stored.validationError);
+    start.response = Api::error(
+        422, Api::json(data), "stored EPDIMG is invalid");
+    return start;
+  }
+  const UserDataDownloadBegin begin =
+      epaperService_->beginImageDownload(rangeHeader);
+  start.fileSize = begin.fileSize;
+  if (!begin.result.ok()) {
+    if (begin.result.status == UserDataFileStatus::NotFound) {
+      start.response = Api::problem(404, "epaper_image_not_found",
+                                    "stored e-paper image not found");
+    } else {
+      start.response = fileStorageError(begin.result, begin.fileSize);
+    }
+    return start;
+  }
+  start.ready = true;
+  start.sessionId = begin.sessionId;
+  strlcpy(start.name, EpaperService::kImageName, sizeof(start.name));
+  start.rangeStart = begin.rangeStart;
+  start.contentLength = begin.contentLength;
+  start.partial = begin.partial;
+  start.response = Api::ok("{}");
+  return start;
+}
+
+UserDataReadResult ApiRouter::readEpaperDownload(
+    uint32_t sessionId,
+    uint8_t *buffer,
+    size_t bufferLength) {
+  return epaperService_->readImageDownload(sessionId, buffer, bufferLength);
+}
+
+void ApiRouter::finishEpaperDownload(uint32_t sessionId) {
+  epaperService_->finishImageDownload(sessionId);
 }
 
 ApiRouter::StreamingFileRequest ApiRouter::prepareStreamingFileRequest(

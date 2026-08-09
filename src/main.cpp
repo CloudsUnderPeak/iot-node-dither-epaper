@@ -1,7 +1,23 @@
 #include <Arduino.h>
+#include <SPI.h>
 
 #include "api/ApiRouter.h"
+#include "board/BoardProfile.h"
 #include "core/SubsystemRegistry.h"
+#include "modules/epaper/Epd7In3E.h"
+#include "modules/epaper/EpdSpiTransport.h"
+#include "modules/epaper/ArduinoCpuFrequencyDriver.h"
+#include "modules/epaper/ArduinoEpaperSafetyStorage.h"
+#include "modules/epaper/ArduinoRestartDriver.h"
+#include "modules/epaper/EpaperSafetyStore.h"
+#include "modules/epaper/EpaperShutdownCoordinator.h"
+#include "modules/epaper/EpaperCooldown.h"
+#include "modules/epaper/EpaperPowerProbe.h"
+#include "modules/epaper/EpaperRefreshProbe.h"
+#include "modules/epaper/EpaperService.h"
+#include "modules/hardware/EpaperHardware.h"
+#include "modules/hardware/PinRegistry.h"
+#include "modules/hardware/SpiBus.h"
 #include "modules/runtime/RuntimeActionScheduler.h"
 #include "modules/auth/AuthService.h"
 #include "modules/captive/CaptivePortalDnsService.h"
@@ -25,7 +41,33 @@
 #define STATUS_LED_PIN -1
 #endif
 
+#ifndef ENABLE_EPAPER_PANEL_SELF_TEST
+#define ENABLE_EPAPER_PANEL_SELF_TEST 0
+#endif
+
+#ifndef ENABLE_EPAPER_REFRESH_SELF_TEST
+#define ENABLE_EPAPER_REFRESH_SELF_TEST 0
+#endif
+
+#if ENABLE_EPAPER_PANEL_SELF_TEST && ENABLE_EPAPER_REFRESH_SELF_TEST
+#error "Only one e-paper hardware self-test may be enabled"
+#endif
+
 namespace {
+PinRegistry pinRegistry;
+SpiBus spiBus;
+EpdSpiTransport epdTransport;
+Epd7In3E epdDriver;
+ArduinoCpuFrequencyDriver epaperCpuFrequency;
+ArduinoEpaperSafetyStorage epaperSafetyStorage;
+EpaperSafetyStore epaperSafetyStore;
+ArduinoRestartDriver restartDriver;
+EpaperShutdownCoordinator epaperShutdownCoordinator;
+EpaperCooldown epaperCooldown;
+EpaperPowerProbe epaperPowerProbe;
+EpaperRefreshProbe epaperRefreshProbe;
+EpaperPaletteFrameSource epaperPaletteFrame;
+EpaperService epaperService;
 ArduinoPreferencesBackend configBackend;
 PreferencesConfigStore configStore(configBackend);
 ConfigService configService(configStore);
@@ -53,12 +95,117 @@ const char *readyLabel(bool ready) {
   return ready ? "READY" : "FAIL";
 }
 
+const char *epaperBusyLabel() {
+  if (!epdTransport.ready()) return "unavailable";
+  return epdTransport.busyHigh() ? "high_idle" : "low_busy";
+}
+
 bool wifiHealthy(const WifiStatus &status) {
   if (status.apState == WifiApState::Failed) return false;
   if (status.staState == WifiLinkState::Failed) {
     return status.apState == WifiApState::Active;
   }
   return true;
+}
+
+Result startEpaperHardware() {
+  Result result = EpaperHardware::claimAndQuiescePins(&pinRegistry);
+  if (!result.ok()) return result;
+  result = spiBus.begin(&SPI, &pinRegistry, Board::ActiveProfile::kSpi);
+  if (!result.ok()) return result;
+  result = epdTransport.begin(&spiBus, &pinRegistry);
+  if (!result.ok()) return result;
+  if (!epdDriver.begin(&epdTransport)) {
+    return invalidInput("e-paper driver logical quiesce failed");
+  }
+  if (!epaperSafetyStore.begin(&epaperSafetyStorage)) {
+    return storageError("e-paper safety marker unavailable");
+  }
+  if (!epaperShutdownCoordinator.begin(
+          &epdDriver, &epaperSafetyStore, &restartDriver)) {
+    return invalidInput("e-paper shutdown coordinator unavailable");
+  }
+  return epaperShutdownCoordinator.unavailable()
+             ? storageError("e-paper active marker requires power-cycle recovery")
+             : okResult();
+}
+
+bool epaperHardwareHealthy() {
+  const Epd7In3E::State driverState = epdDriver.state();
+  return spiBus.ready() && epdTransport.ready() &&
+         (driverState == Epd7In3E::State::Quiesced ||
+          driverState == Epd7In3E::State::Sleeping) &&
+         epaperSafetyStore.ready() && epaperShutdownCoordinator.ready() &&
+         !epaperShutdownCoordinator.unavailable();
+}
+
+void reportEpaperHardware(const Result &) {
+  Serial.printf(
+      "epaper-hardware: board=%s, spi=%d/%d/%d, cs=%d, dc=%d, rst=%d, "
+      "busy=%d, busy_level=%s, marker=%s, cpu_mhz=%u, "
+      "state=logical_quiesce, refresh=disabled\n",
+      Board::ActiveProfile::kBoardId,
+      Board::ActiveProfile::kSpi.sck,
+      Board::ActiveProfile::kSpi.mosi,
+      Board::ActiveProfile::kSpi.miso,
+      Board::ActiveProfile::kEpaper.cs,
+      Board::ActiveProfile::kEpaper.dc,
+      Board::ActiveProfile::kEpaper.reset,
+      Board::ActiveProfile::kEpaper.busy,
+      epaperBusyLabel(),
+      epaperProtectionStageToString(epaperSafetyStore.stage()),
+      static_cast<unsigned>(epaperCpuFrequency.currentMhz()));
+}
+
+void runEpaperPanelSelfTest() {
+#if ENABLE_EPAPER_PANEL_SELF_TEST
+  Serial.println(
+      "epaper-self-test: armed in 5000 ms, power-only, refresh=disabled");
+  delay(5000);
+  Serial.printf(
+      "epaper-self-test: start marker=%s, cpu_mhz=%u, busy=%s, refresh=disabled\n",
+      epaperProtectionStageToString(epaperSafetyStore.stage()),
+      static_cast<unsigned>(epaperCpuFrequency.currentMhz()),
+      epaperBusyLabel());
+  const bool success = epaperPowerProbe.run(
+      &epdDriver, &epdTransport, &epaperSafetyStore, &epaperCpuFrequency,
+      &epaperShutdownCoordinator);
+  if (success) epaperCooldown.begin(millis());
+  Serial.printf(
+      "epaper-self-test: result=%s, driver_error=%u, shutdown=%s, marker=%s, "
+      "cpu_mhz=%u, busy=%s, refresh=disabled\n",
+      epaperPowerProbeResultToString(epaperPowerProbe.result()),
+      static_cast<unsigned>(epaperPowerProbe.driverError()),
+      epaperShutdownOutcomeToString(epaperShutdownCoordinator.lastOutcome()),
+      epaperProtectionStageToString(epaperSafetyStore.stage()),
+      static_cast<unsigned>(epaperCpuFrequency.currentMhz()),
+      epaperBusyLabel());
+#elif ENABLE_EPAPER_REFRESH_SELF_TEST
+  Serial.println(
+      "epaper-refresh-test: armed in 5000 ms, pattern=palette, refresh=once");
+  delay(5000);
+  Serial.printf(
+      "epaper-refresh-test: start marker=%s, cpu_mhz=%u, busy=%s, "
+      "frame_bytes=%u\n",
+      epaperProtectionStageToString(epaperSafetyStore.stage()),
+      static_cast<unsigned>(epaperCpuFrequency.currentMhz()),
+      epaperBusyLabel(),
+      static_cast<unsigned>(EpaperImageFormat::kFrameBytes));
+  const bool success = epaperRefreshProbe.run(
+      &epdDriver, &epdTransport, &epaperPaletteFrame, &epaperSafetyStore,
+      &epaperCpuFrequency, &epaperShutdownCoordinator);
+  if (success) epaperCooldown.begin(millis());
+  Serial.printf(
+      "epaper-refresh-test: result=%s, driver_error=%u, transferred=%u, "
+      "shutdown=%s, marker=%s, cpu_mhz=%u, busy=%s\n",
+      epaperRefreshProbeResultToString(epaperRefreshProbe.result()),
+      static_cast<unsigned>(epaperRefreshProbe.driverError()),
+      static_cast<unsigned>(epaperRefreshProbe.transferredBytes()),
+      epaperShutdownOutcomeToString(epaperShutdownCoordinator.lastOutcome()),
+      epaperProtectionStageToString(epaperSafetyStore.stage()),
+      static_cast<unsigned>(epaperCpuFrequency.currentMhz()),
+      epaperBusyLabel());
+#endif
 }
 
 void printWifiStatus(const WifiStatus &status) {
@@ -71,6 +218,17 @@ void printWifiStatus(const WifiStatus &status) {
 
 Result startUserdata() {
   return storageLifecycle.begin(&userDataStorage);
+}
+
+Result startEpaperService() {
+  return epaperService.begin(
+      &userDataStorage, &epdDriver, &epdTransport, &epaperSafetyStore,
+      &epaperCpuFrequency, &epaperShutdownCoordinator);
+}
+
+bool epaperServiceHealthy() {
+  return epaperService.ready() &&
+         epaperService.snapshot(millis()).state != EpaperServiceState::Unavailable;
 }
 
 bool userdataHealthy() {
@@ -203,7 +361,8 @@ Result startWifiScanner() {
 
 Result startRuntime() {
   return runtimeActions.begin(
-      &configService, &wifiManager, &mdnsService, &captiveDnsService);
+      &configService, &wifiManager, &mdnsService, &captiveDnsService,
+      &epaperShutdownCoordinator);
 }
 
 bool runtimeHealthy() {
@@ -221,6 +380,7 @@ Result startApiRouter() {
       storageLifecycle,
       authService,
       runtimeActions,
+      epaperService,
   };
   return apiRouter.begin(deps);
 }
@@ -244,7 +404,9 @@ void reportConsole(const Result &) {
 }
 
 enum SubsystemIndex : size_t {
+  kEpaperHardwareSubsystem,
   kUserdataSubsystem,
+  kEpaperServiceSubsystem,
   kConfigSubsystem,
   kWifiSubsystem,
   kAssetsSubsystem,
@@ -261,7 +423,10 @@ enum SubsystemIndex : size_t {
 };
 
 Subsystem subsystems[] = {
+    {"epaper_hardware", startEpaperHardware, epaperHardwareHealthy,
+     reportEpaperHardware},
     {"userdata", startUserdata, userdataHealthy, reportUserdata},
+    {"epaper", startEpaperService, epaperServiceHealthy},
     {"config", startConfig, configHealthy, reportConfig},
     {"wifi", startWifi, wifiSubsystemHealthy, reportWifi},
     {"assets", startAssets, nullptr, reportAssets},
@@ -310,6 +475,16 @@ void printHeartbeat() {
         subsystem.name,
         readyLabel(subsystemHealthy(subsystem)));
   }
+  printHeartbeatField("epaper_busy", epaperBusyLabel());
+  printHeartbeatField(
+      "epaper_marker",
+      epaperProtectionStageToString(epaperSafetyStore.stage()));
+  printHeartbeatField("cpu_mhz", epaperCpuFrequency.currentMhz());
+  printHeartbeatField(
+      "epaper_cooldown_seconds",
+      epaperService.ready()
+          ? epaperService.snapshot(millis()).retryAfterSeconds
+          : epaperCooldown.retryAfterSeconds(millis()));
   printHeartbeatField(
       "config_state",
       configStartupStateToString(configService.startupState()));
@@ -329,6 +504,12 @@ void printHeartbeat() {
 }  // namespace
 
 void setup() {
+  // Establish CS high and DC/RST low before Serial startup delays or any
+  // network/storage subsystem. This is logical quiesce only; it never sends a
+  // panel command and must not be reported as Power OFF or Deep Sleep.
+  const Result epaperHardwareResult =
+      startSubsystem(subsystems[kEpaperHardwareSubsystem]);
+
 #if STATUS_LED_PIN >= 0
   pinMode(STATUS_LED_PIN, OUTPUT);
 #endif
@@ -344,7 +525,18 @@ void setup() {
   Serial.printf("Flash: %u MB, free heap: %u bytes\n",
                 ESP.getFlashChipSize() / (1024 * 1024), ESP.getFreeHeap());
 
-  for (Subsystem &subsystem : subsystems) {
+  const Subsystem &epaperHardware = subsystems[kEpaperHardwareSubsystem];
+  Serial.printf("%s: start: %s (%u), state=%s\n",
+                epaperHardware.name,
+                epaperHardwareResult.message,
+                static_cast<unsigned>(epaperHardwareResult.code),
+                readyLabel(epaperHardware.ready));
+  if (epaperHardware.report != nullptr) {
+    epaperHardware.report(epaperHardwareResult);
+  }
+
+  for (size_t index = kUserdataSubsystem; index < kSubsystemCount; ++index) {
+    Subsystem &subsystem = subsystems[index];
     const Result result = startSubsystem(subsystem);
     Serial.printf("%s: start: %s (%u), state=%s\n",
                   subsystem.name,
@@ -355,12 +547,20 @@ void setup() {
       subsystem.report(result);
     }
   }
+  runEpaperPanelSelfTest();
 }
 
 void loop() {
 #if STATUS_LED_PIN >= 0
   digitalWrite(STATUS_LED_PIN, tick & 1U);
 #endif
+
+  const uint32_t now = millis();
+  if (epaperService.ready()) epaperService.poll(now);
+  if (epaperCooldown.elapsed(now)) {
+    const bool markerCleared = epaperSafetyStore.clear();
+    epaperCooldown.releaseIfElapsed(now, markerCleared);
+  }
 
   if (subsystemHealthy(subsystems[kRuntimeSubsystem])) {
     runtimeActions.poll();
@@ -378,7 +578,6 @@ void loop() {
     consoleShell.poll();
   }
 
-  const uint32_t now = millis();
   if (now - lastHeartbeatMs >= 1000U) {
     lastHeartbeatMs = now;
     printHeartbeat();

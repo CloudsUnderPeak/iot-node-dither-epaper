@@ -28,17 +28,16 @@ http://<hostname>.local
 - 使用 `ESPAsyncWebServer`。
 - 網路 transport 僅支援 HTTP；USB serial 的 `api ...` adapter 共用 JSON resource contract。
 - 靜態頁面與明確標示為公開的 `GET` API 不需要登入；Wi-Fi scan 與 auth session 需要 Bearer token。
-- 除 `/api/auth/login` 與 `/api/auth/verify` 外，`POST` / `PUT` / `DELETE` 類寫入 API 需要 Bearer token。
+- `POST` / `PUT` / `DELETE` 類寫入 API 預設需要 Bearer token；auth login/verify 與本文件列出的 e-paper action 是明確公開例外。
 - REST JSON response 使用統一 envelope。
 - STA 連線成功後會啟動 mDNS，並註冊 `_http._tcp` port `80`。
 - AP/setup/fallback AP active 時會啟用 DNS wildcard captive portal，將 AP client 的任意 domain 查詢回覆為裝置 AP IP。
 - Wi-Fi 設定支援單組 STA credential、STA DHCP/static IPv4、單組 AP SSID、AP default/static IPv4、AP 密碼開關與 STA 失敗 fallback AP。
-- `userdata` 支援受保護的 generic file list、raw HTTP upload／download、single byte range 與 delete；不包含電子紙 rendering 或內容排程。
+- `userdata` 支援受保護的 generic file list、raw HTTP upload／download、single byte range 與 delete；e-paper 使用 reserved fixed file 與獨立 public resource family，不能由 generic PUT／DELETE 繞過 operation gate。
 
 目前不在範圍內：
 
 - 尚未實作完整 device config REST endpoint。
-- 尚未實作電子紙 endpoint。
 - 尚未持久化 AP DHCP server、AP channel、AP max clients、scan policy 等進階欄位。
 
 ## Response Envelope
@@ -93,6 +92,11 @@ wifi_scan_failed
 wifi_scan_busy
 wifi_connect_busy
 wifi_connect_requires_ap
+epaper_busy
+invalid_epaper_image
+epaper_image_not_found
+epaper_unavailable
+reserved_file
 not_found
 ```
 
@@ -102,13 +106,22 @@ not_found
 
 ## Auth
 
-除登入與帳密驗證外，所有 `POST` / `PUT` / `DELETE` 預設需要 Bearer token。`/api/storage/files` collection 與 item 的 `GET` 也需要 Bearer token；未來若新增免登入例外，必須明確記錄在本文件。
+除明列的公開例外外，所有 `POST` / `PUT` / `DELETE` 預設需要 Bearer token。`/api/storage/files` collection 與 item 的 `GET` 也需要 Bearer token；未來若新增免登入例外，必須明確記錄在本文件。
 Dynamic user-file item route 會先驗證 token，才開始 HTTP streaming storage session、判斷 serial raw transport 不支援，或執行 JSON delete；因此缺少或無效 token 固定先回 `401 unauthorized`。
 
 公開例外：
 
 - `POST /api/auth/login`
 - `POST /api/auth/verify`
+- `GET /api/epaper`
+- `GET /api/epaper/status`
+- `POST /api/epaper/image`
+- `GET /api/epaper/image`
+- `GET /api/epaper/image/download`
+- `POST /api/epaper/image/refresh`
+- `POST /api/epaper/image/white`
+- `POST /api/epaper/image/palette`
+- `GET /api/runtime/status`
 
 token 放在 HTTP header：
 
@@ -157,6 +170,15 @@ curl -H 'Authorization: Bearer <token>' \
 | `PUT` | `/api/storage/files/{name}` | 是 | 以 raw HTTP body 建立或原子替換檔案。 |
 | `GET` | `/api/storage/files/{name}` | 是 | 下載完整檔案或單一 byte range。 |
 | `DELETE` | `/api/storage/files/{name}` | 是 | 刪除檔案。 |
+| `GET` | `/api/epaper` | 否 | 固定 panel、format、檔名、cooldown 與能力資訊。 |
+| `GET` | `/api/epaper/status` | 否 | 動態 operation、retry、CPU、stored image 與 brownout 狀態。 |
+| `POST` | `/api/epaper/image` | 否 | 上傳固定 `EPDIMG` 並自動排程 draw；raw HTTP only。 |
+| `GET` | `/api/epaper/image` | 否 | 固定 image 的 header、CRC、generation 與 validity metadata。 |
+| `GET` | `/api/epaper/image/download` | 否 | 下載完整固定 image 或 single byte range；raw HTTP only。 |
+| `POST` | `/api/epaper/image/refresh` | 否 | 重新驗證並重畫 stored image。 |
+| `POST` | `/api/epaper/image/white` | 否 | 動態產生全白 frame 並 draw。 |
+| `POST` | `/api/epaper/image/palette` | 否 | 動態產生六色測試 frame 並 draw。 |
+| `GET` | `/api/runtime/status` | 否 | 跨模組 activity、phase、CPU 與 blocked-resource 概況。 |
 
 AP/setup/fallback AP active 時，裝置會啟用 DNS wildcard captive portal；SoftAP DHCP 將 AP IP 發布為 DNS server，並以 DHCP captive portal option 發布 portal URI。AP client 查詢任意 domain 都會回裝置 AP IP。純 STA LAN 模式不啟用 DNS wildcard，避免影響一般網路。DHCP captive portal option、DNS interception 與 detection endpoint 都只能提高 client 發現率；作業系統不保證自動顯示 portal，直接開啟 AP IP 的 `/` 始終是正式入口。
 
@@ -968,3 +990,154 @@ Content-Disposition: inline; filename="photo.jpg"
 ```
 
 檔案不存在回 `404 not_found`；filesystem 未掛載回 `503 storage_unavailable`；operation gate busy 回 `409 storage_busy`。所有 file endpoint 都不公開 internal temporary file。
+
+## E-paper
+
+本節全部 endpoint 都是公開例外，不要求 Bearer token。這代表同網路 client 可讀取／替換固定圖片並觸發 draw；180 秒 cooldown 是面板保護，不是 authentication。JSON status、metadata 與 action 可由 HTTP 或 serial `api ...` 使用；raw upload/download 只支援 HTTP。
+
+`EPDIMG` request 固定為 192,040 bytes：40-byte little-endian header 後接 192,000-byte packed frame。Header layout 依序為 8-byte magic `EPDIMG\0\0`、uint32 version `1`、uint32 header size `40`、uint32 width `800`、uint32 height `480`、uint32 frame bytes `192000`、uint32 CRC32 與 non-zero uint64 generation。每 byte 的 high／low nibble 分別是左／右 pixel，只允許 `0,1,2,3,5,6`。
+
+### `GET /api/epaper`
+
+只回 build/board profile 固定資訊，不得包含 runtime state、目前 CPU、stored file availability 或 last result。成功回 `200`：
+
+```json
+{
+  "success": true,
+  "data": {
+    "panel": {"model": "waveshare-7in3e", "width": 800, "height": 480, "colors": 6, "color_codes": [0, 1, 2, 3, 5, 6]},
+    "image": {"name": "epaper-current.epd", "format": "epdimg", "header_bytes": 40, "frame_bytes": 192000, "upload_bytes": 192040},
+    "refresh": {"cpu_mhz": 80, "cooldown_seconds": 180, "automatic_on_boot": false},
+    "capabilities": {"upload": true, "metadata": true, "download": true, "refresh": true, "white": true, "palette": true}
+  },
+  "message": "ok"
+}
+```
+
+### `GET /api/epaper/status`
+
+只回 cached dynamic snapshot。成功回 `200`：
+
+```json
+{
+  "success": true,
+  "data": {
+    "state": "cooldown",
+    "phase": null,
+    "busy": true,
+    "can_upload": false,
+    "can_draw": false,
+    "can_download": true,
+    "retry_after_seconds": 173,
+    "cpu_mhz": 160,
+    "panel_state": "sleeping",
+    "shutdown_method": "power_off_then_deep_sleep",
+    "recovery_required": null,
+    "stored_image": {"available": true, "valid": true},
+    "last_operation": {"source": "uploaded", "result": "success", "error_code": "none"},
+    "last_reset_reason": "software",
+    "brownout_detected": false,
+    "brownout_during_draw": false
+  },
+  "message": "ok"
+}
+```
+
+- `state` 固定為 `idle`、`uploading`、`queued`、`drawing`、`cooldown`、`unavailable`；drawing `phase` 固定為 `prewake`、`initializing`、`transferring`、`refreshing`、`powering_off`、`sleeping`、`quiescing` 或 `null`。
+- `panel_state` 固定為 `inactive`、`active`、`sleeping`、`unknown`；`shutdown_method` 固定為 `none`、`power_off_then_deep_sleep`、`logical_only`。
+- `logical_only` 必須搭配 `state: unavailable`、`panel_state: unknown`、`recovery_required: full_power_cycle`、`can_draw: false`，不得表示成功 safe-off。
+- `retry_after_seconds` 在 cooldown 中向上取整；無可自行到期 cooldown 時為 `null`。Brownout + active marker 映射為 `last_operation.result: interrupted`、`error_code: brownout`、兩個 brownout bool 為 `true`，並要求 full power cycle。
+
+### `POST /api/epaper/image`
+
+Body 是 raw `EPDIMG`，不是 JSON、form 或 multipart；`Content-Type` 可為 `application/octet-stream` 或省略，`Content-Length` 必須精確等於 `192040`。成功 atomic commit 後回 `202` 與 `state: queued`，client再輪詢 status。中止、invalid frame 或 storage failure 不覆蓋舊檔、不排程 draw。Serial 回 `415 unsupported_transport`。
+
+### `GET /api/epaper/image`
+
+回 fixed file 的 cached/validated metadata，不回 raw bytes。Generation 固定以 decimal string、CRC32 固定以 8-digit uppercase hex string 表示：
+
+```json
+{
+  "success": true,
+  "data": {
+    "name": "epaper-current.epd",
+    "format": "epdimg",
+    "media_type": "application/octet-stream",
+    "size_bytes": 192040,
+    "header_bytes": 40,
+    "frame_bytes": 192000,
+    "width": 800,
+    "height": 480,
+    "generation": "1234567890123456789",
+    "crc32": "89ABCDEF",
+    "valid": true
+  },
+  "message": "ok"
+}
+```
+
+不存在回 `404 epaper_image_not_found`；存在但 validation失敗回 `422 invalid_epaper_image`，可在 data 回不含 raw bytes 的 stable `reason`。
+
+### `GET /api/epaper/image/download`
+
+HTTP body 是 raw 192,040-byte fixed file，不使用 JSON success envelope。完整下載回 `200`，single Range 與 generic download 相同，回 `206` 或 `416 range_not_satisfiable`。Response 至少包含：
+
+```text
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="epaper-current.epd"
+Accept-Ranges: bytes
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+```
+
+Serial 回 `415 unsupported_transport`。Userdata gate 正被 upload、validation 或 frame read 使用時回 `409 storage_busy`；純 physical refresh 與 cooldown 已釋放 storage gate，可下載。
+
+### `POST /api/epaper/image/refresh`
+
+不接受 body fields；重新驗證並重畫 fixed file，不寫檔。無有效 stored image 回 `404 epaper_image_not_found`，接受後回 `202`。
+
+### `POST /api/epaper/image/white`
+
+不接受 body fields；動態串流 `0x11` 共 192,000 bytes，不建立或替換 user file，接受後回 `202`。
+
+### `POST /api/epaper/image/palette`
+
+不接受 body fields；動態產生 4-pixel black border及 black／white／yellow／red／blue／green vertical bars，不建立 pixel array 或 user file，接受後回 `202`。
+
+E-paper synchronous error mapping：
+
+| HTTP | code | 情境 |
+| ---: | --- | --- |
+| `409` | `epaper_busy` | uploading、queued、drawing、cooldown；cooldown 另回 `retry_after_seconds`。 |
+| `422` | `invalid_epaper_image` | header、尺寸、generation、palette、CRC 或 byte count 錯誤。 |
+| `404` | `epaper_image_not_found` | metadata／refresh／download 沒有有效 fixed file。 |
+| `503` | `epaper_unavailable` | pin、SPI、worker、safety store 未 ready或 panel state unknown。 |
+| `403` | `reserved_file` | Generic file PUT／DELETE 嘗試修改 `epaper-current.epd`。 |
+
+Storage error沿用 `storage_busy`、`storage_unavailable`、`insufficient_storage`、`storage_error`。已回 `202` 後的 async failure只寫入 `last_operation.error_code`，至少包含 `cpu_frequency_failed`、`brownout`、`busy_timeout`、`operation_watchdog_timeout`、`frame_read_failed`、`panel_init_failed`、`refresh_failed`、`power_off_failed`、`sleep_failed`、`panel_state_unknown`；software restart shutdown失敗另由 runtime 診斷回 `epaper_shutdown_failed`。
+
+## Runtime Status
+
+### `GET /api/runtime/status`
+
+公開、唯讀，回 cached cross-module activity，不掃 filesystem、不等待 bus，也不作全域 admission lock：
+
+```json
+{
+  "success": true,
+  "data": {
+    "state": "degraded",
+    "busy": true,
+    "activity": "epaper_draw",
+    "phase": "refreshing",
+    "cpu_mhz": 80,
+    "normal_cpu_mhz": 160,
+    "blocked_resources": ["epaper"],
+    "last_reset_reason": "software",
+    "brownout_detected": false
+  },
+  "message": "ok"
+}
+```
+
+`state` 固定為 `normal`、`degraded`、`restarting`。Validation時 blocked resources為 `epaper,userdata`，frame transfer為 `epaper,userdata,spi`，physical refresh與 cooldown只為 `epaper`；`busy: true` 不表示 HTTP 或 Wi-Fi 全部不可用。E-paper retry/cooldown的權威仍是 `/api/epaper/status`。

@@ -41,6 +41,50 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 "$build_dir/userdata-policy-test"
 
 g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/EpaperPureLogicTest.cpp" \
+  "$project_dir/src/modules/epaper/EpaperImageFormat.cpp" \
+  "$project_dir/src/modules/epaper/EpaperFrameSource.cpp" \
+  "$project_dir/src/modules/epaper/EpaperCooldown.cpp" \
+  -o "$build_dir/epaper-pure-logic-test"
+
+"$build_dir/epaper-pure-logic-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror -pthread \
+  -I"$project_dir/tests/native/stubs" \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/HardwareResourceTest.cpp" \
+  "$project_dir/src/modules/hardware/EpaperHardware.cpp" \
+  "$project_dir/src/modules/hardware/PinRegistry.cpp" \
+  "$project_dir/src/modules/hardware/SpiBus.cpp" \
+  -o "$build_dir/hardware-resource-test"
+
+"$build_dir/hardware-resource-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/EpdDriverTest.cpp" \
+  "$project_dir/src/modules/epaper/Epd7In3E.cpp" \
+  "$project_dir/src/modules/epaper/EpaperFrameSource.cpp" \
+  -o "$build_dir/epd-driver-test"
+
+"$build_dir/epd-driver-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/EpaperSafetyTest.cpp" \
+  "$project_dir/src/modules/epaper/CpuFrequencyGuard.cpp" \
+  "$project_dir/src/modules/epaper/EpaperSafetyStore.cpp" \
+  "$project_dir/src/modules/epaper/EpaperShutdownCoordinator.cpp" \
+  "$project_dir/src/modules/epaper/EpaperPowerProbe.cpp" \
+  "$project_dir/src/modules/epaper/EpaperRefreshProbe.cpp" \
+  "$project_dir/src/modules/epaper/Epd7In3E.cpp" \
+  "$project_dir/src/modules/epaper/EpaperFrameSource.cpp" \
+  -o "$build_dir/epaper-safety-test"
+
+"$build_dir/epaper-safety-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror \
   -I"$project_dir/tests/native/stubs" \
   -I"$arduinojson_include" \
   -I"$project_dir/src" \
@@ -164,6 +208,8 @@ g++ -std=c++17 -Wall -Wextra -Werror \
   "$project_dir/src/api/alive/AliveEndpoints.cpp" \
   "$project_dir/src/api/auth/AuthEndpoints.cpp" \
   "$project_dir/src/api/device/DeviceEndpoints.cpp" \
+  "$project_dir/src/api/epaper/EpaperEndpoints.cpp" \
+  "$project_dir/src/api/runtime/RuntimeEndpoints.cpp" \
   "$project_dir/src/api/storage/StorageEndpoints.cpp" \
   "$project_dir/src/api/storage/UserFileEndpoints.cpp" \
   "$project_dir/src/api/system/SystemEndpoints.cpp" \
@@ -177,6 +223,7 @@ g++ -std=c++17 -Wall -Wextra -Werror \
   "$project_dir/src/modules/config/model/DeviceConfigValidation.cpp" \
   "$project_dir/src/modules/config/model/StrictIpv4.cpp" \
   "$project_dir/src/modules/storage/UserFilePolicy.cpp" \
+  "$project_dir/src/modules/epaper/EpaperImageFormat.cpp" \
   -o "$build_dir/api-router-auth-test"
 
 "$build_dir/api-router-auth-test"

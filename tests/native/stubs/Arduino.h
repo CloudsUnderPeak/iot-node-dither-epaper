@@ -6,6 +6,34 @@
 #include <cstring>
 #include <string>
 
+constexpr uint8_t LOW = 0;
+constexpr uint8_t HIGH = 1;
+constexpr uint8_t INPUT = 1;
+constexpr uint8_t OUTPUT = 3;
+constexpr uint8_t INPUT_PULLUP = 5;
+
+struct NativePinRecord {
+  uint8_t mode = INPUT;
+  uint8_t level = LOW;
+  size_t modeWrites = 0;
+  size_t levelWrites = 0;
+};
+
+inline NativePinRecord nativePins[31];
+
+inline void pinMode(uint8_t pin, uint8_t mode) {
+  if (pin >= 31) return;
+  nativePins[pin].mode = mode;
+  if (mode == INPUT_PULLUP) nativePins[pin].level = HIGH;
+  ++nativePins[pin].modeWrites;
+}
+
+inline void digitalWrite(uint8_t pin, uint8_t level) {
+  if (pin >= 31) return;
+  nativePins[pin].level = level;
+  ++nativePins[pin].levelWrites;
+}
+
 class String {
  public:
   String() = default;

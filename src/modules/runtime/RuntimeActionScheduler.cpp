@@ -3,9 +3,11 @@
 Result RuntimeActionScheduler::begin(ConfigService *configService,
                                      WifiManager *wifiManager,
                                      MdnsService *mdnsService,
-                                     CaptivePortalDnsService *captivePortalDnsService) {
+                                     CaptivePortalDnsService *captivePortalDnsService,
+                                     SystemRestartCoordinator *restartCoordinator) {
   ready_ = false;
-  if (configService == nullptr || wifiManager == nullptr || mdnsService == nullptr || captivePortalDnsService == nullptr) {
+  if (configService == nullptr || wifiManager == nullptr || mdnsService == nullptr ||
+      captivePortalDnsService == nullptr || restartCoordinator == nullptr) {
     return invalidInput("missing runtime action scheduler dependencies");
   }
 
@@ -13,6 +15,7 @@ Result RuntimeActionScheduler::begin(ConfigService *configService,
   wifiManager_ = wifiManager;
   mdnsService_ = mdnsService;
   captivePortalDnsService_ = captivePortalDnsService;
+  restartCoordinator_ = restartCoordinator;
   ready_ = true;
   return okResult();
 }
@@ -48,7 +51,17 @@ void RuntimeActionScheduler::scheduleSystemReset(uint32_t delayMs) {
     systemResetDueMs_ = dueMs;
   }
   systemResetPending_ = true;
+  systemResetFailed_ = false;
   portEXIT_CRITICAL(&pendingMux_);
+}
+
+RuntimeActionSnapshot RuntimeActionScheduler::snapshot() {
+  RuntimeActionSnapshot result;
+  portENTER_CRITICAL(&pendingMux_);
+  result.restartPending = systemResetPending_;
+  result.restartFailed = systemResetFailed_;
+  portEXIT_CRITICAL(&pendingMux_);
+  return result;
 }
 
 void RuntimeActionScheduler::applyPendingWifi() {
@@ -133,6 +146,11 @@ void RuntimeActionScheduler::applyPendingSystemReset() {
     return;
   }
 
-  Serial.println("api system: scheduled restart");
-  ESP.restart();
+  Serial.println("api system: scheduled restart coordination");
+  if (!restartCoordinator_->restartNow()) {
+    portENTER_CRITICAL(&pendingMux_);
+    systemResetFailed_ = true;
+    portEXIT_CRITICAL(&pendingMux_);
+    Serial.println("api system: restart cancelled by safety coordinator");
+  }
 }

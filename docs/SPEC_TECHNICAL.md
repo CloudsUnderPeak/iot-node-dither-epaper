@@ -37,7 +37,9 @@ Arduino loop <──────────────────────
 | `api/auth/*` | `/api/auth` 與 `/api/auth/*` endpoints。 |
 | `api/system/*` | `/api/system` 與 `/api/system/*` endpoints。 |
 | `api/wifi/*` | `/api/wifi`、`/api/wifi/*` endpoints 與 typed payload mapping。 |
-| `modules/runtime/RuntimeActionScheduler.*` | 接收跨 task command，由 loop 唯一執行 Wi-Fi apply 或 restart。 |
+| `api/epaper/*` | E-paper capability、status、image metadata/download、raw upload 與 action response mapping；不直接操作 GPIO、SPI 或 LittleFS。 |
+| `modules/runtime/RuntimeActionScheduler.*` | 接收跨 task command，由 loop 唯一執行 Wi-Fi apply；system restart 必須委派 e-paper shutdown coordinator 核准後才執行。 |
+| `api/runtime/RuntimeEndpoints.*` | 組合 `EpaperService` 與 `RuntimeActionScheduler` 的短 cached snapshot，回 activity／phase／CPU／blocked resources；不掃 filesystem、不形成全域 lock。 |
 | `modules/config/ConfigService.*` | active config 的唯一 owner；提供同步 snapshot、完整 commit 與型別化原子欄位群組更新。 |
 | `modules/config/model/*` | Config type、factory defaults、scalar/cross-field validation 與 IPv4 計算。 |
 | `modules/config/storage/*` | NVS schema、雙 slot 儲存、read-back verification 與 active slot commit。 |
@@ -52,6 +54,19 @@ Arduino loop <──────────────────────
 | `modules/storage/UserFilePolicy.*` | User-file 公開檔名、MIME、strict size、single Range 與 opaque cursor 的 pure policy。 |
 | `modules/storage/StorageLifecycle.*` | 預設 NVS 中的獨立 partition 初始化旗標、reset intent 與 early-boot erase／format 協調。 |
 | `modules/storage/StorageCapacity.h` | User upload quota 的 value／保留量／對齊計算。 |
+| `board/BoardProfile.h`、`board/profiles/FireBeetle2Esp32C6Profile.h` | Build-time board/chip、可用 GPIO、bus route 與 e-paper pin map；以 `static_assert` 阻止重複、禁止或未審查腳位。 |
+| `modules/hardware/PinRegistry.*` | Fixed-size owner/role claim table；exclusive GPIO 衝突 fail startup，shared bus pin 只可由 bus owner claim。 |
+| `modules/hardware/SpiBus.*` | `SPIClass` lifecycle、固定 SCK/MOSI route、mutex 與 transaction ownership；device driver 不得自行 `SPI.begin/end`。 |
+| `modules/epaper/EpaperImageFormat.*` | 純函式與 streaming validator；解析固定 40-byte `EPDIMG` header、little-endian 欄位、generation、CRC32 與六色 nibble。 |
+| `modules/epaper/EpaperFrameSource.*` | File／white／palette 的無 framebuffer streaming source；動態來源依 offset 直接產生 packed bytes。 |
+| `modules/epaper/EpaperCooldown.*` | 180 秒 wrap-safe monotonic gate；倒數到期仍要求 persistent marker 清除成功才釋放。 |
+| `modules/epaper/Epd7In3E.*` | 7.3inch E driver command、BUSY timeout、Power OFF／Deep Sleep 與 operation watchdog；透過 shared SPI bus 傳輸。 |
+| `modules/epaper/CpuFrequencyGuard.*` | RAII 全晶片 frequency guard；panel wake 前切到並 read-back 80 MHz，cleanup 後恢復並 read-back 原頻率。 |
+| `modules/epaper/EpaperSafetyStore.*` | Default NVS `epaper_meta` protection marker、read-back verification 與 boot recovery 判定；故障 fail closed。 |
+| `modules/epaper/EpaperShutdownCoordinator.*` | Worker quiesce、protocol shutdown、logical quiesce 與 software restart 核准；失敗標記 unknown 並取消 restart。 |
+| `modules/epaper/EpaperPowerProbe.*` | Build-flag gated、預設停用的 power-only bring-up；marker 與 80 MHz guard 成功後只做 initialize、Power OFF／Deep Sleep，不傳 frame、不 refresh。 |
+| `modules/epaper/EpaperRefreshProbe.*` | Build-flag gated、預設停用的單次實機刷新 bring-up；依序執行 marker、80 MHz guard、initialize、一次 transfer/refresh、Power OFF／Deep Sleep 與頻率恢復；任何階段失敗仍執行 cleanup。 |
+| `modules/epaper/EpaperService.*` | 唯一 operation/status owner、upload reservation、queue depth 1、worker、cooldown 與 stable error mapping。 |
 | `modules/console/*` | Human diagnostics、userdata inspection、typed config staging／commit 與 REST-equivalent `api ...` serial adapter。 |
 
 ## API 與 transport 邊界
@@ -93,6 +108,23 @@ Arduino loop <──────────────────────
 - `storage_meta/reset_pending` 是字串 `none`、`settings`、`data` 或 `all`。Reset endpoint 先 read-back 驗證 pending intent，再排程 restart；early boot 在 Config、Wi-Fi 與 HTTP 前執行指定的 erase／format，逐一把成功完成的初始化旗標設為 `true`，最後才把 pending 改回 `none`。中途斷電時下次 boot 重試同一 scope。
 - 完整 factory reset erase 整個 `user_nvs` 並格式化 `userdata`；settings reset 只 erase `user_nvs`，data reset 只格式化 `userdata`。一般 release 只寫 bootloader、partition table、boot_app0 與 app image；app image 可依明確的 `WEB=none` 選擇不含前端。Release manifest 必須描述 `userdata` 與 `user_nvs`，並驗證所有 image 都不與兩者的位址範圍重疊。
 
+## E-paper hardware、format 與 runtime
+
+- Target 是 DFRobot FireBeetle 2 ESP32-C6（ESP32-C6FH4、4 MB flash、無 PSRAM）與 Waveshare 7.3inch e-Paper HAT (E)。固定 signal mapping 為 SCK GPIO23、MOSI GPIO22、CS GPIO18、DC GPIO1、RST GPIO14、BUSY GPIO21；BUSY 是 active-low `INPUT_PULLUP`，避免 controller reset 期間輸出呈高阻時漂浮；不配置 MISO。第一版不新增 power-enable，也不修改 `partitions.csv`。
+- Board profile 必須核對 exposed pin、ESP32-C6 strapping／flash／USB-JTAG 限制及板上保留功能。Boot 最早先設 CS high、DC/RST low；這只建立 logical quiesce，不能回報 protocol shutdown。
+- `main.cpp` 必須在 Serial、status LED、storage 與 network subsystem 之前啟動 `epaper_hardware`：先原子 claim e-paper pins、設定安全 latch 與方向，再初始化 write-only shared SPI、transport 和 driver 的 `Quiesced` software state。此階段不得呼叫 panel initialize、frame transfer 或 refresh；startup log 必須明確標示 `logical_quiesce` 與 `refresh=disabled`，任一步失敗則保持 `FAIL` 且不送 panel command。
+- `EPDIMG` 總長 192,040 bytes：magic `EPDIMG\0\0`、version 1、header size 40、width 800、height 480、frame bytes 192000、frame CRC32、non-zero uint64 generation。所有 multibyte field 為 little-endian；generation 對外以 decimal string 表達。
+- Packed frame 是 row-major，左 pixel 在 high nibble、右 pixel 在 low nibble；只允許 code `0,1,2,3,5,6`。Validator 可跨任意 input chunk 邊界收資料，依序驗證 header、每個 nibble、完整長度與 CRC，不配置 192 KB framebuffer。
+- Dynamic white source 對任何合法 offset 回 `0x11`；palette source 產生 4-pixel black border，內部依序為 black／white／yellow／red／blue／green vertical bars。兩者與 file source 使用相同 streaming interface。
+- Fixed file 是 `/files/epaper-current.epd`。`UserDataStorage` 仍是 LittleFS 與 operation gate 唯一 owner；e-paper 只能透過 internal read seam 與既有 temp/atomic rename 流程整合，不得另開 filesystem owner。Generic PUT／DELETE 在 policy layer 對 fixed name 回 `reserved_file`。
+- Upload 取得 e-paper gate 後檢查 exact Content-Length 與 capacity，stream validate 到 temp，flush／close／reopen size 驗證後 atomic rename。Manual refresh 在 panel wake 前以 4 KiB buffer 重新驗證完整 header、palette 與 CRC，再重新開檔串流 frame。任何失敗保留舊正式檔。
+- `EpaperService` 使用短 mutex 保存完整 cached status，mutex 內不得操作 filesystem、SPI、NVS、JSON 或 Serial。Queue depth 固定 1；實體 draw 在低優先序 dedicated FreeRTOS worker 執行，BUSY wait sleep/yield，frame 每 4 KiB yield。
+- Worker 必須在 panel wake 前持久化 `stage: active` 並 read-back，再取得全晶片 frequency guard、設定並 read-back 80 MHz。80 MHz 涵蓋 prewake、initialize、transfer、refresh、Power OFF／Deep Sleep cleanup；全部 exit path 經 shutdown coordinator 後才恢復 160 MHz。
+- 成功或 wake 後失敗都依序嘗試 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5`。只有 protocol shutdown 與 `stage: shutdown_confirmed` read-back 成功才開始 180 秒 cooldown；timeout、SPI failure 或 shutdown failure 設 `panel_state: unknown` 並永久 fail closed 到完整 power cycle。
+- `epaper_meta` namespace 位於 default `nvs`，不屬於 settings/data/factory reset 會清除的 `user_nvs` 或 `userdata`。Boot 先讀 `esp_reset_reason()` 與 marker：confirmed marker 重啟 180 秒 cooldown；active marker搭配非協調 reset 記錄 interrupted，禁止自動 draw。
+- Runtime status 只組合既有 service cached snapshot。`blocked_resources` 在 validation 是 `epaper,userdata`，transfer 是 `epaper,userdata,spi`，physical refresh 與 cooldown 只保留 `epaper`；不得由 `busy` 推導 Wi-Fi/HTTP 不可用或建立全域 mutex。
+- 全專案只有 shutdown coordinator 最終核准點可呼叫 `ESP.restart()`。到期 software restart 先發布 `restarting`、拒絕新 operation、bounded quiesce worker；本次 boot 曾 wake panel 時，protocol shutdown 失敗必須取消 restart並保存 `epaper_shutdown_failed`。
+
 ## Config persistence
 
 - `ConfigService` 是唯一 active config owner；其他模組只保存 service pointer 並取得 value snapshot。
@@ -121,6 +153,10 @@ Arduino loop <──────────────────────
 | Wi-Fi scan/cooldown | `WifiScanner` mutex；scan scope 使用 `SemaphoreGuard` 確保所有 early return 釋放。 |
 | Arduino Wi-Fi driver | `WifiRadio` mutex；scan 與 state-machine driver call 不同時執行。`WifiManager` 只依賴可注入的 `WifiDriver`／`MonotonicClock`，production adapter 才接觸 Arduino `WiFi`／`millis()`。 |
 | User-data filesystem | `UserDataStorage` binary semaphore；所有 file／inspection operation non-blocking serialize，active session 由 session id 驗證。 |
+| E-paper operation/status | `EpaperService` 短 mutex 與 queue depth 1；upload/action producer，dedicated worker consumer。 |
+| SPI bus | `SpiBus` mutex與唯一 lifecycle owner；BUSY wait 不持有 transaction。 |
+| E-paper protection marker | `EpaperSafetyStore`／default NVS `epaper_meta`；write 後 read-back，failure fail closed。 |
+| Runtime activity | `RuntimeEndpoints` 唯讀組合 `EpaperService`／`RuntimeActionScheduler` cached snapshot；不作 admission gate。 |
 | Console staged config | `ConsoleConfigCommand`／`ConfigStaging`，只在 console runtime RAM；dirty bitset 與 fixed-size secret buffers。 |
 
 Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作。同步 scan 可能等待 Wi-Fi driver，但 STA connect/apply 本身不得用等待連線的 loop。
@@ -142,7 +178,7 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 
 ## 測試、logging 與嵌入式限制
 
-- Native test 唯一入口為 `tools/native-test/test_native.sh`；目前測試 config／IPv4 validation、ConfigService 原子欄位群組更新與故障隔離、PreferencesConfigStore slot／marker fault injection、AuthService session lifecycle／concurrency、WifiManager driver/clock seam 與 timeout／IPv4／disconnect／subnet overlap／commit-finalize-rollback failure 狀態、Wi-Fi payload、response codec、HTTP JSON transport parsing、user filename／MIME／Range／cursor／inspection path、console config staging、subsystem registry start order/readiness/dynamic health、ApiRouter catalogue metadata 與 exact/dynamic runtime authorization matrix、Web identity response（包含 none／null）、generated metadata、空前端 artifact protection、web preview/minifier/deterministic gzip、release partition/manifest/path/hash protection，以及 metadata-driven HTTP registration source contract。Source contract lint 不代表 HTTP adapter 或 filesystem integration coverage。
+- Native test 唯一入口為 `tools/native-test/test_native.sh`；目前測試 config／IPv4 validation、ConfigService 原子欄位群組更新與故障隔離、PreferencesConfigStore slot／marker fault injection、AuthService session lifecycle／concurrency、WifiManager driver/clock seam 與 timeout／IPv4／disconnect／subnet overlap／commit-finalize-rollback failure 狀態、Wi-Fi payload、response codec、HTTP JSON transport parsing、user filename／MIME／Range／cursor／inspection path、EPDIMG header／CRC／palette streaming validation、white／palette packed frame 與 wrap-safe cooldown、board restricted-pin／原子 claim／shared SPI ownership與安全 boot level、fake transport driver command／BUSY timeout／watchdog／shutdown failure、80 MHz set/read-back/restore、`epaper_meta` marker fault injection、power-only／single-refresh probe、protocol shutdown與 restart denial、e-paper hardware 早於 Serial 與其他 subsystem 且 release self-test/refresh disabled 的 source contract、e-paper/runtime 公開 route 與 reserved-file matrix、host EPDIMG/CRC/URL/raw-upload/error/wait client、console config staging、subsystem registry start order/readiness/dynamic health、ApiRouter catalogue metadata 與 exact/dynamic runtime authorization matrix、Web identity response（包含 none／null）、generated metadata、空前端 artifact protection、web preview/minifier/deterministic gzip、release partition/manifest/path/hash protection，以及 metadata-driven HTTP registration source contract。Source contract lint 不代表 HTTP adapter、filesystem 或完整 service integration coverage。
 - Firmware runtime 變更至少對既有 verified production `build/latest/web/` 執行 `make esp`；需同時重建 frontend 時執行 `make build`，API-only firmware 使用 `make build WEB=none`。
 - `builtin-web/` 是專案預設 frontend source，`user-web/` 接受使用者 prebuilt static output；`tools/web-build/` 也可明確產生 `WEB=none` 的已驗證空 production web。`tools/release-build/` 只消費 production web 並管理 generated header、binary、manifest、`firmware.img` 與快照。
 - `VERSION` 保存純 `MAJOR.MINOR.PATCH`，目前為 `0.8.0`；顯示與 tag 使用 `v0.8.0`。Firmware 與 web manifest version 必須一致。本機 dirty build 允許且 manifest 記錄 `git_dirty: true`；official CI release 必須拒絕 dirty worktree。

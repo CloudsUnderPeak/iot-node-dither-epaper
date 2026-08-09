@@ -41,7 +41,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 
 ## 狀態查詢與 REST-first 操作
 
-- `GET /api/device`、`GET /api/web`、`GET /api/storage`、`GET /api/wifi` 與 `GET /api/auth` 公開；Wi-Fi scan／connect、auth session 與所有 user-file endpoint（包含 list／download）需要有效 Bearer token。
+- `GET /api/device`、`GET /api/web`、`GET /api/storage`、`GET /api/wifi`、`GET /api/auth`、全部 e-paper 專用 endpoint 與 `GET /api/runtime/status` 公開；Wi-Fi scan／connect、auth session 與 generic user-file endpoint（包含 list／download）需要有效 Bearer token。
 - `GET /api/web` 只回報目前 app image 的 Web 狀態：包入前端時為 `builtin`／`user` 來源與實際輸出檔案樹 SHA-256；明確以 `WEB=none` 建置時為 `source: "none"` 與 `sha256: null`。不公開 version、檔案數量、payload 大小或 user source hash。非 null hash 用於對照 release manifest 與辨識 Web bundle 是否為預期版本，不代表整包 firmware image hash。
 - `GET /api/storage` 回報完整 flash partition、1984 KiB `app0` 的整包韌體／前端／剩餘容量、32 KiB `user_nvs`，以及獨立 `userdata` 的可上傳容量。前端若存在就是目前 app image 的一部分，不占用獨立 filesystem partition；`WEB=none` 回報 `frontend_bundled: false` 與零 frontend payload。
 - `user.capacity.available_bytes` 必須等於 `user.limits.max_upload_bytes`，代表以當下狀態可接受的單一新檔 payload 上限。計算先保留 64 KiB，再向下對齊 4 KiB allocation unit；前端直接把這個數字呈現為可用空間，不加入模糊化的免責文字。
@@ -143,6 +143,21 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - 已排程的 reset/restart 優先於 Wi-Fi apply、candidate commit 與 rollback，不能因同時存在的網路 action 延後第一次可執行的重啟時機。
 - 不 migration 舊 config blob、舊 schema 或舊 key layout；遇到不支援或損壞的 current slot 時，boot 使用 recovery defaults 保持 AP 可達，且不自動覆寫該資料。Boot log、heartbeat 與 device API 必須以不含敏感資料的狀態區分 persisted config、首次建立 factory defaults 與 recovery defaults。無產品用途的 boot counter 不持久化，避免每次開機寫 flash。
 
+## E-paper 行為與安全邊界
+
+- 目標面板固定為 Waveshare 7.3inch e-Paper HAT (E)，800×480、每 pixel 4-bit packed code；第一版只接受總長 192,040 bytes 的 `EPDIMG`，不接受裸 frame、PNG、JPEG 或 BMP。
+- 固定圖片名稱為 `epaper-current.epd`，保存於 `userdata:/files/`。成功 upload 以 atomic replace 更新並自動排程 draw；中止、格式錯誤或儲存失敗必須保留舊圖。Generic file PUT／DELETE 不得修改此 reserved file。
+- `white` 動態輸出 192,000 bytes `0x11`；`palette` 動態輸出 4-pixel 黑框與 black／white／yellow／red／blue／green直條。兩者不建立檔案，`refresh` 只重畫最近一次有效 upload。
+- 對外狀態固定為 `idle`、`uploading`、`queued`、`drawing`、`cooldown`、`unavailable`；client 只依 `can_upload`、`can_draw` 與 `retry_after_seconds` 判斷，不解析 message。
+- 每次實體 draw 在 panel wake 前必須把 CPU 切到並 read-back 確認 80 MHz，直到 Power OFF／Deep Sleep cleanup 完成後才恢復 160 MHz；不得以 160 MHz fallback，也不得關閉 brownout detector。
+- 每次 draw 後只有 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5` 與 persistent marker read-back 全部成功，才開始完整 180 秒 cooldown。倒數使用 monotonic wrap-safe 時差，秒數向上取整，任何圖片或 action 都沒有例外。
+- Cooldown 到期後仍須成功清除並 read-back protection marker才回 `idle`；marker 操作失敗時繼續禁止 draw。
+- RST low、CS high、DC low 只代表 `logical_quiesce`，不能宣稱面板已 Power OFF／Deep Sleep。若 panel 已 wake 但 protocol shutdown 失敗，狀態固定為 `unavailable`／`panel_state: unknown`，要求 MCU 與 HAT 一起完整斷電，不得靠等待或 software restart 解鎖。
+- Boot 不自動重畫。發現 `shutdown_confirmed` marker 時從本次 boot 重新保守等待 180 秒；發現 `active` marker 且前次為 brownout、watchdog、panic 或其他非協調 reset 時，記錄 interrupted 結果並 fail closed。
+- 所有可控制的 software restart 必須先拒絕新 draw、quiesce worker，並在需要時完成 Power OFF／Deep Sleep；shutdown 失敗時取消 restart。不可攔截 reset 的 residual risk 由 marker 在下次 boot 診斷，不能宣稱已由軟體消除。
+- Draw 在低優先序 dedicated worker 執行，BUSY wait 必須 yield，frame 每 4 KiB yield；Wi-Fi、HTTP、console、heartbeat 與 runtime scheduler 在刷新期間仍須可排程。CPU 降頻造成的 latency 與供電穩定性需以實板驗證。
+- 全部 e-paper 專用 endpoint 與 `GET /api/runtime/status` 是明確 public exception；同網路 client 可上傳、下載及觸發 draw 是已接受的可信任網路風險，180 秒 cooldown 不是 authentication 或 abuse protection。Generic user-file API 權限不變。
+
 ## Serial console 行為
 
 - Serial console 同時提供人類可讀 CLI 與 `api METHOD PATH [token=<token>] [json]` adapter。
@@ -172,7 +187,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 
 ## 不在目前範圍
 
-- 內建圖片／電子紙內容管理 UI 與 rendering pipeline（generic file API 本身已提供）
+- 內建電子紙內容管理 UI 與 MCU 端 PNG／JPEG／BMP decode、resize、quantize、dithering pipeline
 - OTA
 - 雲端帳號或遠端管理
 - 多使用者或角色權限

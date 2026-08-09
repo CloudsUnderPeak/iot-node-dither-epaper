@@ -8,6 +8,64 @@ server = (project / "src/modules/http/ApiServer.cpp").read_text()
 wifi_manager = (project / "src/modules/wifi/WifiManager.cpp").read_text()
 wifi_driver = (project / "src/modules/wifi/ArduinoWifiDriver.cpp").read_text()
 main = (project / "src/main.cpp").read_text()
+platformio = (project / "platformio.ini").read_text()
+epaper_hardware = (project / "src/modules/hardware/EpaperHardware.cpp").read_text()
+epaper_service = (project / "src/modules/epaper/EpaperService.cpp").read_text()
+if "while (receivedBytes < begin.contentLength)" not in epaper_service:
+    print("Stored image validation must stop at the auto-closing download length", file=sys.stderr)
+    raise SystemExit(1)
+
+if "-D ENABLE_EPAPER_PANEL_SELF_TEST=0" not in platformio:
+    print("Release configuration must keep the one-shot panel self-test disabled", file=sys.stderr)
+    raise SystemExit(1)
+if "-D ENABLE_EPAPER_REFRESH_SELF_TEST=0" not in platformio:
+    print("Release configuration must keep the one-shot refresh test disabled", file=sys.stderr)
+    raise SystemExit(1)
+
+if "gpio_set_level" not in epaper_hardware:
+    print("ESP32 e-paper outputs must preload their latches before output enable", file=sys.stderr)
+    raise SystemExit(1)
+if re.search(r"digitalWrite\(epaper\.(?:cs|dc|reset)", epaper_hardware):
+    print("Arduino digitalWrite must not be used before e-paper output pinMode", file=sys.stderr)
+    raise SystemExit(1)
+
+epaper_start = "startSubsystem(subsystems[kEpaperHardwareSubsystem])"
+if epaper_start not in main:
+    print("E-paper hardware must be initialized through the subsystem registry", file=sys.stderr)
+    raise SystemExit(1)
+if not main.index(epaper_start) < main.index("Serial.begin(115200)") < main.index("for (size_t index = kUserdataSubsystem"):
+    print("E-paper logical quiesce must precede Serial delays and all other subsystems", file=sys.stderr)
+    raise SystemExit(1)
+if "epdDriver.initialize()" in main or "transferAndRefresh" in main:
+    print("Hardware-only bring-up must not initialize or refresh the panel", file=sys.stderr)
+    raise SystemExit(1)
+if 'printHeartbeatField("epaper_busy", epaperBusyLabel())' not in main:
+    print("Hardware bring-up must expose the read-only BUSY level in heartbeat", file=sys.stderr)
+    raise SystemExit(1)
+epaper_transfer = epaper_service.index("driver_->transferFrame(source)")
+epaper_release = epaper_service.index(
+    "storage_->finishDownload(storageSessionId)", epaper_transfer
+)
+if not epaper_transfer < epaper_release < epaper_service.index(
+    "driver_->refresh()", epaper_release
+):
+    print("Stored frame must release userdata before physical refresh", file=sys.stderr)
+    raise SystemExit(1)
+
+restart_callers = []
+for source_path in (project / "src").rglob("*.cpp"):
+    if "ESP.restart()" in source_path.read_text():
+        restart_callers.append(source_path.relative_to(project).as_posix())
+if restart_callers != ["src/modules/epaper/ArduinoRestartDriver.cpp"]:
+    print(
+        f"ESP.restart() must exist only behind the e-paper restart coordinator: {restart_callers}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+runtime_scheduler = (project / "src/modules/runtime/RuntimeActionScheduler.cpp").read_text()
+if "restartCoordinator_->restartNow()" not in runtime_scheduler:
+    print("RuntimeActionScheduler must delegate reset to the safety coordinator", file=sys.stderr)
+    raise SystemExit(1)
 
 router_header = (project / "src/api/ApiRouter.h").read_text()
 if "RouteAccess access = RouteAccess::Protected" not in router_header:
@@ -26,10 +84,29 @@ for required in (
     "case ApiRouter::HttpBinding::Query:",
     "case ApiRouter::HttpBinding::RawUpload:",
     "case ApiRouter::HttpBinding::RawDownload:",
+    "case ApiRouter::HttpBinding::EpaperRawUpload:",
+    "case ApiRouter::HttpBinding::EpaperRawDownload:",
 ):
     if required not in server:
         print(f"HTTP adapter is not driven by route metadata: {required}", file=sys.stderr)
         raise SystemExit(1)
+
+for route in (
+    '"/api/epaper"',
+    '"/api/epaper/status"',
+    '"/api/epaper/image"',
+    '"/api/epaper/image/download"',
+    '"/api/epaper/image/refresh"',
+    '"/api/epaper/image/white"',
+    '"/api/epaper/image/palette"',
+    '"/api/runtime/status"',
+):
+    if route not in router:
+        print(f"E-paper API route is missing: {route}", file=sys.stderr)
+        raise SystemExit(1)
+if '403, "reserved_file"' not in router:
+    print("Generic upload must protect the reserved e-paper image", file=sys.stderr)
+    raise SystemExit(1)
 
 print("API route catalogue/HTTP registration contract tests passed")
 
@@ -39,8 +116,12 @@ if "Subsystem subsystems[]" not in main:
 if main.count("for (const Subsystem &subsystem : subsystems)") != 1:
     print("heartbeat must traverse the subsystem registry exactly once", file=sys.stderr)
     raise SystemExit(1)
-if main.count("for (Subsystem &subsystem : subsystems)") != 1:
-    print("setup must traverse the subsystem registry exactly once", file=sys.stderr)
+remaining_start_loop = "for (size_t index = kUserdataSubsystem; index < kSubsystemCount; ++index)"
+if main.count(remaining_start_loop) != 1:
+    print("setup must start every non-e-paper subsystem exactly once in registry order", file=sys.stderr)
+    raise SystemExit(1)
+if main.count(epaper_start) != 1:
+    print("setup must start the e-paper hardware subsystem exactly once", file=sys.stderr)
     raise SystemExit(1)
 for required in (
     "startSubsystem(subsystem)",

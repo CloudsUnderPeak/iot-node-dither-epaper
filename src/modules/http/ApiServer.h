@@ -41,6 +41,15 @@ class ApiServer {
                         size_t total);
   void handleFileUpload(AsyncWebServerRequest *request);
   void handleFileDownload(AsyncWebServerRequest *request);
+  void bufferEpaperUpload(AsyncWebServerRequest *request,
+                          uint8_t *data,
+                          size_t len,
+                          size_t index,
+                          size_t total);
+  void prepareEpaperUpload(AsyncWebServerRequest *request,
+                           size_t callbackTotal);
+  void handleEpaperUpload(AsyncWebServerRequest *request);
+  void handleEpaperDownload(AsyncWebServerRequest *request);
   void prepareFileUpload(AsyncWebServerRequest *request, size_t callbackTotal);
   void populateQuery(AsyncWebServerRequest *request, Api::Request &apiRequest) const;
   String bearerTokenFromRequest(AsyncWebServerRequest *request) const;

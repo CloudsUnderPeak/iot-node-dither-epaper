@@ -74,6 +74,10 @@ Result ApiServer::registerRoutes() {
       [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
         bufferFileUpload(request, data, len, index, total);
       };
+  const ArBodyHandlerFunction epaperBody =
+      [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        bufferEpaperUpload(request, data, len, index, total);
+      };
 
   for (size_t index = 0; index < ApiRouter::routeCount(); ++index) {
     ApiRouter::RouteInfo route;
@@ -161,6 +165,24 @@ Result ApiServer::registerRoutes() {
             httpMethod,
             [this](AsyncWebServerRequest *request) {
               handleFileDownload(request);
+            });
+        break;
+      case ApiRouter::HttpBinding::EpaperRawUpload:
+        server_.on(
+            matcher,
+            httpMethod,
+            [this](AsyncWebServerRequest *request) {
+              handleEpaperUpload(request);
+            },
+            nullptr,
+            epaperBody);
+        break;
+      case ApiRouter::HttpBinding::EpaperRawDownload:
+        server_.on(
+            matcher,
+            httpMethod,
+            [this](AsyncWebServerRequest *request) {
+              handleEpaperDownload(request);
             });
         break;
     }
@@ -386,6 +408,148 @@ void ApiServer::handleFileDownload(AsyncWebServerRequest *request) {
   }
   request->onDisconnect([this, sessionId]() {
     router_->finishFileDownload(sessionId);
+  });
+  request->send(response);
+}
+
+void ApiServer::prepareEpaperUpload(AsyncWebServerRequest *request,
+                                    size_t callbackTotal) {
+  FileUploadState *state = uploadState(request);
+  if (state == nullptr || state->initialized) return;
+  state->initialized = true;
+  for (size_t index = 0; index < request->params(); ++index) {
+    const AsyncWebParameter *parameter = request->getParam(index);
+    if (parameter != nullptr && !parameter->isPost() && !parameter->isFile()) {
+      saveUploadError(*state, Api::problem(
+          400, "unsupported_field", "e-paper upload does not accept query fields"));
+      return;
+    }
+  }
+  if (request->hasHeader("Transfer-Encoding") ||
+      !request->hasHeader("Content-Length")) {
+    saveUploadError(*state, Api::problem(
+        411, "content_length_required", "e-paper upload requires Content-Length"));
+    return;
+  }
+  size_t declaredBytes = 0;
+  const String declaredHeader = request->getHeader("Content-Length")->value();
+  if (!UserFilePolicy::parseSize(declaredHeader.c_str(), declaredBytes) ||
+      declaredBytes != EpaperImageFormat::kImageBytes ||
+      declaredBytes != request->contentLength() ||
+      (callbackTotal != 0 && callbackTotal != declaredBytes)) {
+    saveUploadError(*state, Api::problem(
+        411, "content_length_required",
+        "EPDIMG Content-Length must be exactly 192040 bytes"));
+    return;
+  }
+  if (request->contentType().length() != 0) {
+    String contentType = request->contentType();
+    contentType.toLowerCase();
+    if (contentType != "application/octet-stream") {
+      saveUploadError(*state, Api::problem(
+          415, "unsupported_media_type",
+          "e-paper upload requires application/octet-stream or no Content-Type"));
+      return;
+    }
+  }
+  const ApiRouter::FileUploadStart start =
+      router_->prepareEpaperUpload(declaredBytes);
+  if (!start.ready) {
+    saveUploadError(*state, start.response);
+    return;
+  }
+  state->sessionId = start.sessionId;
+  state->active = true;
+  const uint32_t sessionId = state->sessionId;
+  request->onDisconnect([this, sessionId]() {
+    router_->abortEpaperUpload(sessionId);
+  });
+}
+
+void ApiServer::bufferEpaperUpload(AsyncWebServerRequest *request,
+                                   uint8_t *data,
+                                   size_t len,
+                                   size_t index,
+                                   size_t total) {
+  prepareEpaperUpload(request, total);
+  auto *state = static_cast<FileUploadState *>(request->_tempObject);
+  if (state == nullptr || state->failed || !state->active) return;
+  const Api::Response result =
+      router_->writeEpaperUpload(state->sessionId, index, data, len);
+  if (!result.success) saveUploadError(*state, result);
+}
+
+void ApiServer::handleEpaperUpload(AsyncWebServerRequest *request) {
+  prepareEpaperUpload(request, request->contentLength());
+  auto *state = static_cast<FileUploadState *>(request->_tempObject);
+  if (state == nullptr) {
+    sendApiResponse(request, Api::problem(
+        500, "storage_error", "failed to allocate upload state"));
+    return;
+  }
+  if (state->failed) {
+    sendApiResponse(request, Api::error(
+        state->errorStatus, state->errorData, state->errorMessage));
+    return;
+  }
+  const uint32_t sessionId = state->sessionId;
+  state->active = false;
+  sendApiResponse(request, router_->finishEpaperUpload(sessionId));
+}
+
+void ApiServer::handleEpaperDownload(AsyncWebServerRequest *request) {
+  if (request->contentLength() != 0 || request->params() != 0) {
+    sendApiResponse(request, Api::problem(
+        400, "unsupported_field",
+        "e-paper download does not accept fields or a request body"));
+    return;
+  }
+  const String range = request->hasHeader("Range")
+                           ? request->getHeader("Range")->value()
+                           : String();
+  const ApiRouter::FileDownloadStart start =
+      router_->prepareEpaperDownload(range.c_str());
+  if (!start.ready) {
+    if (start.response.statusCode == 416) {
+      AsyncWebServerResponse *response = request->beginResponse(
+          416, "application/json", Api::serialize(start.response));
+      String contentRange = "bytes */";
+      contentRange += String(start.fileSize);
+      response->addHeader("Content-Range", contentRange);
+      request->send(response);
+    } else {
+      sendApiResponse(request, start.response);
+    }
+    return;
+  }
+  const uint32_t sessionId = start.sessionId;
+  if (start.contentLength == 0) router_->finishEpaperDownload(sessionId);
+  AsyncWebServerResponse *response = request->beginResponse(
+      "application/octet-stream",
+      start.contentLength,
+      [this, sessionId](uint8_t *buffer, size_t maxLength, size_t) {
+        const UserDataReadResult result = router_->readEpaperDownload(
+            sessionId, buffer, maxLength);
+        return result.result.ok() ? result.bytesRead : 0;
+      });
+  response->setCode(start.partial ? 206 : 200);
+  response->addHeader("Accept-Ranges", "bytes");
+  response->addHeader("Cache-Control", "no-store");
+  response->addHeader("X-Content-Type-Options", "nosniff");
+  response->addHeader(
+      "Content-Disposition",
+      "attachment; filename=\"epaper-current.epd\"");
+  if (start.partial) {
+    String contentRange = "bytes ";
+    contentRange += String(start.rangeStart);
+    contentRange += '-';
+    contentRange += String(start.rangeStart + start.contentLength - 1);
+    contentRange += '/';
+    contentRange += String(start.fileSize);
+    response->addHeader("Content-Range", contentRange);
+  }
+  request->onDisconnect([this, sessionId]() {
+    router_->finishEpaperDownload(sessionId);
   });
   request->send(response);
 }
