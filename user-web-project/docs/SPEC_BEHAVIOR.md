@@ -67,6 +67,7 @@ Split From: SPEC_INDEX.md
 - 2026-06-14: Original palette 萃取改為 RgbQuant-style 流程，使用 8x8 區塊統計、hue retention 與 BT.709 euclidean 合併產生代表色。
 - 2026-06-14: Color Distance 的 RgbQuant-style BT.709 距離改以 `Euclidean` 命名，並作為預設選項；`RGB` 保留為未加權 RGB 選項。
 - 2026-06-14: Color Distance 依是否套用 BT.709 權重拆分為 Euclidean BT.709 / Euclidean RGB 與 Manhattan BT.709 / Manhattan RGB，預設為 Euclidean BT.709。
+- 2026-08-11: Color Distance 預設改為 Euclidean RGB；既有已儲存的有效選項維持原值，不做遷移。
 - 2026-06-14: Dither 新增 Error Strength，讓 error diffusion algorithm 可調整誤差擴散強度，預設維持 100%。
 - 2026-06-14: Original palette 重新對齊 ditherit-v2 / RgbQuant `method: 2`，使用完整 2D histogram 而非額外候選上限。
 - 2026-06-14: 專案改為直接使用 vendored RgbQuant 萃取 Original palette，並優先以 RgbQuant 執行支援的 Error Diffusion。
@@ -286,7 +287,7 @@ Acceptance:
 
 - Dither starts from Floyd-Steinberg.
 - Serpentine starts disabled.
-- Color Distance starts from `Euclidean BT.709`.
+- Color Distance starts from `Euclidean RGB`.
 - The shared strength slider starts from `100%` and is adjustable from `0%` to `150%` in `2%` steps.
 - The strength slider is shown as `Error Strength` for Error Diffusion and Dot Diffusion algorithms, and applies to error diffusion coefficients.
 - The same strength slider is shown as `Dither Strength` for Bayer and Blue Noise threshold algorithms, and applies to threshold strength across Palette Mapping modes.
@@ -648,7 +649,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 - Palette 當前有效色票必須同步給 Dither 使用。
 - Dither 啟用時，Palette 不先量化像素；Dither 以目前有效色票產生固定色點陣結果。
 - Dither 為 None 時，固定 preset 或 Custom Palette 可直接把像素映射到最近色。
-- 最近色映射使用 Dither 面板目前選擇的 Color Distance；預設為 Euclidean BT.709。
+- 最近色映射使用 Dither 面板目前選擇的 Color Distance；預設為 Euclidean RGB。
 - E-paper Device Mode 強制使用 E6 六色；不顯示新增、刪除、preset、Original Colors 或 swatch 編輯控制。色票固定依 EPD code `0,1,2,3,5,6` 排成黑、白、黃、紅、藍、綠，與面板六色測試圖一致。色票、Result canvas、palette mapping 與 dither error 使用可校正的 DISPLAY RGB A′；encoder boundary 再依相同 code slot 精確轉成 OUTPUT RGB A，EPDIMG 不接受其他 RGB。
 
 ### Dither
@@ -668,7 +669,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 - Palette Mapping 選單支援 Nearest Color、Pair Mix 與 Tri Mix。
 - Serpentine 預設為關閉。
 - Serpentine 使用 Toggle Switch 呈現。
-- Color Distance 預設為 Euclidean BT.709，使用者可切換支援的距離公式。
+- Color Distance 預設為 Euclidean RGB，使用者可切換支援的距離公式；既有已儲存的有效選項維持原值。
 - 強度百分比預設為 100%；Error Diffusion 與 Dot Diffusion 顯示為 Error Strength，Bayer 與 Blue Noise 顯示為 Dither Strength，Dot Halftone 顯示為 Dot Density。
 - 選擇 None 時，強度控制仍可見但不可調整。
 - None 不改變圖片。

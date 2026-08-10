@@ -86,6 +86,7 @@ Split From: SPEC_INDEX.md
 - 2026-06-14: Original palette 萃取改為 RgbQuant-style：8x8 box histogram、hue retention、`initColors: 4096` 候選上限與 BT.709 euclidean palette reduction。
 - 2026-06-14: Color Distance 將 RgbQuant-style BT.709 weighted distance 命名為 `euclidean`，`bt709` 舊 id 僅作為相容 alias。
 - 2026-06-14: Color Distance 拆成 `euclidean-bt709`、`euclidean-rgb`、`manhattan-bt709`、`manhattan-rgb` 與 `ciede2000`；舊 id 只作為 alias。
+- 2026-08-11: `DEFAULT_COLOR_DISTANCE_ID` 與 standalone palette fallback 改為 `euclidean-rgb`；有效的既有 settings 不做遷移。
 - 2026-06-14: Dither settings 新增 `errorStrength`，Error Diffusion 以百分比控制誤差擴散倍率，預設 100%。
 - 2026-06-14: Original palette 重新對齊 RgbQuant `method: 2` 的 `buildPal()` 行為，完整排序 2D histogram 後再 reduce，不使用 `initColors` 候選截斷。
 - 2026-06-14: 將 RgbQuant 以 MIT vendored library 納入 `src/vendor/`，由 `rgbquant-adapter.js` 統一提供 Original palette 萃取與支援的 Error Diffusion。
@@ -806,7 +807,7 @@ Palette feature 必須把 preset 與使用者自訂色票分清楚：
 - 原生 color picker 的 `input` 事件只能更新 palette state 與 Dither palette，不應排程 preview 或重建色票 DOM；`change` 事件才排正式 preview。
 - `.palette-swatches` 必須用 8 欄 grid 排列，讓每列最多 8 個色票或新增按鈕；新增按鈕必須維持與色票同尺寸的圓形外框加號 affordance。
 - 色票陣列為空時，feature 應回到 `presetId: 'original'`；`Original` 不主動改圖。
-- `palette-utils` 必須集中管理 palette 最近色判斷；預設使用 RgbQuant-style Euclidean BT.709 distance，並支援由 Dither settings 指定其他 Color Distance。
+- `palette-utils` 必須集中管理 palette 最近色判斷；預設使用未加權 Euclidean RGB distance，並支援由 Dither settings 指定其他 Color Distance。
 
 `dither-algorithm-registry.js` / `dither-algorithms.js`：
 
@@ -846,7 +847,7 @@ Tri Mix CPU optimization 可預先列出 top-6 candidate 內的 20 組三色組�
 
 `threshold-dither-processor.js` 是 Ordered / Pattern threshold 類演算法的可選 WebGL fast path。它只能在 `nearest-color` 或 `pair-mix` Palette Mapping、已支援的 Color Distance、palette 長度不超過 shader 上限，且瀏覽器可建立 WebGL context 時啟用；`tri-mix` 必須走 CPU，避免 shader 組合量過高且難以維持 Palette Mapping 語意。GPU path 必須使用同一份 threshold rank、`thresholdScale`、`thresholdStrength`、`thresholdCellScale`、palette 與 Color Distance；`nearest-color` 應把 threshold 當亮度偏移，`pair-mix` 應先找最佳 palette pair 與混合比例，再把縮放後 threshold 當 cutoff 決定輸出 pair 的哪個顏色。`auto` backend 必須以 CPU fallback 保留功能可用性；forced `gpu` backend 在不支援目前 options 時必須報錯。benchmark 工具應用 checksum 驗證 CPU/GPU 輸出一致後才報告速度差異。
 
-`color-distance-metrics.js` 宣告使用者可選的距離公式。Dither feature 預設使用 `DEFAULT_COLOR_DISTANCE_ID`，目前為 `euclidean-bt709`。同一個 `colorDistance` 必須傳給 Error Diffusion、Ordered Dither、Pattern Dither，以及 Dither 關閉時 Palette operation 的直接最近色映射；在 `pair-mix` 與 `tri-mix` 下，`colorDistance` 必須用來評估哪一組 palette mix 的混合結果最接近輸入顏色。`euclidean-bt709` 是 RgbQuant-style BT.709 weighted euclidean distance；`euclidean-rgb` 是未加權 RGB squared distance；`manhattan-bt709` 是 BT.709 weighted Manhattan distance；`manhattan-rgb` 是未加權 Manhattan distance。舊 id `euclidean` / `bt709` 應正規化到 `euclidean-bt709`，舊 id `rgb` 應正規化到 `euclidean-rgb`，舊 id `manhattan` 應正規化到 `manhattan-rgb`。
+`color-distance-metrics.js` 宣告使用者可選的距離公式。Dither feature 預設使用 `DEFAULT_COLOR_DISTANCE_ID`，目前為 `euclidean-rgb`。同一個 `colorDistance` 必須傳給 Error Diffusion、Ordered Dither、Pattern Dither，以及 Dither 關閉時 Palette operation 的直接最近色映射；在 `pair-mix` 與 `tri-mix` 下，`colorDistance` 必須用來評估哪一組 palette mix 的混合結果最接近輸入顏色。`euclidean-bt709` 是 RgbQuant-style BT.709 weighted euclidean distance；`euclidean-rgb` 是未加權 RGB squared distance；`manhattan-bt709` 是 BT.709 weighted Manhattan distance；`manhattan-rgb` 是未加權 Manhattan distance。舊 id `euclidean` / `bt709` 應正規化到 `euclidean-bt709`，舊 id `rgb` 應正規化到 `euclidean-rgb`，舊 id `manhattan` 應正規化到 `manhattan-rgb`。
 
 `rgbquant-adapter.js` 是 Dither Editor 使用 RgbQuant 的唯一入口，且只可用於 Original palette 萃取。Adapter 必須：
 
@@ -1825,7 +1826,7 @@ const ditherSettings = {
     algorithm: 'none',
     paletteMapping: 'nearest-color',
     serpentine: false,
-    colorDistance: 'euclidean-bt709',
+    colorDistance: 'euclidean-rgb',
     errorStrength: 100,
     palette: [
         { r: 0, g: 0, b: 0 },

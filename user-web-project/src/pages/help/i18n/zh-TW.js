@@ -54,9 +54,9 @@
                 title: '比較色彩距離',
                 settings: '合成漸層 480x288 · Floyd-Steinberg · E6 · 最近色 · 100%',
                 bt709: 'Euclidean BT.709',
-                bt709Caption: '加權 RGB 強調綠色差異，也是專案預設值。',
+                bt709Caption: '加權 RGB 強調綠色差異。',
                 rgb: 'Euclidean RGB',
-                rgbCaption: '三個 RGB 通道以相同權重參與平方距離。',
+                rgbCaption: '三個 RGB 通道以相同權重參與平方距離，也是專案預設值。',
                 ciede: 'CIEDE2000',
                 ciedeCaption: '在 Lab 空間比較人眼感知差異，可能選出不同鄰近色。'
             }
@@ -167,7 +167,7 @@
                         steps: [
                             { title: '調整', body: '在減色之前調整亮度、對比與飽和度。' },
                             { title: '調色盤', body: '保留「原始」以萃取代表色、選擇裝置 preset，或修改色票建立「自訂」。' },
-                            { title: '抖色', body: '先使用 Floyd-Steinberg、最近色與 Euclidean BT.709，每次只改一個設定。' }
+                            { title: '抖色', body: '先使用 Floyd-Steinberg、最近色與 Euclidean RGB，每次只改一個設定。' }
                         ]
                     },
                     {
@@ -189,7 +189,7 @@
                                 ['Palette', '原始，8 色'],
                                 ['Dither Algorithm', 'Floyd-Steinberg'],
                                 ['Palette Mapping', '最近色'],
-                                ['Color Distance', 'Euclidean BT.709'],
+                                ['Color Distance', 'Euclidean RGB'],
                                 ['Error Strength', '100%'],
                                 ['Serpentine', '關閉；單方向條紋明顯時再開啟']
                             ]
@@ -394,8 +394,8 @@
                         table: {
                             headers: ['公式', '意義', '適用時機'],
                             rows: [
-                                ['Euclidean BT.709', 'RGB 平方距離，紅 0.2126、綠 0.7152、藍 0.0722。', '需要專案預設與兼顧亮度感知的配對。'],
-                                ['Euclidean RGB', '三個通道使用相同權重的平方距離。', '數值 RGB 差異比亮度加權更重要。'],
+                                ['Euclidean BT.709', 'RGB 平方距離，紅 0.2126、綠 0.7152、藍 0.0722。', '亮度感知配對比通道等權重更重要。'],
+                                ['Euclidean RGB', '三個通道使用相同權重的平方距離。', '需要專案預設，並讓各通道的數值差異等權計算。'],
                                 ['Manhattan BT.709', '加權的通道絕對差。', '希望使用較簡單且有 BT.709 權重的角狀決策邊界。'],
                                 ['Manhattan RGB', '相同權重的通道絕對差。', '希望得到可預期的逐通道配對。'],
                                 ['CIEDE2000', 'sRGB 轉 Lab 後比較感知色差。', '人眼相似度比處理成本更重要。']
@@ -407,8 +407,8 @@
                         id: 'choosing',
                         title: '實際選擇方式',
                         bullets: [
-                            '第一個選擇維持 Euclidean BT.709。',
-                            '顏色受到亮度權重影響而偏離預期時，比較 Euclidean RGB。',
+                            '第一個選擇維持 Euclidean RGB。',
+                            '需要亮度感知配對時，比較 Euclidean BT.709。',
                             '想要不同、逐通道線性的邊界時嘗試 Manhattan 版本。',
                             '小型 Palette 含有感知上接近的顏色，且 preview latency 可接受時嘗試 CIEDE2000。',
                             '先固定 Palette 與 Palette Mapping，再比較 Distance，避免一次改變太多變因。'

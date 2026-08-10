@@ -1,7 +1,7 @@
 (function (app) {
     // Palette 共用計算工具。
-    // 預設使用 RgbQuant-style Euclidean distance，也就是 BT.709 weighted RGB。
-    var DEFAULT_COLOR_DISTANCE_ID = 'euclidean-bt709';
+    // 預設使用未加權 RGB 的 Euclidean distance。
+    var DEFAULT_COLOR_DISTANCE_ID = 'euclidean-rgb';
     // 依賴 core/color/color-utils.js 先載入（index.html 與 tools 的 script 順序保證）。
     var clampChannel = app.core.colorUtils.clampChannel;
 

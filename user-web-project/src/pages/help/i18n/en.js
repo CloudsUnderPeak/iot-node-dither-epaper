@@ -54,9 +54,9 @@
                 title: 'Compare Color Distance',
                 settings: 'Synthetic gradient 480x288 · Floyd-Steinberg · E6 · Nearest Color · 100%',
                 bt709: 'Euclidean BT.709',
-                bt709Caption: 'Weighted RGB emphasizes differences in green and follows the project default.',
+                bt709Caption: 'Weighted RGB emphasizes differences in green.',
                 rgb: 'Euclidean RGB',
-                rgbCaption: 'All RGB channels contribute equally to squared distance.',
+                rgbCaption: 'All RGB channels contribute equally to squared distance; this is the project default.',
                 ciede: 'CIEDE2000',
                 ciedeCaption: 'A perceptual Lab-space comparison can choose a different palette neighbor.'
             }
@@ -167,7 +167,7 @@
                         steps: [
                             { title: 'Adjust', body: 'Tune brightness, contrast, and saturation before color reduction.' },
                             { title: 'Palette', body: 'Keep Original for extracted representative colors, choose a device preset, or edit swatches to create Custom.' },
-                            { title: 'Dither', body: 'Begin with Floyd-Steinberg, Nearest Color, and Euclidean BT.709. Change one setting at a time.' }
+                            { title: 'Dither', body: 'Begin with Floyd-Steinberg, Nearest Color, and Euclidean RGB. Change one setting at a time.' }
                         ]
                     },
                     {
@@ -189,7 +189,7 @@
                                 ['Palette', 'Original, 8 colors'],
                                 ['Dither Algorithm', 'Floyd-Steinberg'],
                                 ['Palette Mapping', 'Nearest Color'],
-                                ['Color Distance', 'Euclidean BT.709'],
+                                ['Color Distance', 'Euclidean RGB'],
                                 ['Error Strength', '100%'],
                                 ['Serpentine', 'Off; enable it if one-way streaks are distracting']
                             ]
@@ -412,8 +412,8 @@
                         table: {
                             headers: ['Metric', 'Meaning', 'Use it when'],
                             rows: [
-                                ['Euclidean BT.709', 'Squared RGB distance weighted 0.2126 red, 0.7152 green, 0.0722 blue.', 'You want the project default and balanced luminance-sensitive matching.'],
-                                ['Euclidean RGB', 'Squared distance with equal channel weight.', 'Equal numeric RGB change is more important than luminance weighting.'],
+                                ['Euclidean BT.709', 'Squared RGB distance weighted 0.2126 red, 0.7152 green, 0.0722 blue.', 'Balanced luminance-sensitive matching is more important than equal channel weight.'],
+                                ['Euclidean RGB', 'Squared distance with equal channel weight.', 'You want the project default and equal numeric RGB changes to count equally.'],
                                 ['Manhattan BT.709', 'Weighted absolute channel differences.', 'You want a simpler, more angular BT.709-weighted decision boundary.'],
                                 ['Manhattan RGB', 'Equal-weight absolute channel differences.', 'You want predictable channel-by-channel matching.'],
                                 ['CIEDE2000', 'Perceptual difference after sRGB to Lab conversion.', 'Perceptual similarity matters more than processing cost.']
@@ -429,8 +429,8 @@
                         id: 'choosing',
                         title: 'Practical choice',
                         bullets: [
-                            'Keep Euclidean BT.709 as the first choice.',
-                            'Compare Euclidean RGB if colors appear unexpectedly biased by luminance weighting.',
+                            'Keep Euclidean RGB as the first choice.',
+                            'Compare Euclidean BT.709 when luminance-sensitive matching is more important than equal channel weight.',
                             'Use Manhattan variants for a deliberately different, channel-linear boundary.',
                             'Try CIEDE2000 when a small palette contains perceptually close colors and preview latency remains acceptable.',
                             'Evaluate distance only after fixing the palette and Palette Mapping; otherwise several variables change at once.'
