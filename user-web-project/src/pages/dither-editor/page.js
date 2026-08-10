@@ -11,6 +11,7 @@
     var pixelPreviewDrag = null;
     var previewToolbar = null;
     var epaperUnsubscribe = null;
+    var calibrationUnsubscribe = null;
 
     // 取得 UI 文字，缺字串時回傳 key 方便除錯。
     function t(key) {
@@ -508,9 +509,15 @@
             var state = controller.state;
             modeMachine().normalize(state);
             app.pages.ditherEditor.featureRegistry.dispatch('onMount', { state: state, controller: controller });
+            var calibrationChanged = controller.syncEpaperCalibration({ defer: true });
             epaperUnsubscribe = app.device.epaper.subscribe(function () {
                 if (controller) {
                     controller.syncEpaperTarget();
+                }
+            });
+            calibrationUnsubscribe = app.device.epaperCalibration.subscribe(function () {
+                if (controller) {
+                    controller.syncEpaperCalibration();
                 }
             });
             rebuildControls(state);
@@ -526,7 +533,8 @@
                 // Dither Editor 切到其他頁再回來時，使用 in-memory cachedState 還原工作區。
                 normalizeCachedStatus(controller.state);
                 modeMachine().normalize(controller.state);
-                if (controller.state.status === 'processing-preview' && controller.state.mode === modeMachine().groups.EDIT) {
+                if ((calibrationChanged || controller.state.status === 'processing-preview')
+                    && controller.state.mode === modeMachine().groups.EDIT) {
                     controller.schedulePreview();
                 } else {
                     render(controller.state);
@@ -541,6 +549,10 @@
             if (epaperUnsubscribe) {
                 epaperUnsubscribe();
                 epaperUnsubscribe = null;
+            }
+            if (calibrationUnsubscribe) {
+                calibrationUnsubscribe();
+                calibrationUnsubscribe = null;
             }
             if (refs.handleResize) {
                 window.removeEventListener('resize', refs.handleResize);

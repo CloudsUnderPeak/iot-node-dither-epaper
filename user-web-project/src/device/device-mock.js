@@ -14,6 +14,24 @@
     var TRANSITION_CONNECT_MS = 4000;
     var LATENCY_MIN_MS = 120;
     var LATENCY_MAX_MS = 320;
+    var DEFAULT_EPAPER_CALIBRATION = [
+        { id: 'black', code: 0, display: { r: 39, g: 39, b: 43 } },
+        { id: 'white', code: 1, display: { r: 237, g: 237, b: 225 } },
+        { id: 'yellow', code: 2, display: { r: 224, g: 212, b: 31 } },
+        { id: 'red', code: 3, display: { r: 120, g: 32, b: 32 } },
+        { id: 'blue', code: 5, display: { r: 31, g: 88, b: 169 } },
+        { id: 'green', code: 6, display: { r: 58, g: 110, b: 72 } }
+    ];
+
+    function copyCalibration(colors) {
+        return colors.map(function (color) {
+            return {
+                id: color.id,
+                code: color.code,
+                display: Object.assign({}, color.display)
+            };
+        });
+    }
 
     var state = {
         password: 'password',
@@ -42,7 +60,11 @@
         },
         // {startedAt, payload, fail} — PUT /api/wifi 的 202 safe transition。
         transition: null,
-        epaper: { operation: null, stored: false, lastSource: null }
+        epaper: { operation: null, stored: false, lastSource: null },
+        epaperCalibration: {
+            source: 'default',
+            colors: copyCalibration(DEFAULT_EPAPER_CALIBRATION)
+        }
     };
 
     var SCAN_NETWORKS = [
@@ -282,6 +304,48 @@
         return base;
     }
 
+    function epaperCalibrationSnapshot() {
+        return {
+            schema_version: 1,
+            source: state.epaperCalibration.source,
+            recovery_reason: 'none',
+            colors: copyCalibration(state.epaperCalibration.colors)
+        };
+    }
+
+    function updateEpaperCalibration(init) {
+        var body = parseJson(init);
+        var source = body && body.colors;
+        var ids = DEFAULT_EPAPER_CALIBRATION.map(function (color) { return color.id; });
+        if (!source || Object.keys(source).length !== ids.length) {
+            return fail(400, 'invalid_field', 'complete calibration is required');
+        }
+        var seen = {};
+        var colors = [];
+        for (var index = 0; index < ids.length; index += 1) {
+            var definition = DEFAULT_EPAPER_CALIBRATION[index];
+            var display = source[definition.id];
+            if (!display || !Number.isInteger(display.r) || !Number.isInteger(display.g)
+                || !Number.isInteger(display.b) || display.r < 0 || display.r > 255
+                || display.g < 0 || display.g > 255 || display.b < 0 || display.b > 255) {
+                return fail(400, 'invalid_field', 'invalid calibration channel');
+            }
+            var rgb = display.r + ',' + display.g + ',' + display.b;
+            if (seen[rgb]) {
+                return fail(400, 'invalid_field', 'display colors must be unique');
+            }
+            seen[rgb] = true;
+            colors.push({
+                id: definition.id,
+                code: definition.code,
+                display: { r: display.r, g: display.g, b: display.b }
+            });
+        }
+        state.epaperCalibration.colors = colors;
+        state.epaperCalibration.source = 'persisted';
+        return ok(epaperCalibrationSnapshot(), 'e-paper calibration updated');
+    }
+
     function beginEpaper(source) {
         var current = epaperStatus();
         if (!current.can_draw) {
@@ -301,6 +365,17 @@
         }
         if (path === 'api/epaper/status' && method === 'GET') {
             return ok(epaperStatus());
+        }
+        if (path === 'api/epaper/calibration' && method === 'GET') {
+            return ok(epaperCalibrationSnapshot());
+        }
+        if (path === 'api/epaper/calibration' && method === 'PUT') {
+            return updateEpaperCalibration(init);
+        }
+        if (path === 'api/epaper/calibration/reset' && method === 'POST') {
+            state.epaperCalibration.source = 'default';
+            state.epaperCalibration.colors = copyCalibration(DEFAULT_EPAPER_CALIBRATION);
+            return ok(epaperCalibrationSnapshot(), 'e-paper calibration reset');
         }
         if (path === 'api/epaper/image' && method === 'POST') {
             var byteLength = init && init.body && init.body.byteLength;
@@ -425,6 +500,8 @@
             state.password = 'password';
             state.token = '';
             state.hostname = 'esp32-device';
+            state.epaperCalibration.source = 'default';
+            state.epaperCalibration.colors = copyCalibration(DEFAULT_EPAPER_CALIBRATION);
             state.transition = null;
             state.wifi.mode = 'ap';
             state.wifi.fallbackToAp = true;

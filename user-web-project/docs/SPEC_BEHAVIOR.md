@@ -11,6 +11,8 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-08-10: 面板測試新增公開的六色色準編輯器：色票與 RGB 輸入即時改變預覽，只有儲存才寫入裝置 NVS；可重載裝置值或恢復韌體預設。儲存成功後同一份 canonical 色盤立即套用到固定色票、抖色與 Result，編輯中的舊頁面會重算，未儲存草稿不影響編輯器。
+- 2026-08-10: E-paper 固定六色色票與面板六色測試圖統一依 EPD code `0,1,2,3,5,6` 排列，顯示順序為黑、白、黃、紅、藍、綠；`DISPLAY_COLORS` 與 `OUTPUT_COLORS` 維持相同 code slot，避免紅／黃因語意順序不同而錯配。
 - 2026-08-10: 「電子紙測試」更名為「面板測試」並對齊其他裝置頁版型：移除頁內重複大標題，狀態卡只顯示面板、狀態與冷卻資訊，診斷卡顯示說明與三個操作；卡片、欄位層級、間距、離線反灰與行動列均沿用裝置管理共用樣式。
 - 2026-08-09: 電子紙肉眼校色改為實體參考色模型：網頁色票與抖動皆使用面板在真實世界呈現的 `DISPLAY_COLORS`（A′）做色距、選色與誤差擴散；送出前再依固定 palette index 轉成裝置協定 `OUTPUT_COLORS`（A），使網頁 Result 與實體面板視覺對齊而不改變 EPDIMG contract。
 - 2026-08-09: E-paper 繪製／測試操作 overlay 改為沿用 App 啟動 loading 的主題遮罩、64px spinner、accent 色、文字與進度條視覺；電子紙既有的 phase 文案、獨立百分比與時間加權進度行為不變。
@@ -365,7 +367,7 @@ Acceptance:
 
 - `GET /api/alive` and a valid `GET /api/epaper` capability response switch the editor to E-paper Device Mode; an absent or unsupported endpoint leaves PNG export unchanged.
 - Crop only offers landscape 5:3 and portrait 3:5. Resize is read-only 800×480 or 480×800, and Palette is the fixed E6 six-color set.
-- The fixed palette has separate display RGB A′ and protocol RGB A values. Swatches, the Result canvas, palette mapping, and dither error use A′; the encoder boundary maps the exact palette index back to A before producing EPDIMG.
+- The fixed palette has separate display RGB A′ and protocol RGB A values. Both arrays and the six-color test image follow EPD code order `0,1,2,3,5,6` (black, white, yellow, red, blue, green). Swatches, the Result canvas, palette mapping, and dither error use A′; the encoder boundary maps the exact palette index back to A before producing EPDIMG.
 - The formal pipeline decides orientation from the actual output dimensions. 800×480 stays unchanged; 480×800 rotates clockwise to 800×480 before EPDIMG encoding; any other size is rejected before upload.
 - The e-paper action sends one raw `POST /api/epaper/image`. The accepted upload already updates the stored image and queues draw, so the editor does not append a refresh request.
 - Processing, upload and physical draw show a blocking spinner, phase copy and simulated percentage. Percentage is weighted by expected time, with `refreshing` using the largest interval; repeated polling of the same phase must not reset its timer, and an over-time phase keeps moving asymptotically without reaching 100% before server success/cooldown.
@@ -473,6 +475,9 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
   - 顯示空白：`POST /api/epaper/image/white`，不寫 stored image。
   - 顯示六色測試圖：`POST /api/epaper/image/palette`，不寫 stored image。
   - 重新繪製目前圖片：`POST /api/epaper/image/refresh`，stored image 不存在或無效時不可操作。
+- 同頁的「六色色準調整」依 EPD code `0,1,2,3,5,6` 顯示黑、白、黃、紅、藍、綠。色票或 RGB 欄位輸入時六段預覽即時更新，但不發送 API；六組值全部為 `0..255` 整數且互異時才可儲存。
+- 儲存是完整六色 replacement；成功後清除 dirty 並立即同步抖色編輯器。重載會在 dirty 時要求確認；恢復預設一定要求確認。若編輯期間 canonical 被其他頁面更新，不自動覆蓋草稿，必須先重載。
+- 離線、載入或儲存中禁止操作；離線樣式不可改變六色預覽本身的 RGB。色準 API 公開，不顯示登入鎖定卡。
 - 三個測試 action 不送 request body，並和 editor upload 共用 single-operation admission、overlay、status polling、錯誤處理與 180 秒 cooldown。
 
 ### 驗收重點
@@ -644,7 +649,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 - Dither 啟用時，Palette 不先量化像素；Dither 以目前有效色票產生固定色點陣結果。
 - Dither 為 None 時，固定 preset 或 Custom Palette 可直接把像素映射到最近色。
 - 最近色映射使用 Dither 面板目前選擇的 Color Distance；預設為 Euclidean BT.709。
-- E-paper Device Mode 強制使用 E6 六色；不顯示新增、刪除、preset、Original Colors 或 swatch 編輯控制。色票、Result canvas、palette mapping 與 dither error 使用可校正的 DISPLAY RGB A′；encoder boundary 再依固定 palette index 精確轉成 OUTPUT RGB A，EPDIMG 不接受其他 RGB。
+- E-paper Device Mode 強制使用 E6 六色；不顯示新增、刪除、preset、Original Colors 或 swatch 編輯控制。色票固定依 EPD code `0,1,2,3,5,6` 排成黑、白、黃、紅、藍、綠，與面板六色測試圖一致。色票、Result canvas、palette mapping 與 dither error 使用可校正的 DISPLAY RGB A′；encoder boundary 再依相同 code slot 精確轉成 OUTPUT RGB A，EPDIMG 不接受其他 RGB。
 
 ### Dither
 

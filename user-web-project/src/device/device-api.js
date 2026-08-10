@@ -118,7 +118,10 @@
             storage_busy: 'epaperErrorStorageBusy',
             storage_unavailable: 'epaperErrorStorageUnavailable',
             insufficient_storage: 'epaperErrorInsufficientStorage',
-            storage_error: 'epaperErrorStorage'
+            storage_error: 'epaperErrorStorage',
+            invalid_calibration: 'epaperCalibrationErrorInvalid',
+            unsupported_schema: 'epaperCalibrationErrorUnsupportedSchema',
+            calibration_unavailable: 'epaperCalibrationErrorUnavailable'
         };
         if (error && error.code === 'transport_error') {
             return app.i18n.t('deviceErrorUnreachable');
@@ -160,6 +163,19 @@
             },
             epaperStatus: function epaperStatus() {
                 return request('GET', 'api/epaper/status', { auth: false, timeoutMs: 4000 });
+            },
+            epaperCalibration: function epaperCalibration() {
+                return request('GET', 'api/epaper/calibration', { auth: false, timeoutMs: 4000 });
+            },
+            updateEpaperCalibration: function updateEpaperCalibration(payload) {
+                return request('PUT', 'api/epaper/calibration', {
+                    auth: false,
+                    json: payload,
+                    timeoutMs: 10000
+                });
+            },
+            resetEpaperCalibration: function resetEpaperCalibration() {
+                return request('POST', 'api/epaper/calibration/reset', { auth: false, timeoutMs: 10000 });
             },
             epaperUpload: function epaperUpload(payload) {
                 return request('POST', 'api/epaper/image', {

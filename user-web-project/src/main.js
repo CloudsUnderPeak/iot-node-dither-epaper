@@ -73,6 +73,7 @@
                 shell.start();
                 // Capability discovery runs beside the visual startup gate and never blocks it.
                 app.device.epaper.start();
+                app.device.epaperCalibration.start();
                 app.device.live.start();
                 if (app.startupGate) {
                     app.startupGate.setProgress(82);

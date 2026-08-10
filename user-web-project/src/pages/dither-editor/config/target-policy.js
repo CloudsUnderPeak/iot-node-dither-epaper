@@ -1,31 +1,49 @@
 (function (app) {
     var PALETTE_ID = 'e6-color-epaper';
-    // OUTPUT_COLORS 是 EPDIMG encoder 的協定色 A；不得為了肉眼校色修改。
+    // OUTPUT_COLORS 是 EPDIMG encoder 的協定色 A；依 EPD code 0、1、2、3、5、6 排列。
     var OUTPUT_COLORS = [
         { r: 0, g: 0, b: 0 },
         { r: 255, g: 255, b: 255 },
-        { r: 255, g: 0, b: 0 },
         { r: 255, g: 255, b: 0 },
+        { r: 255, g: 0, b: 0 },
         { r: 0, g: 0, b: 255 },
         { r: 0, g: 255, b: 0 }
     ];
 
-    // DISPLAY_COLORS 是實體面板肉眼呈現的參考色 A′，同時供網頁預覽、色距與抖動使用。
-    // 輸出前會依相同 index 精確轉回 OUTPUT_COLORS；校色時只修改這六組 RGB。
-    // 順序必須維持：黑、白、紅、黃、藍、綠。
-    var DISPLAY_COLORS = [
-        { r: 24, g: 24, b: 22 },
-        { r: 242, g: 239, b: 222 },
-        { r: 194, g: 49, b: 43 },
-        { r: 230, g: 194, b: 55 },
-        { r: 45, g: 79, b: 137 },
-        { r: 54, g: 125, b: 71 }
+    // Defaults 只供 calibration service 尚未建立時 fallback；正式 canonical 由裝置 NVS API 提供。
+    // 順序必須維持 EPD code 0、1、2、3、5、6：黑、白、黃、紅、藍、綠。
+    var DEFAULT_DISPLAY_COLORS = [
+        { r: 39, g: 39, b: 43 },       // code 0：黑色
+        { r: 237, g: 237, b: 225 },    // code 1：白色
+        { r: 224, g: 212, b: 31 },     // code 2：黃色
+        { r: 120, g: 32, b: 32 },      // code 3：紅色
+        { r: 31, g: 88, b: 169 },      // code 5：藍色
+        { r: 58, g: 110, b: 72 }       // code 6：綠色
     ];
     var displayImageCache = new WeakMap();
     var outputImageCache = new WeakMap();
 
     function copyColors(colors) {
         return colors.map(function (color) { return Object.assign({}, color); });
+    }
+
+    function displayColors() {
+        if (!app.device.epaperCalibration) {
+            return copyColors(DEFAULT_DISPLAY_COLORS);
+        }
+        return app.device.epaperCalibration.colors().map(function (color) {
+            return { r: color.r, g: color.g, b: color.b };
+        });
+    }
+
+    function calibrationRevision() {
+        return app.device.epaperCalibration ? app.device.epaperCalibration.revision() : 0;
+    }
+
+    function colorsEqual(left, right) {
+        return Array.isArray(left) && left.length === right.length && left.every(function (color, index) {
+            return color.r === right[index].r && color.g === right[index].g && color.b === right[index].b;
+        });
     }
 
     function colorIndex(colors, r, g, b) {
@@ -45,35 +63,39 @@
     }
 
     function displayColorIndex(color) {
+        var colors = displayColors();
         return color
-            ? colorIndex(DISPLAY_COLORS, color.r, color.g, color.b)
+            ? colorIndex(colors, color.r, color.g, color.b)
             : -1;
     }
 
     function displayColor(color) {
         var index = outputColorIndex(color);
-        return Object.assign({}, index === -1 ? color : DISPLAY_COLORS[index]);
+        var colors = displayColors();
+        return Object.assign({}, index === -1 ? color : colors[index]);
     }
 
     function displayImageData(imageData) {
         if (!imageData || !imageData.data) {
             return imageData;
         }
+        var revision = calibrationRevision();
         var cached = displayImageCache.get(imageData);
-        if (cached) {
-            return cached;
+        if (cached && cached.revision === revision) {
+            return cached.imageData;
         }
+        var colors = displayColors();
         var data = new Uint8ClampedArray(imageData.data);
         for (var offset = 0; offset < data.length; offset += 4) {
             var index = colorIndex(OUTPUT_COLORS, data[offset], data[offset + 1], data[offset + 2]);
             if (index !== -1) {
-                data[offset] = DISPLAY_COLORS[index].r;
-                data[offset + 1] = DISPLAY_COLORS[index].g;
-                data[offset + 2] = DISPLAY_COLORS[index].b;
+                data[offset] = colors[index].r;
+                data[offset + 1] = colors[index].g;
+                data[offset + 2] = colors[index].b;
             }
         }
         var displayed = new ImageData(data, imageData.width, imageData.height);
-        displayImageCache.set(imageData, displayed);
+        displayImageCache.set(imageData, { revision: revision, imageData: displayed });
         return displayed;
     }
 
@@ -82,13 +104,15 @@
         if (!imageData || !imageData.data) {
             return imageData;
         }
+        var revision = calibrationRevision();
         var cached = outputImageCache.get(imageData);
-        if (cached) {
-            return cached;
+        if (cached && cached.revision === revision) {
+            return cached.imageData;
         }
+        var colors = displayColors();
         var data = new Uint8ClampedArray(imageData.data);
         for (var offset = 0; offset < data.length; offset += 4) {
-            var index = colorIndex(DISPLAY_COLORS, data[offset], data[offset + 1], data[offset + 2]);
+            var index = colorIndex(colors, data[offset], data[offset + 1], data[offset + 2]);
             if (index === -1) {
                 index = colorIndex(OUTPUT_COLORS, data[offset], data[offset + 1], data[offset + 2]);
             }
@@ -100,7 +124,7 @@
             data[offset + 2] = OUTPUT_COLORS[index].b;
         }
         var output = new ImageData(data, imageData.width, imageData.height);
-        outputImageCache.set(imageData, output);
+        outputImageCache.set(imageData, { revision: revision, imageData: output });
         return output;
     }
 
@@ -112,13 +136,21 @@
         if (!state || !state.settings || !app.device.epaper.isSupported()) {
             return false;
         }
+        var previousTarget = state.target || {};
+        var previousPalette = state.settings.palette && state.settings.palette.palette;
         var crop = state.settings.crop;
         var portrait = crop && crop.aspectRatioId === '3-5';
         if (crop && crop.aspectRatioId !== '5-3' && crop.aspectRatioId !== '3-5') {
             crop.aspectRatioId = '5-3';
             portrait = false;
         }
-        state.target = { mode: 'epaper', orientation: portrait ? 'portrait' : 'landscape' };
+        var revision = calibrationRevision();
+        var colors = displayColors();
+        state.target = {
+            mode: 'epaper',
+            orientation: portrait ? 'portrait' : 'landscape',
+            calibrationRevision: revision
+        };
         if (state.settings.resize) {
             Object.assign(state.settings.resize, portrait
                 ? { width: 480, height: 800, aspectRatio: 3 / 5 }
@@ -126,9 +158,12 @@
         }
         if (state.settings.palette) {
             state.settings.palette.presetId = PALETTE_ID;
-            state.settings.palette.palette = copyColors(DISPLAY_COLORS);
+            state.settings.palette.palette = copyColors(colors);
         }
-        return true;
+        return previousTarget.mode !== 'epaper'
+            || previousTarget.orientation !== state.target.orientation
+            || previousTarget.calibrationRevision !== revision
+            || !colorsEqual(previousPalette, colors);
     }
 
     function sync(state) {
@@ -157,9 +192,10 @@
         normalizeBeforePipeline: force,
         settingAllowed: settingAllowed,
         paletteId: PALETTE_ID,
-        colors: DISPLAY_COLORS,
+        colors: displayColors,
         outputColors: OUTPUT_COLORS,
-        displayColors: DISPLAY_COLORS,
+        displayColors: displayColors,
+        calibrationRevision: calibrationRevision,
         displayColor: displayColor,
         displayImageData: displayImageData,
         outputImageData: outputImageData,

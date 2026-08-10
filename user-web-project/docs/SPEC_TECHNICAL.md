@@ -11,6 +11,8 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-08-10: 新增 `device-epaper-calibration.js` 作為六色色準 canonical service，處理公開 GET／PUT／reset、deep-copy snapshot、revision 與 stale GET suppression。面板測試保留本地 draft；`target-policy` 改為 revision-aware 動態 palette，editor 收到變更時清 stage/image cache 並重跑 preview。
+- 2026-08-10: `target-policy.js` 的 `OUTPUT_COLORS`／`DISPLAY_COLORS` 改為共用 EPD code order `0,1,2,3,5,6`（黑、白、黃、紅、藍、綠）；韌體的 palette validation、capability `color_codes` 與六色測試 frame source 改讀同一份具名 code-order 常數。
 - 2026-08-09: E-paper effective palette 改為 `DISPLAY_COLORS`（A′），讓所有 palette mapper／dither processor 使用校色後的實體參考色；`target-policy.outputImageData()` 在 encoder boundary 以 exact RGB lookup 保留 palette index 並轉回 `OUTPUT_COLORS`（A），拒絕任何非六色色素。
 - 2026-08-09: `EpaperOperationOverlay` 共用 `.app-loading-content`、spinner、message、progress 與 progress-bar primitives，僅以 e-paper CSS 保留全畫面 blocking 層與獨立 percentage；避免啟動 loading 與操作 loading 的尺寸、動畫及 theme token 漂移。
 - 2026-08-09: E-paper frontend follow-up：phase progress 改為不受相同 status polling 重設的 time estimate 與 overtime asymptotic motion；cooldown local timer 在歸零後持續短輪詢至 server 離開 cooldown。`target-policy.js` 分離 immutable OUTPUT_COLORS 與人工可校正 DISPLAY_COLORS，viewport/display swatch 只套 display mapping，encoder 仍驗證純六色。
@@ -1022,6 +1024,7 @@ src/device/
   device-api.js    REST client：envelope 解析、Bearer token store、AbortController timeout、resources 目錄
   device-live.js   alive 監看：GET /api/alive 輪詢、online/offline/standalone 狀態、subscribe
   device-epaper.js e-paper capability、cached status、single operation、phase progress、cooldown
+  device-epaper-calibration.js 六色 canonical snapshot、revision、公開 GET／PUT／reset 與 stale response suppression
   device-gate.js   離線反灰：banner、fieldset disable、恢復後自動刷新
   device-auth.js   認證：login dialog、session 驗證、logout、全域 401 處理、鎖定卡
 ```
@@ -1074,6 +1077,8 @@ src/device/
 - `device-live` 仍只擁有 connection truth；`device-epaper` 在 online 後 probe `GET /api/epaper`，驗證固定 800×480、EPDIMG、192,040 bytes、六個 color codes 與必要 capabilities。
 - Target state 與 connection state 分離。Capability 一旦在 session 內確認，offline 不清除 target，只禁止 operation；reconnect 後重抓 capability/status。
 - `device-epaper` 擁有 cached status、operation run id、polling、blocking state、phase progress與 cooldown deadline。Editor 與 test page 只能訂閱 snapshot及呼叫公開 operation method。
+- `device-epaper-calibration` 擁有六色 canonical snapshot。所有對外 colors 都 deep copy；只有 response 通過固定 id/code、channel integer/range 與 duplicate RGB 驗證後才發布。`revision` 只在 RGB 真正改變時遞增；較舊 GET 不得覆蓋較新的 save/reset，斷線或 request failure 保留最後 canonical。
+- 面板測試 draft 與 canonical 分離，高頻 e-paper status render 不得重建輸入 DOM 或覆蓋草稿。save/reset/reload 期間以 request generation 防 stale response；dirty 遇到外部 revision 只標記 conflict，不自動 rebase。
 - `app.app.state.blockingOperation` 只保存 coarse global lock reason，不保存 editor image 或 API payload。Router/Menu 在 lock 期間拒絕 navigation。
 - Static site 由 ESP32 提供；ESP32 不負責 crop、resize、palette、dither、portrait rotation 或 EPDIMG packing。
 
@@ -1173,7 +1178,8 @@ Device Mode 啟用 device display target 時：
 - 固定 panel profile 由 ESP32 `GET /api/epaper` 回傳；local registry 只描述前端支援形狀，不可單獨宣告真裝置存在。
 - E-paper Crop ratio allowlist 固定為 landscape `5-3` 與 portrait `3-5`。
 - Landscape output 固定 800×480；portrait output 固定 480×800。Resize UI 為 read-only。
-- Effective palette 固定為 `e6-color-epaper`；Palette UI 不建立 add/remove control，color input、preset、Original size 均不可修改。`DISPLAY_COLORS` 是 pipeline 的實體參考色 A′，固定 swatch、Result viewport、palette mapping 與 dither error 都使用它；`OUTPUT_COLORS` 是 EPDIMG 協定色 A。`target-policy.outputImageData()` 必須在 encoder boundary 以 exact DISPLAY/OUTPUT RGB lookup 取得固定 palette index，再轉成 OUTPUT RGB；非六色像素必須拒絕，不可用 nearest-color 猜測硬體色碼。
+- Effective palette 固定為 `e6-color-epaper`；Palette UI 不建立 add/remove control，color input、preset、Original size 均不可修改。`OUTPUT_COLORS` 與 calibration service 的動態 display colors 必須平行採用 EPD code order `0,1,2,3,5,6`，即黑、白、黃、紅、藍、綠；前者是 EPDIMG 協定色 A，後者是 pipeline 的實體參考色 A′，固定 swatch、Result viewport、palette mapping 與 dither error 都使用 A′。`target-policy.outputImageData()` 必須在 encoder boundary 以 exact DISPLAY/OUTPUT RGB lookup 取得固定 code slot，再轉成 OUTPUT RGB；非六色像素必須拒絕，不可用 nearest-color 猜測硬體色碼。
+- `target-policy` 的 display/output `WeakMap` cache 必須帶 calibration revision。Editor 訂閱色準 service；revision 改變時重新 force target palette、清除 stage cache、live preview 與 output image，再依目前模式排程正式 preview，確保已開啟的工作區不沿用舊色盤。
 - `target-policy.js` 同時提供 UI guard、controller setting guard 與 formal pipeline 前 normalization。DOM disabled 不是安全邊界。
 - Capability 在 editor mount 後才確認時，policy 原子套用 target、增加 `uiRevision`、rebuild controls並重跑 preview。
 

@@ -545,13 +545,43 @@
             });
     };
 
-    DitherEditorController.prototype.syncEpaperTarget = function syncEpaperTarget() {
-        var previous = this.state.target && this.state.target.mode;
-        app.pages.ditherEditor.targetPolicy.sync(this.state);
-        if (previous !== this.state.target.mode) {
-            this.state.uiRevision = (this.state.uiRevision || 0) + 1;
+    DitherEditorController.prototype.syncEpaperCalibration = function syncEpaperCalibration(options) {
+        options = options || {};
+        var previousTarget = this.state.target || {};
+        var previousMode = previousTarget.mode;
+        var previousRevision = previousTarget.calibrationRevision;
+        var changed = app.pages.ditherEditor.targetPolicy.sync(this.state);
+        var currentTarget = this.state.target || {};
+        var targetChanged = previousMode !== currentTarget.mode;
+        var calibrationChanged = previousRevision !== currentTarget.calibrationRevision;
+        if (!changed && !targetChanged && !calibrationChanged) {
+            if (!options.defer) {
+                this.render(this.state);
+            }
+            return false;
         }
-        this.render(this.state);
+
+        clearTimeout(this.previewTimer);
+        this.previewTimer = null;
+        this.previewRunId = (this.previewRunId || 0) + 1;
+        this.state.livePreview = null;
+        this.state.outputImageData = null;
+        this.state.uiRevision = (this.state.uiRevision || 0) + 1;
+        app.pages.ditherEditor.pipelineRunner.clearStageCache(this.stageCache);
+        if (options.defer) {
+            return true;
+        }
+        if (this.state.sourceImageData
+            && this.state.mode === app.pages.ditherEditor.editorModeStateMachine.groups.EDIT) {
+            this.schedulePreview();
+        } else {
+            this.render(this.state);
+        }
+        return true;
+    };
+
+    DitherEditorController.prototype.syncEpaperTarget = function syncEpaperTarget() {
+        return this.syncEpaperCalibration();
     };
 
     DitherEditorController.prototype.cancelExport = function cancelExport() {

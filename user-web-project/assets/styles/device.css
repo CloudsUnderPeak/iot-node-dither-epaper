@@ -926,6 +926,111 @@ a.network-status-value {
     cursor: help;
 }
 
+/* ---- E-paper six-color calibration ---- */
+
+.epaper-calibration-strip {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    height: 28px;
+    overflow: hidden;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 7px;
+}
+
+.epaper-calibration-strip > span + span {
+    border-left: 1px solid color-mix(in srgb, var(--color-surface) 60%, transparent);
+}
+
+.epaper-calibration-grid {
+    display: grid;
+    gap: 8px;
+}
+
+.epaper-calibration-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) 46px minmax(270px, 1.6fr);
+    gap: 12px;
+    align-items: center;
+    padding: 9px 10px;
+    border: 1px solid var(--color-border-faint);
+    border-radius: 8px;
+    background: var(--color-surface-muted);
+}
+
+.epaper-calibration-name {
+    display: flex;
+    min-width: 0;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.epaper-calibration-preview {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 auto;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 5px;
+}
+
+.epaper-calibration-preview.is-invalid {
+    background: repeating-linear-gradient(135deg, var(--color-danger) 0 3px, transparent 3px 6px) !important;
+}
+
+.epaper-calibration-picker {
+    width: 46px;
+    height: 36px;
+    padding: 2px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 6px;
+    background: var(--color-surface);
+    cursor: pointer;
+}
+
+.epaper-calibration-picker:disabled {
+    opacity: 1;
+    cursor: default;
+}
+
+.epaper-calibration-channels {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.epaper-calibration-channel-wrap {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 5px;
+    align-items: center;
+    color: var(--color-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.epaper-calibration-channel {
+    font-variant-numeric: tabular-nums;
+}
+
+.epaper-calibration-state {
+    min-width: 0;
+}
+
+.epaper-calibration-card .save-dock {
+    position: static;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.is-device-offline .device-gate.epaper-calibration-card {
+    opacity: 1;
+    filter: none;
+}
+
 /* ---- Menu 裝置群組 ---- */
 
 .app-menu-divider {
@@ -968,6 +1073,10 @@ a.network-status-value {
         align-items: center;
     }
 
+    .epaper-calibration-row {
+        grid-template-columns: minmax(140px, 1fr) 46px minmax(240px, 1.5fr);
+    }
+
 }
 
 @media (max-width: 700px) {
@@ -996,6 +1105,14 @@ a.network-status-value {
     /* 觸控裝置的輸入框維持 16px，避免 iOS 聚焦時自動放大頁面。 */
     .device-input {
         font-size: 16px;
+    }
+
+    .epaper-calibration-row {
+        grid-template-columns: minmax(0, 1fr) 46px;
+    }
+
+    .epaper-calibration-channels {
+        grid-column: 1 / -1;
     }
 
     .modal-backdrop {
