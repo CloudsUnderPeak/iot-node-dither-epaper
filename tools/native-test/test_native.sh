@@ -53,6 +53,17 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 g++ -std=c++17 -Wall -Wextra -Werror -pthread \
   -I"$project_dir/tests/native/stubs" \
   -I"$project_dir/src" \
+  "$project_dir/tests/native/EpaperCalibrationTest.cpp" \
+  "$project_dir/src/modules/epaper/calibration/EpaperCalibration.cpp" \
+  "$project_dir/src/modules/epaper/calibration/EpaperCalibrationService.cpp" \
+  "$project_dir/src/modules/epaper/calibration/storage/PreferencesEpaperCalibrationStore.cpp" \
+  -o "$build_dir/epaper-calibration-test"
+
+"$build_dir/epaper-calibration-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror -pthread \
+  -I"$project_dir/tests/native/stubs" \
+  -I"$project_dir/src" \
   "$project_dir/tests/native/HardwareResourceTest.cpp" \
   "$project_dir/src/modules/hardware/EpaperHardware.cpp" \
   "$project_dir/src/modules/hardware/PinRegistry.cpp" \
@@ -233,6 +244,7 @@ g++ -std=c++17 -Wall -Wextra -Werror \
   "$project_dir/src/modules/config/model/StrictIpv4.cpp" \
   "$project_dir/src/modules/storage/UserFilePolicy.cpp" \
   "$project_dir/src/modules/epaper/EpaperImageFormat.cpp" \
+  "$project_dir/src/modules/epaper/calibration/EpaperCalibration.cpp" \
   -o "$build_dir/api-router-auth-test"
 
 "$build_dir/api-router-auth-test"

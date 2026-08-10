@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "api/shared/ApiResponse.h"
+#include "api/shared/JsonReader.h"
 
 namespace EpaperEndpoints {
 namespace {
@@ -25,6 +26,95 @@ void appendStored(JsonObject object, const EpaperStoredImageMetadata &stored) {
   }
 }
 
+String calibrationJson(const EpaperCalibrationSnapshot &snapshot) {
+  JsonDocument data;
+  data["schema_version"] = snapshot.profile.schemaVersion;
+  data["source"] = epaperCalibrationSourceToString(snapshot.source);
+  data["recovery_reason"] =
+      epaperCalibrationRecoveryReasonToString(snapshot.recoveryReason);
+  JsonArray colors = data["colors"].to<JsonArray>();
+  for (size_t index = 0; index < EpaperCalibration::kColorCount; ++index) {
+    const EpaperCalibration::ColorDefinition &definition =
+        EpaperCalibration::definition(index);
+    const EpaperCalibration::Rgb &display = snapshot.profile.display[index];
+    JsonObject color = colors.add<JsonObject>();
+    color["id"] = definition.id;
+    color["code"] = definition.code;
+    JsonObject displayObject = color["display"].to<JsonObject>();
+    displayObject["r"] = display.r;
+    displayObject["g"] = display.g;
+    displayObject["b"] = display.b;
+  }
+  return Api::json(data);
+}
+
+Api::Response calibrationResult(const Result &result,
+                                const EpaperCalibrationSnapshot &snapshot,
+                                const char *message) {
+  if (result.ok()) return Api::ok(calibrationJson(snapshot), message);
+  if (result.code == ResultCode::InvalidInput) {
+    return Api::problem(400, "invalid_field", result.message, "colors");
+  }
+  if (result.code == ResultCode::Unsupported) {
+    return Api::problem(409, "unsupported_schema", result.message);
+  }
+  return Api::problem(500, "storage_error", result.message);
+}
+
+bool decodeCalibration(const Api::Request &request,
+                       EpaperCalibration::Profile &profile,
+                       Api::Response &errorResponse) {
+  if (request.queryCount != 0 || request.queryOverflow) {
+    errorResponse = Api::problem(400, "unsupported_field",
+                                 "calibration update does not accept query fields");
+    return false;
+  }
+  JsonObjectConst root;
+  const Api::Response bodyResult = ApiRequest::requireObject(request, root);
+  if (!bodyResult.success) {
+    errorResponse = bodyResult;
+    return false;
+  }
+
+  JsonDecodeError error;
+  JsonReader rootReader(root, "", error);
+  JsonReader colorsReader = rootReader.requiredObject(
+      "colors", "colors object is required");
+  rootReader.finish({"colors"});
+  profile = EpaperCalibration::defaultProfile();
+  for (size_t index = 0; index < EpaperCalibration::kColorCount; ++index) {
+    const char *id = EpaperCalibration::definition(index).id;
+    JsonReader colorReader = colorsReader.requiredObject(
+        id, "color object is required");
+    const uint32_t r = colorReader.requiredUint32("r", "r is required");
+    const uint32_t g = colorReader.requiredUint32("g", "g is required");
+    const uint32_t b = colorReader.requiredUint32("b", "b is required");
+    colorReader.finish({"r", "g", "b"});
+    if (error.ok() && (r > 255 || g > 255 || b > 255)) {
+      error.code = "invalid_field";
+      error.field = "colors.";
+      error.field += id;
+      error.message = "RGB channels must be integers from 0 to 255";
+    }
+    profile.display[index] = {
+        static_cast<uint8_t>(r),
+        static_cast<uint8_t>(g),
+        static_cast<uint8_t>(b),
+    };
+  }
+  colorsReader.finish({"black", "white", "yellow", "red", "blue", "green"});
+  if (!error.ok()) {
+    errorResponse = Api::decodeError(error);
+    return false;
+  }
+  const Result validation = EpaperCalibration::validate(profile);
+  if (!validation.ok()) {
+    errorResponse = Api::problem(400, "invalid_field", validation.message, "colors");
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 Api::Response capabilities(const Api::Request &request) {
@@ -35,9 +125,9 @@ Api::Response capabilities(const Api::Request &request) {
   panel["model"] = "waveshare-7in3e";
   panel["width"] = EpaperImageFormat::kWidth;
   panel["height"] = EpaperImageFormat::kHeight;
-  panel["colors"] = 6;
+  panel["colors"] = EpaperImageFormat::kPaletteColorCount;
   JsonArray codes = panel["color_codes"].to<JsonArray>();
-  for (uint8_t code : {0, 1, 2, 3, 5, 6}) codes.add(code);
+  for (uint8_t code : EpaperImageFormat::kPaletteCodes) codes.add(code);
   JsonObject image = data["image"].to<JsonObject>();
   image["name"] = EpaperService::kImageName;
   image["format"] = "epdimg";
@@ -131,6 +221,37 @@ Api::Response metadata(const Api::Request &request,
   data["crc32"] = crc;
   data["valid"] = true;
   return Api::ok(Api::json(data));
+}
+
+Api::Response calibration(const Api::Request &request,
+                          const EpaperCalibrationService &service) {
+  Api::Response error;
+  if (rejectFields(request, error)) return error;
+  const EpaperCalibrationSnapshot snapshot = service.snapshot();
+  if (!snapshot.ready) {
+    return Api::problem(503, "calibration_unavailable",
+                        "e-paper calibration service unavailable");
+  }
+  return Api::ok(calibrationJson(snapshot));
+}
+
+Api::Response updateCalibration(const Api::Request &request,
+                                EpaperCalibrationService &service) {
+  EpaperCalibration::Profile profile;
+  Api::Response error;
+  if (!decodeCalibration(request, profile, error)) return error;
+  EpaperCalibrationSnapshot updated;
+  const Result result = service.update(profile, &updated);
+  return calibrationResult(result, updated, "e-paper calibration updated");
+}
+
+Api::Response resetCalibration(const Api::Request &request,
+                               EpaperCalibrationService &service) {
+  Api::Response error;
+  if (rejectFields(request, error)) return error;
+  EpaperCalibrationSnapshot updated;
+  const Result result = service.reset(&updated);
+  return calibrationResult(result, updated, "e-paper calibration reset");
 }
 
 Api::Response action(const Api::Request &request,

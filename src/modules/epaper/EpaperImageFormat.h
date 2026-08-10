@@ -13,6 +13,19 @@ constexpr uint32_t kHeight = 480;
 constexpr size_t kFrameBytes = 192000;
 constexpr size_t kImageBytes = kHeaderBytes + kFrameBytes;
 
+constexpr uint8_t kColorBlack = 0;
+constexpr uint8_t kColorWhite = 1;
+constexpr uint8_t kColorYellow = 2;
+constexpr uint8_t kColorRed = 3;
+constexpr uint8_t kColorBlue = 5;
+constexpr uint8_t kColorGreen = 6;
+constexpr uint8_t kPaletteCodes[] = {
+    kColorBlack, kColorWhite, kColorYellow,
+    kColorRed,   kColorBlue,  kColorGreen,
+};
+constexpr size_t kPaletteColorCount =
+    sizeof(kPaletteCodes) / sizeof(kPaletteCodes[0]);
+
 struct Header {
   uint32_t version = 0;
   uint32_t headerBytes = 0;

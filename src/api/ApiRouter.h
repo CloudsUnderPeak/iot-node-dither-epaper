@@ -11,6 +11,7 @@
 #include "modules/auth/AuthService.h"
 #include "modules/config/ConfigService.h"
 #include "modules/epaper/EpaperService.h"
+#include "modules/epaper/calibration/EpaperCalibrationService.h"
 #include "modules/power/BatteryMonitor.h"
 #include "modules/runtime/RuntimeActionScheduler.h"
 #include "modules/storage/EmbeddedWebAssets.h"
@@ -32,6 +33,7 @@ struct ApiRouterDeps {
   AuthService &authService;
   RuntimeActionScheduler &runtime;
   EpaperService &epaperService;
+  EpaperCalibrationService &epaperCalibrationService;
   BatteryMonitor &batteryMonitor;
 };
 
@@ -145,6 +147,7 @@ class ApiRouter {
   AuthService *authService_ = nullptr;
   RuntimeActionScheduler *runtimeActions_ = nullptr;
   EpaperService *epaperService_ = nullptr;
+  EpaperCalibrationService *epaperCalibrationService_ = nullptr;
   BatteryMonitor *batteryMonitor_ = nullptr;
   AuthEndpoints authEndpoints_;
   WifiEndpoints wifiEndpoints_;

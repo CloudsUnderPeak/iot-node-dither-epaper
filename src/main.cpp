@@ -15,6 +15,8 @@
 #include "modules/epaper/EpaperPowerProbe.h"
 #include "modules/epaper/EpaperRefreshProbe.h"
 #include "modules/epaper/EpaperService.h"
+#include "modules/epaper/calibration/EpaperCalibrationService.h"
+#include "modules/epaper/calibration/storage/PreferencesEpaperCalibrationStore.h"
 #include "modules/hardware/EpaperHardware.h"
 #include "modules/hardware/PinRegistry.h"
 #include "modules/hardware/SpiBus.h"
@@ -70,6 +72,9 @@ EpaperPowerProbe epaperPowerProbe;
 EpaperRefreshProbe epaperRefreshProbe;
 EpaperPaletteFrameSource epaperPaletteFrame;
 EpaperService epaperService;
+ArduinoPreferencesBackend epaperCalibrationBackend;
+PreferencesEpaperCalibrationStore epaperCalibrationStore(epaperCalibrationBackend);
+EpaperCalibrationService epaperCalibrationService(epaperCalibrationStore);
 ArduinoBatteryAdc batteryAdc;
 BatteryMonitor batteryMonitor;
 ArduinoPreferencesBackend configBackend;
@@ -228,6 +233,14 @@ Result startEpaperService() {
   return epaperService.begin(
       &userDataStorage, &epdDriver, &epdTransport, &epaperSafetyStore,
       &epaperCpuFrequency, &epaperShutdownCoordinator);
+}
+
+Result startEpaperCalibration() {
+  return epaperCalibrationService.begin();
+}
+
+bool epaperCalibrationHealthy() {
+  return epaperCalibrationService.ready();
 }
 
 bool epaperServiceHealthy() {
@@ -403,6 +416,7 @@ Result startApiRouter() {
       authService,
       runtimeActions,
       epaperService,
+      epaperCalibrationService,
       batteryMonitor,
   };
   return apiRouter.begin(deps);
@@ -430,6 +444,7 @@ enum SubsystemIndex : size_t {
   kEpaperHardwareSubsystem,
   kUserdataSubsystem,
   kEpaperServiceSubsystem,
+  kEpaperCalibrationSubsystem,
   kBatterySubsystem,
   kConfigSubsystem,
   kWifiSubsystem,
@@ -451,6 +466,8 @@ Subsystem subsystems[] = {
      reportEpaperHardware},
     {"userdata", startUserdata, userdataHealthy, reportUserdata},
     {"epaper", startEpaperService, epaperServiceHealthy},
+    {"epaper_calibration", startEpaperCalibration,
+     epaperCalibrationHealthy},
     {"battery", startBatteryMonitor, batteryMonitorHealthy,
      reportBatteryMonitor},
     {"config", startConfig, configHealthy, reportConfig},

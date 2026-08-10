@@ -33,6 +33,7 @@ For everyday use, network, hardware, and storage status remain visible without s
 - **Designed to stay reachable**: A fallback AP can preserve access when the STA connection fails or disconnects.
 - **More than Wi-Fi settings**: View device status, update the hostname, manage the administrator password, and perform a factory reset.
 - **Battery-ready device API**: The FireBeetle target reports onboard ADC voltage and an estimated battery percentage through `/api/device`, without guessing battery presence or charging state.
+- **Persistent e-paper calibration**: Tune the six display RGB values live, save them in device NVS, and use the same calibrated palette in the dither editor.
 - **Bilingual interface**: Switch instantly between English and Traditional Chinese.
 - **Built for integration**: The web UI, REST API, and serial console share the same behavior for easier customization and automation.
 - **Replaceable frontend**: The interface is bundled into the firmware image and can be replaced with your own branding, layout, and product features.

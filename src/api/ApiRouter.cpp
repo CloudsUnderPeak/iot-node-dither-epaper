@@ -43,6 +43,24 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
        return EpaperEndpoints::status(request, *router.epaperService_);
      },
      HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Get, "/api/epaper/calibration",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return EpaperEndpoints::calibration(
+           request, *router.epaperCalibrationService_);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Put, "/api/epaper/calibration",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return EpaperEndpoints::updateCalibration(
+           request, *router.epaperCalibrationService_);
+     },
+     HttpBinding::JsonBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Post, "/api/epaper/calibration/reset",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return EpaperEndpoints::resetCalibration(
+           request, *router.epaperCalibrationService_);
+     },
+     HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
     {Api::Method::Post, "/api/epaper/image",
      +[](ApiRouter &, const Api::Request &request, const char *) {
        return request.transport == Api::Transport::Serial
@@ -189,6 +207,7 @@ Result ApiRouter::begin(const ApiRouterDeps &deps) {
   authService_ = &deps.authService;
   runtimeActions_ = &deps.runtime;
   epaperService_ = &deps.epaperService;
+  epaperCalibrationService_ = &deps.epaperCalibrationService;
   batteryMonitor_ = &deps.batteryMonitor;
 
   Result result = authEndpoints_.begin(

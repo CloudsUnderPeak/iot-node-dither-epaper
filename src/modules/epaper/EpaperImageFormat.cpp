@@ -64,7 +64,10 @@ const char *errorCode(ValidationError error) {
 }
 
 bool paletteCodeValid(uint8_t code) {
-  return code == 0 || code == 1 || code == 2 || code == 3 || code == 5 || code == 6;
+  for (uint8_t validCode : kPaletteCodes) {
+    if (code == validCode) return true;
+  }
+  return false;
 }
 
 bool paletteByteValid(uint8_t value) {

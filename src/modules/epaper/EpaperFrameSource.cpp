@@ -4,8 +4,6 @@
 
 namespace {
 
-constexpr uint8_t kPalette[] = {0, 1, 2, 3, 5, 6};
-
 size_t readableBytes(size_t offset, size_t capacity) {
   if (offset >= EpaperImageFormat::kFrameBytes) return 0;
   const size_t remaining = EpaperImageFormat::kFrameBytes - offset;
@@ -19,23 +17,27 @@ size_t EpaperWhiteFrameSource::read(size_t offset,
                                     size_t capacity) const {
   if (output == nullptr && capacity != 0) return 0;
   const size_t selected = readableBytes(offset, capacity);
-  if (selected != 0) memset(output, 0x11, selected);
+  constexpr uint8_t kWhiteByte = static_cast<uint8_t>(
+      (EpaperImageFormat::kColorWhite << 4U) | EpaperImageFormat::kColorWhite);
+  if (selected != 0) memset(output, kWhiteByte, selected);
   return selected;
 }
 
 uint8_t EpaperPaletteFrameSource::colorAt(uint32_t x, uint32_t y) {
-  if (x >= EpaperImageFormat::kWidth || y >= EpaperImageFormat::kHeight) return 0;
+  if (x >= EpaperImageFormat::kWidth || y >= EpaperImageFormat::kHeight) {
+    return EpaperImageFormat::kColorBlack;
+  }
   if (x < kBorderPixels || x >= EpaperImageFormat::kWidth - kBorderPixels ||
       y < kBorderPixels || y >= EpaperImageFormat::kHeight - kBorderPixels) {
-    return 0;
+    return EpaperImageFormat::kColorBlack;
   }
   constexpr uint32_t kInnerWidth = EpaperImageFormat::kWidth - 2 * kBorderPixels;
-  uint32_t bar = ((x - kBorderPixels) * (sizeof(kPalette) / sizeof(kPalette[0]))) /
-                 kInnerWidth;
-  if (bar >= sizeof(kPalette) / sizeof(kPalette[0])) {
-    bar = sizeof(kPalette) / sizeof(kPalette[0]) - 1;
+  uint32_t bar =
+      ((x - kBorderPixels) * EpaperImageFormat::kPaletteColorCount) / kInnerWidth;
+  if (bar >= EpaperImageFormat::kPaletteColorCount) {
+    bar = EpaperImageFormat::kPaletteColorCount - 1;
   }
-  return kPalette[bar];
+  return EpaperImageFormat::kPaletteCodes[bar];
 }
 
 size_t EpaperPaletteFrameSource::read(size_t offset,

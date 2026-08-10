@@ -23,6 +23,7 @@ struct RouterFixture {
   AuthService auth;
   RuntimeActionScheduler runtime;
   EpaperService epaper;
+  EpaperCalibrationService calibration;
   BatteryMonitor battery;
   ApiRouter router;
 
@@ -39,6 +40,7 @@ struct RouterFixture {
         auth,
         runtime,
         epaper,
+        calibration,
         battery,
     };
     expect(router.begin(deps).ok(),
@@ -76,6 +78,9 @@ void testExactRouteAuthorizationMatrix() {
       {Api::Method::Get, "/api/storage/files", ApiRouter::HttpBinding::Query, ApiRouter::RouteMatch::Exact, true, 200},
       {Api::Method::Get, "/api/epaper", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Get, "/api/epaper/status", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
+      {Api::Method::Get, "/api/epaper/calibration", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
+      {Api::Method::Put, "/api/epaper/calibration", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, false, 400},
+      {Api::Method::Post, "/api/epaper/calibration/reset", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Post, "/api/epaper/image", ApiRouter::HttpBinding::EpaperRawUpload, ApiRouter::RouteMatch::Exact, false, 404},
       {Api::Method::Get, "/api/epaper/image", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 404},
       {Api::Method::Get, "/api/epaper/image/download", ApiRouter::HttpBinding::EpaperRawDownload, ApiRouter::RouteMatch::Exact, false, 404},
@@ -261,6 +266,59 @@ void testEpaperPublicContract() {
              capabilityData.find("\"upload_bytes\":192040") != std::string::npos &&
              capabilityData.find("\"cooldown_seconds\":180") != std::string::npos,
          "e-paper capabilities must expose the fixed image and cooldown contract");
+
+  const Api::Response defaultCalibration = fixture.router.dispatch(
+      requestFor(Api::Method::Get, "/api/epaper/calibration"));
+  const std::string defaultCalibrationData = defaultCalibration.data.c_str();
+  expect(defaultCalibration.statusCode == 200 &&
+             defaultCalibrationData.find("\"source\":\"default\"") !=
+                 std::string::npos &&
+             defaultCalibrationData.find(
+                 "\"id\":\"yellow\",\"code\":2") != std::string::npos &&
+             defaultCalibrationData.find(
+                 "\"id\":\"red\",\"code\":3") != std::string::npos,
+         "calibration GET should expose defaults in EPD code order");
+
+  JsonDocument updateBody;
+  JsonObject colors = updateBody["colors"].to<JsonObject>();
+  const EpaperCalibration::Profile defaults = EpaperCalibration::defaultProfile();
+  for (size_t index = 0; index < EpaperCalibration::kColorCount; ++index) {
+    const char *id = EpaperCalibration::definition(index).id;
+    JsonObject color = colors[id].to<JsonObject>();
+    color["r"] = defaults.display[index].r;
+    color["g"] = defaults.display[index].g;
+    color["b"] = defaults.display[index].b;
+  }
+  colors["red"]["r"] = 131;
+  Api::Request update = requestFor(Api::Method::Put,
+                                   "/api/epaper/calibration",
+                                   "invalid-token");
+  update.hasBody = true;
+  update.hasJsonBody = true;
+  update.body = updateBody.as<JsonVariantConst>();
+  const Api::Response updated = fixture.router.dispatch(update);
+  expect(updated.statusCode == 200 &&
+             std::string(updated.data.c_str()).find(
+                 "\"source\":\"persisted\"") != std::string::npos &&
+             fixture.calibration.current.profile.display[3].r == 131,
+         "public calibration PUT should persist a complete valid profile");
+
+  colors["green"]["r"] = 131;
+  colors["green"]["g"] = defaults.display[3].g;
+  colors["green"]["b"] = defaults.display[3].b;
+  const Api::Response duplicate = fixture.router.dispatch(update);
+  expect(duplicate.statusCode == 400 &&
+             std::string(duplicate.data.c_str()).find(
+                 "\"code\":\"invalid_field\"") != std::string::npos &&
+             fixture.calibration.current.profile.display[3].r == 131,
+         "duplicate display RGB should fail without replacing canonical data");
+
+  const Api::Response reset = fixture.router.dispatch(
+      requestFor(Api::Method::Post, "/api/epaper/calibration/reset"));
+  expect(reset.statusCode == 200 &&
+             fixture.calibration.current.source == EpaperCalibrationSource::Default &&
+             fixture.calibration.current.profile.display[3].r == 120,
+         "public calibration reset should restore firmware defaults");
 
   fixture.epaper.current.canDownload = true;
   fixture.epaper.current.stored.present = true;

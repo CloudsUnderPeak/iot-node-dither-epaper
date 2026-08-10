@@ -161,14 +161,21 @@ void testDynamicFrameSources() {
          "frame source should stop exactly at frame size");
 
   EpaperPaletteFrameSource palette;
-  expect(palette.colorAt(0, 0) == 0 && palette.colorAt(799, 479) == 0 &&
-             palette.colorAt(3, 240) == 0 && palette.colorAt(796, 240) == 0,
+  expect(palette.colorAt(0, 0) == EpaperImageFormat::kColorBlack &&
+             palette.colorAt(799, 479) == EpaperImageFormat::kColorBlack &&
+             palette.colorAt(3, 240) == EpaperImageFormat::kColorBlack &&
+             palette.colorAt(796, 240) == EpaperImageFormat::kColorBlack,
          "palette should have an exact four-pixel black border");
   constexpr uint32_t innerWidth = 800 - 8;
   const uint8_t expected[] = {0, 1, 2, 3, 5, 6};
-  for (uint32_t bar = 0; bar < 6; ++bar) {
-    const uint32_t x = 4 + (innerWidth * bar / 6) + 8;
-    expect(palette.colorAt(x, 240) == expected[bar],
+  expect(EpaperImageFormat::kPaletteColorCount == sizeof(expected),
+         "palette should expose exactly six EPD codes");
+  for (uint32_t bar = 0; bar < EpaperImageFormat::kPaletteColorCount; ++bar) {
+    expect(EpaperImageFormat::kPaletteCodes[bar] == expected[bar],
+           "shared palette should follow EPD code order");
+    const uint32_t x =
+        4 + (innerWidth * bar / EpaperImageFormat::kPaletteColorCount) + 8;
+    expect(palette.colorAt(x, 240) == EpaperImageFormat::kPaletteCodes[bar],
            "palette bars should follow the six-color order");
   }
 

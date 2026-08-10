@@ -1059,6 +1059,42 @@ Content-Disposition: inline; filename="photo.jpg"
 - `logical_only` 必須搭配 `state: unavailable`、`panel_state: unknown`、`recovery_required: full_power_cycle`、`can_draw: false`，不得表示成功 safe-off。
 - `retry_after_seconds` 在 cooldown 中向上取整；無可自行到期 cooldown 時為 `null`。Brownout + active marker 映射為 `last_operation.result: interrupted`、`error_code: brownout`、兩個 brownout bool 為 `true`，並要求 full power cycle。
 
+### `GET /api/epaper/calibration`
+
+公開取得目前 canonical 六色色準。順序與 identity 固定為 EPD code `0,1,2,3,5,6`；`source` 為 `default`、`persisted` 或 `recovery_default`，`recovery_reason` 為 `none`、`unsupported_schema`、`storage_error` 或其他穩定 recovery reason。
+
+```json
+{
+  "success": true,
+  "data": {
+    "schema_version": 1,
+    "source": "persisted",
+    "recovery_reason": "none",
+    "colors": [
+      {"id": "black", "code": 0, "display": {"r": 39, "g": 39, "b": 43}},
+      {"id": "white", "code": 1, "display": {"r": 237, "g": 237, "b": 225}},
+      {"id": "yellow", "code": 2, "display": {"r": 224, "g": 212, "b": 31}},
+      {"id": "red", "code": 3, "display": {"r": 120, "g": 32, "b": 32}},
+      {"id": "blue", "code": 5, "display": {"r": 31, "g": 88, "b": 169}},
+      {"id": "green", "code": 6, "display": {"r": 58, "g": 110, "b": 72}}
+    ]
+  },
+  "message": "ok"
+}
+```
+
+### `PUT /api/epaper/calibration`
+
+公開、完整 replacement；必須一次提供六個具名顏色，每個 channel 為 `0..255` 整數，六組 RGB 不可重複。未知／缺少欄位與 query 均回 `400`。成功後才切換 NVS active slot並回傳與 GET 相同的 canonical snapshot；任何寫入或 read-back 失敗不改變 RAM canonical。未知 persisted schema 回 `409 unsupported_schema`，必須先 reset。
+
+```json
+{"colors":{"black":{"r":39,"g":39,"b":43},"white":{"r":237,"g":237,"b":225},"yellow":{"r":224,"g":212,"b":31},"red":{"r":120,"g":32,"b":32},"blue":{"r":31,"g":88,"b":169},"green":{"r":58,"g":110,"b":72}}}
+```
+
+### `POST /api/epaper/calibration/reset`
+
+公開且不接受 body 或 query。清除 `epcal_a`、`epcal_b`、`epcal_meta` 後回傳 firmware defaults；失敗時保留目前 RAM canonical。`GET` service 未 ready 回 `503 calibration_unavailable`，持久化錯誤回 `500 storage_error`。
+
 ### `POST /api/epaper/image`
 
 Body 是 raw `EPDIMG`，不是 JSON、form 或 multipart；`Content-Type` 可為 `application/octet-stream` 或省略，`Content-Length` 必須精確等於 `192040`。成功 atomic commit 後回 `202` 與 `state: queued`，client再輪詢 status。中止、invalid frame 或 storage failure 不覆蓋舊檔、不排程 draw。Serial 回 `415 unsupported_transport`。

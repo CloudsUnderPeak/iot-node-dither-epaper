@@ -149,6 +149,8 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - 目標面板固定為 Waveshare 7.3inch e-Paper HAT (E)，800×480、每 pixel 4-bit packed code；第一版只接受總長 192,040 bytes 的 `EPDIMG`，不接受裸 frame、PNG、JPEG 或 BMP。
 - 固定圖片名稱為 `epaper-current.epd`，保存於 `userdata:/files/`。成功 upload 以 atomic replace 更新並自動排程 draw；中止、格式錯誤或儲存失敗必須保留舊圖。Generic file PUT／DELETE 不得修改此 reserved file。
 - `white` 動態輸出 192,000 bytes `0x11`；`palette` 動態輸出 4-pixel 黑框與 black／white／yellow／red／blue／green直條。兩者不建立檔案，`refresh` 只重畫最近一次有效 upload。
+- 六色顯示色準固定依 EPD code `0,1,2,3,5,6`（黑、白、黃、紅、藍、綠）保存。面板測試頁可即時預覽並一次儲存完整六色 RGB；未按儲存的草稿不得寫入 flash。已儲存值會成為抖色、色距、固定色票與 Result 預覽的共同來源，但 EPDIMG 協定色碼不變。
+- 色準 GET／PUT／reset 與其他 e-paper endpoint 一樣公開，不要求管理員登入。色準保存在 `user_nvs`；settings／完整 reset 會清除，data reset 保留。遇到未知持久化 schema 時只提供 recovery defaults，且必須明確 reset 後才能寫入新值。
 - 對外狀態固定為 `idle`、`uploading`、`queued`、`drawing`、`cooldown`、`unavailable`；client 只依 `can_upload`、`can_draw` 與 `retry_after_seconds` 判斷，不解析 message。
 - 每次實體 draw 在 panel wake 前必須把 CPU 切到並 read-back 確認 80 MHz，直到 Power OFF／Deep Sleep cleanup 完成後才恢復 160 MHz；不得以 160 MHz fallback，也不得關閉 brownout detector。
 - 每次 draw 後只有 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5` 與 persistent marker read-back 全部成功，才開始完整 180 秒 cooldown。倒數使用 monotonic wrap-safe 時差，秒數向上取整，任何圖片或 action 都沒有例外。

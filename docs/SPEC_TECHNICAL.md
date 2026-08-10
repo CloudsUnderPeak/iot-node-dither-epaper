@@ -68,6 +68,7 @@ Arduino loop <──────────────────────
 | `modules/epaper/EpaperPowerProbe.*` | Build-flag gated、預設停用的 power-only bring-up；marker 與 80 MHz guard 成功後只做 initialize、Power OFF／Deep Sleep，不傳 frame、不 refresh。 |
 | `modules/epaper/EpaperRefreshProbe.*` | Build-flag gated、預設停用的單次實機刷新 bring-up；依序執行 marker、80 MHz guard、initialize、一次 transfer/refresh、Power OFF／Deep Sleep 與頻率恢復；任何階段失敗仍執行 cleanup。 |
 | `modules/epaper/EpaperService.*` | 唯一 operation/status owner、upload reservation、queue depth 1、worker、cooldown 與 stable error mapping。 |
+| `modules/epaper/calibration/*` | 六色色準 model/service 與 `user_nvs` 雙 slot store；EPD code identity 固定，display RGB 可持久化調整。 |
 | `modules/console/*` | Human diagnostics、userdata inspection、typed config staging／commit 與 REST-equivalent `api ...` serial adapter。 |
 
 ## API 與 transport 邊界
@@ -117,6 +118,8 @@ Arduino loop <──────────────────────
 - `EPDIMG` 總長 192,040 bytes：magic `EPDIMG\0\0`、version 1、header size 40、width 800、height 480、frame bytes 192000、frame CRC32、non-zero uint64 generation。所有 multibyte field 為 little-endian；generation 對外以 decimal string 表達。
 - Packed frame 是 row-major，左 pixel 在 high nibble、右 pixel 在 low nibble；只允許 code `0,1,2,3,5,6`。Validator 可跨任意 input chunk 邊界收資料，依序驗證 header、每個 nibble、完整長度與 CRC，不配置 192 KB framebuffer。
 - Dynamic white source 對任何合法 offset 回 `0x11`；palette source 產生 4-pixel black border，內部依序為 black／white／yellow／red／blue／green vertical bars。兩者與 file source 使用相同 streaming interface。
+- `EpaperCalibrationService` 是六色 display RGB 的 canonical owner。色序固定為 code `0,1,2,3,5,6`；protocol RGB 不可修改，六組 display RGB 必須互異。`epcal_a`／`epcal_b` 保存 36 個 hex 字元，`epcal_meta/active` 保存 active slot；inactive slot 先寫 colors、最後寫 schema、read-back 驗證後才切 marker。未知 active schema 不 fallback 到舊 slot、不自動覆寫，直到明確 reset。
+- 色準 store 使用獨立 `ArduinoPreferencesBackend` 但同屬 `user_nvs`。空 store 只在 RAM 發布 firmware defaults，不因 boot 寫 flash；settings／完整 reset erase 整個 partition，因此自然清除色準，data reset 不影響。Service mutex 內完成 store transaction並只在成功後發布新 snapshot；API 與 editor 不得直接碰 NVS。
 - Fixed file 是 `/files/epaper-current.epd`。`UserDataStorage` 仍是 LittleFS 與 operation gate 唯一 owner；e-paper 只能透過 internal read seam 與既有 temp/atomic rename 流程整合，不得另開 filesystem owner。Generic PUT／DELETE 在 policy layer 對 fixed name 回 `reserved_file`。
 - Upload 取得 e-paper gate 後檢查 exact Content-Length 與 capacity，stream validate 到 temp，flush／close／reopen size 驗證後 atomic rename。Manual refresh 在 panel wake 前以 4 KiB buffer 重新驗證完整 header、palette 與 CRC，再重新開檔串流 frame。任何失敗保留舊正式檔。
 - `EpaperService` 使用短 mutex 保存完整 cached status，mutex 內不得操作 filesystem、SPI、NVS、JSON 或 Serial。Queue depth 固定 1；實體 draw 在低優先序 dedicated FreeRTOS worker 執行，BUSY wait sleep/yield，frame 每 4 KiB yield。
@@ -155,6 +158,7 @@ Arduino loop <──────────────────────
 | Arduino Wi-Fi driver | `WifiRadio` mutex；scan 與 state-machine driver call 不同時執行。`WifiManager` 只依賴可注入的 `WifiDriver`／`MonotonicClock`，production adapter 才接觸 Arduino `WiFi`／`millis()`。 |
 | User-data filesystem | `UserDataStorage` binary semaphore；所有 file／inspection operation non-blocking serialize，active session 由 session id 驗證。 |
 | E-paper operation/status | `EpaperService` 短 mutex 與 queue depth 1；upload/action producer，dedicated worker consumer。 |
+| E-paper display calibration | `EpaperCalibrationService` mutex；完整 profile replacement，持久化成功後才發布 canonical snapshot。 |
 | SPI bus | `SpiBus` mutex與唯一 lifecycle owner；BUSY wait 不持有 transaction。 |
 | E-paper protection marker | `EpaperSafetyStore`／default NVS `epaper_meta`；write 後 read-back，failure fail closed。 |
 | Runtime activity | `RuntimeEndpoints` 唯讀組合 `EpaperService`／`RuntimeActionScheduler` cached snapshot；不作 admission gate。 |
