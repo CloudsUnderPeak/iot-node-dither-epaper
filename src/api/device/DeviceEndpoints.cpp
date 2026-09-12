@@ -7,7 +7,8 @@
 namespace DeviceEndpoints {
 
 Api::Response get(const ConfigService &configService,
-                  const BatteryMonitor &batteryMonitor) {
+                  const BatteryMonitor &batteryMonitor,
+                  const BootDiagnostics &bootDiagnostics) {
   const DeviceConfig config = configService.snapshot();
   const BatterySnapshot batterySnapshot = batteryMonitor.snapshot(millis());
   const uint32_t heapTotal = ESP.getHeapSize();
@@ -32,19 +33,21 @@ Api::Response get(const ConfigService &configService,
   data["wifi_tx_dbm"] = config.wifiTxDbm;
   data["config_state"] = configStartupStateToString(configService.startupState());
   data["config_recovery_reason"] = configRecoveryReasonToString(configService.recoveryReason());
+  JsonObject diagnostics = data["diagnostics"].to<JsonObject>();
+  diagnostics["reset_reason"] =
+      deviceResetReasonToString(bootDiagnostics.snapshot().resetReason);
   JsonObject power = data["power"].to<JsonObject>();
-  JsonObject battery = power["battery"].to<JsonObject>();
   if (batterySnapshot.sampleValid) {
-    battery["voltage_mv"] = batterySnapshot.voltageMilliVolts;
-    battery["sample_age_ms"] = batterySnapshot.sampleAgeMs;
+    power["voltage_mv"] = batterySnapshot.voltageMilliVolts;
+    power["sample_age_ms"] = batterySnapshot.sampleAgeMs;
   } else {
-    battery["voltage_mv"] = nullptr;
-    battery["sample_age_ms"] = nullptr;
+    power["voltage_mv"] = nullptr;
+    power["sample_age_ms"] = nullptr;
   }
   if (batterySnapshot.estimate.available) {
-    battery["estimated_percent"] = batterySnapshot.estimate.percent;
+    power["estimated_percent"] = batterySnapshot.estimate.percent;
   } else {
-    battery["estimated_percent"] = nullptr;
+    power["estimated_percent"] = nullptr;
   }
   return Api::ok(Api::json(data));
 }

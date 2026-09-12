@@ -11,6 +11,9 @@ main = (project / "src/main.cpp").read_text()
 platformio = (project / "platformio.ini").read_text()
 epaper_hardware = (project / "src/modules/hardware/EpaperHardware.cpp").read_text()
 epaper_service = (project / "src/modules/epaper/EpaperService.cpp").read_text()
+boot_diagnostics = (
+    project / "src/modules/runtime/BootDiagnostics.cpp"
+).read_text()
 epaper_transport = (project / "src/modules/epaper/EpdSpiTransport.cpp").read_text()
 board_profile = (
     project / "src/board/profiles/FireBeetle2Esp32C6Profile.h"
@@ -28,8 +31,14 @@ if "-D ENABLE_EPAPER_REFRESH_SELF_TEST=0" not in platformio:
 if "-D ENABLE_EPAPER_CONFIRMED_POWER_CYCLE_RECOVERY=0" not in platformio:
     print("Release configuration must keep forced power-cycle recovery disabled", file=sys.stderr)
     raise SystemExit(1)
-if "esp_reset_reason() == ESP_RST_POWERON" not in main:
-    print("Active e-paper markers must recover only from power-on reset evidence", file=sys.stderr)
+if "bootDiagnostics.snapshot().resetReason == DeviceResetReason::PowerOn" not in main:
+    print("Active e-paper markers must use captured power-on reset evidence", file=sys.stderr)
+    raise SystemExit(1)
+if "esp_reset_reason()" in main or "esp_reset_reason()" in epaper_service:
+    print("Boot diagnostics must be the only reset-reason SDK reader", file=sys.stderr)
+    raise SystemExit(1)
+if boot_diagnostics.count("esp_reset_reason()") != 1:
+    print("Boot diagnostics must capture reset reason exactly once", file=sys.stderr)
     raise SystemExit(1)
 if "automatic retry=disabled" not in main:
     print("E-paper hardware tests must not retry after a power-cycle recovery", file=sys.stderr)

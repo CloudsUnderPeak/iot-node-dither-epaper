@@ -15,6 +15,15 @@ mkdir -p "$build_dir"
 
 g++ -std=c++17 -Wall -Wextra -Werror \
   -I"$project_dir/tests/native/stubs" \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/BootDiagnosticsTest.cpp" \
+  "$project_dir/src/modules/runtime/BootDiagnostics.cpp" \
+  -o "$build_dir/boot-diagnostics-test"
+
+"$build_dir/boot-diagnostics-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"$project_dir/tests/native/stubs" \
   -I"$arduinojson_include" \
   -I"$project_dir/src" \
   "$project_dir/tests/native/ApiValidationTest.cpp" \
@@ -245,6 +254,7 @@ g++ -std=c++17 -Wall -Wextra -Werror \
   "$project_dir/src/modules/storage/UserFilePolicy.cpp" \
   "$project_dir/src/modules/epaper/EpaperImageFormat.cpp" \
   "$project_dir/src/modules/epaper/calibration/EpaperCalibration.cpp" \
+  "$project_dir/src/modules/runtime/BootDiagnostics.cpp" \
   -o "$build_dir/api-router-auth-test"
 
 "$build_dir/api-router-auth-test"

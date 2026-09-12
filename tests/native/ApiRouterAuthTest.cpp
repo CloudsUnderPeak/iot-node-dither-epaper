@@ -25,10 +25,14 @@ struct RouterFixture {
   EpaperService epaper;
   EpaperCalibrationService calibration;
   BatteryMonitor battery;
+  BootDiagnostics diagnostics;
   ApiRouter router;
 
-  RouterFixture() {
+  explicit RouterFixture(
+      DeviceResetReason resetReason = DeviceResetReason::Software)
+      : diagnostics(resetReason) {
     runtime.available = true;
+    epaper.current.lastResetReason = deviceResetReasonToString(resetReason);
     const ApiRouterDeps deps{
         config,
         wifi,
@@ -42,6 +46,7 @@ struct RouterFixture {
         epaper,
         calibration,
         battery,
+        diagnostics,
     };
     expect(router.begin(deps).ok(),
            "router should initialize with complete dependencies");
@@ -345,8 +350,8 @@ void testEpaperPublicContract() {
          "serial e-paper download must reject the raw transport");
 }
 
-void testDeviceBatteryContract() {
-  RouterFixture fixture;
+void testDeviceDiagnosticsAndPowerContract() {
+  RouterFixture fixture(DeviceResetReason::Brownout);
   fixture.battery.current.sampleValid = true;
   fixture.battery.current.voltageMilliVolts = 3980;
   fixture.battery.current.estimate.available = true;
@@ -355,22 +360,56 @@ void testDeviceBatteryContract() {
 
   const Api::Response response = fixture.router.dispatch(
       requestFor(Api::Method::Get, "/api/device"));
-  const std::string data = response.data.c_str();
-  expect(response.statusCode == 200 &&
-             data.find("\"power\":{\"battery\":{") != std::string::npos &&
-             data.find("\"voltage_mv\":3980") != std::string::npos &&
-             data.find("\"sample_age_ms\":42") != std::string::npos &&
-             data.find("\"estimated_percent\":83") != std::string::npos &&
-             data.find("charge_state") == std::string::npos &&
-             data.find("charging") == std::string::npos,
-         "device resource should expose voltage estimate without charging claims");
+  JsonDocument document;
+  const DeserializationError error =
+      deserializeJson(document, response.data.c_str());
+  const JsonObjectConst diagnostics = document["diagnostics"].as<JsonObjectConst>();
+  const JsonObjectConst power = document["power"].as<JsonObjectConst>();
+  expect(response.statusCode == 200 && !error &&
+             document["chip_model"].is<const char *>() &&
+             document["hostname"].is<const char *>() &&
+             document["wifi_tx_dbm"].is<int>() &&
+             document["config_state"].is<const char *>() &&
+             !diagnostics.isNull() &&
+             diagnostics["reset_reason"].is<const char *>() &&
+             std::string(diagnostics["reset_reason"].as<const char *>()) ==
+                 "brownout" &&
+             !power.isNull() && power["battery"].isUnbound() &&
+             power["voltage_mv"].as<uint32_t>() == 3980 &&
+             power["sample_age_ms"].as<uint32_t>() == 42 &&
+             power["estimated_percent"].as<uint8_t>() == 83 &&
+             power["power_source"].isUnbound() &&
+             power["usb_present"].isUnbound() &&
+             power["battery_present"].isUnbound() &&
+             power["charging"].isUnbound() &&
+             power["charge_state"].isUnbound(),
+         "device resource should expose diagnostics and flat power fields");
+
+  const Api::Response epaperStatus = fixture.router.dispatch(
+      requestFor(Api::Method::Get, "/api/epaper/status"));
+  expect(std::string(epaperStatus.data.c_str()).find(
+             "\"last_reset_reason\":\"brownout\"") != std::string::npos,
+         "device and e-paper resources should use the same boot reset reason");
+
+  RouterFixture deepSleep(DeviceResetReason::DeepSleep);
+  expect(std::string(deepSleep.router.dispatch(
+             requestFor(Api::Method::Get, "/api/device")).data.c_str()).find(
+             "\"reset_reason\":\"deep_sleep\"") != std::string::npos,
+         "device resource should expose deep-sleep reset reasons");
+  RouterFixture unknown(DeviceResetReason::Unknown);
+  expect(std::string(unknown.router.dispatch(
+             requestFor(Api::Method::Get, "/api/device")).data.c_str()).find(
+             "\"reset_reason\":\"unknown\"") != std::string::npos,
+         "device resource should expose the unknown fallback");
 
   fixture.battery.current = {};
-  const std::string unavailable = fixture.router.dispatch(
-      requestFor(Api::Method::Get, "/api/device")).data.c_str();
-  expect(unavailable.find("\"voltage_mv\":null") != std::string::npos &&
-             unavailable.find("\"sample_age_ms\":null") != std::string::npos &&
-             unavailable.find("\"estimated_percent\":null") != std::string::npos,
+  JsonDocument unavailable;
+  deserializeJson(unavailable, fixture.router.dispatch(
+      requestFor(Api::Method::Get, "/api/device")).data.c_str());
+  expect(unavailable["power"]["voltage_mv"].isNull() &&
+             unavailable["power"]["sample_age_ms"].isNull() &&
+             unavailable["power"]["estimated_percent"].isNull() &&
+             unavailable["diagnostics"]["reset_reason"].is<const char *>(),
          "device resource should keep a stable null shape before a valid sample");
 }
 
@@ -390,7 +429,7 @@ int main() {
   testWebIdentityMatchesAcrossTransports();
   testDynamicFileAuthorizationAndTransport();
   testEpaperPublicContract();
-  testDeviceBatteryContract();
+  testDeviceDiagnosticsAndPowerContract();
   testUnknownRoutesRemainNotFound();
   if (failures != 0) {
     std::cerr << failures << " API router authorization test(s) failed\n";

@@ -2,7 +2,6 @@
 
 #include <cstdio>
 #include <cstring>
-#include <esp_system.h>
 
 namespace {
 
@@ -36,21 +35,6 @@ const char *driverErrorCode(EpdDriverError error) {
   return "driver_error";
 }
 
-const char *resetReasonLabel(esp_reset_reason_t reason) {
-  switch (reason) {
-    case ESP_RST_POWERON: return "power_on";
-    case ESP_RST_EXT: return "external";
-    case ESP_RST_SW: return "software";
-    case ESP_RST_PANIC: return "panic";
-    case ESP_RST_INT_WDT:
-    case ESP_RST_TASK_WDT:
-    case ESP_RST_WDT: return "watchdog";
-    case ESP_RST_DEEPSLEEP: return "deep_sleep";
-    case ESP_RST_BROWNOUT: return "brownout";
-    default: return "unknown";
-  }
-}
-
 }  // namespace
 
 Result EpaperService::begin(
@@ -59,7 +43,8 @@ Result EpaperService::begin(
     EpdTransport *transport,
     EpaperSafetyStore *safetyStore,
     CpuFrequencyDriver *frequencyDriver,
-    EpaperShutdownCoordinator *shutdownCoordinator) {
+    EpaperShutdownCoordinator *shutdownCoordinator,
+    const BootDiagnosticsSnapshot &bootDiagnostics) {
   if (storage == nullptr || !storage->mounted() || driver == nullptr ||
       transport == nullptr || !transport->ready() || safetyStore == nullptr ||
       !safetyStore->ready() || frequencyDriver == nullptr ||
@@ -72,9 +57,8 @@ Result EpaperService::begin(
   safetyStore_ = safetyStore;
   frequencyDriver_ = frequencyDriver;
   shutdownCoordinator_ = shutdownCoordinator;
-  const esp_reset_reason_t resetReason = esp_reset_reason();
-  lastResetReason_ = resetReasonLabel(resetReason);
-  brownoutDetected_ = resetReason == ESP_RST_BROWNOUT;
+  lastResetReason_ = deviceResetReasonToString(bootDiagnostics.resetReason);
+  brownoutDetected_ = bootDiagnostics.resetReason == DeviceResetReason::Brownout;
   mutex_ = xSemaphoreCreateMutex();
   queue_ = xQueueCreate(1, sizeof(EpaperDrawAction));
   if (mutex_ == nullptr || queue_ == nullptr) {

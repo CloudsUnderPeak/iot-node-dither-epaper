@@ -31,7 +31,7 @@ Arduino loop <──────────────────────
 | `api/ApiRouter.*` | 透過 `ApiRouterDeps` 一次接收必備 reference；單一 static route catalogue 列出 method、完整 URL／parameter pattern、matcher、HTTP binding、direct handler 與明確 public exception，未標註 access 的 route 結構上預設需要授權。 |
 | `api/shared/*` | Transport-neutral types、response/JSON serialization 與 JSON reader。 |
 | `api/alive/*` | `GET /api/alive`。 |
-| `api/device/*` | `GET /api/device`；組合 config、晶片資訊與 cached battery snapshot。 |
+| `api/device/*` | `GET /api/device`；組合 config、晶片資訊、immutable boot diagnostics 與 cached battery snapshot，並擁有對外 JSON shape。 |
 | `api/web/*` | `GET /api/web`；把 build-time Web identity 映射為公開 response。 |
 | `api/storage/*` | `GET /api/storage` 與 user-file list／delete response mapping。 |
 | `api/auth/*` | `/api/auth` 與 `/api/auth/*` endpoints。 |
@@ -39,6 +39,7 @@ Arduino loop <──────────────────────
 | `api/wifi/*` | `/api/wifi`、`/api/wifi/*` endpoints 與 typed payload mapping。 |
 | `api/epaper/*` | E-paper capability、status、image metadata/download、raw upload 與 action response mapping；不直接操作 GPIO、SPI 或 LittleFS。 |
 | `modules/runtime/RuntimeActionScheduler.*` | 接收跨 task command，由 loop 唯一執行 Wi-Fi apply；system restart 必須委派 e-paper shutdown coordinator 核准後才執行。 |
+| `modules/runtime/BootDiagnostics.*` | Boot reset reason 的單一 normalized owner；startup 只呼叫一次 `esp_reset_reason()`，保存 immutable snapshot，並將 project enum 映射為穩定 API 字串。 |
 | `api/runtime/RuntimeEndpoints.*` | 組合 `EpaperService` 與 `RuntimeActionScheduler` 的短 cached snapshot，回 activity／phase／CPU／blocked resources；不掃 filesystem、不形成全域 lock。 |
 | `modules/config/ConfigService.*` | active config 的唯一 owner；提供同步 snapshot、完整 commit 與型別化原子欄位群組更新。 |
 | `modules/config/model/*` | Config type、factory defaults、scalar/cross-field validation 與 IPv4 計算。 |
@@ -125,7 +126,7 @@ Arduino loop <──────────────────────
 - `EpaperService` 使用短 mutex 保存完整 cached status，mutex 內不得操作 filesystem、SPI、NVS、JSON 或 Serial。Queue depth 固定 1；實體 draw 在低優先序 dedicated FreeRTOS worker 執行，BUSY wait sleep/yield，frame 每 4 KiB yield。
 - Worker 必須在 panel wake 前持久化 `stage: active` 並 read-back，再取得全晶片 frequency guard、設定並 read-back 80 MHz。80 MHz 涵蓋 prewake、initialize、transfer、refresh、Power OFF／Deep Sleep cleanup；全部 exit path 經 shutdown coordinator 後才恢復 160 MHz。
 - 成功或 wake 後失敗都依序嘗試 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5`。只有 protocol shutdown 與 `stage: shutdown_confirmed` read-back 成功才開始 180 秒 cooldown；timeout、SPI failure 或 shutdown failure 設 `panel_state: unknown` 並永久 fail closed 到完整 power cycle。
-- `epaper_meta` namespace 位於 default `nvs`，不屬於 settings/data/factory reset 會清除的 `user_nvs` 或 `userdata`。Boot 先讀 `esp_reset_reason()` 與 marker：confirmed marker 重啟 180 秒 cooldown；active marker 只有搭配 `ESP_RST_POWERON` 才透過 `EpaperSafetyStore` clear/read-back 恢復，因本專案規定 MCU 與 HAT 共用板上 3.3 V；其他 reset reason 記錄 interrupted 並禁止自動 draw。一次性實板 recovery build 可在操作者已確認共同斷電後用 compile flag 提供同等證據，但 release 設定必須固定關閉。
+- `main.cpp` 在任何依賴 reset reason 的 subsystem 前 capture `BootDiagnostics`，後續 Device API、e-paper status 與 marker recovery 都只使用同一份 normalized snapshot，不再次讀 SDK，也不允許 runtime event 改寫。`epaper_meta` namespace 位於 default `nvs`，不屬於 settings/data/factory reset 會清除的 `user_nvs` 或 `userdata`。Confirmed marker 重啟 180 秒 cooldown；active marker 只有 snapshot 為 `PowerOn` 才透過 `EpaperSafetyStore` clear/read-back 恢復，因本專案規定 MCU 與 HAT 共用板上 3.3 V；其他 reset reason 記錄 interrupted 並禁止自動 draw。一次性實板 recovery build 可在操作者已確認共同斷電後用 compile flag 提供同等證據，但 release 設定必須固定關閉。
 - Runtime status 只組合既有 service cached snapshot。`blocked_resources` 在 validation 是 `epaper,userdata`，transfer 是 `epaper,userdata,spi`，physical refresh 與 cooldown 只保留 `epaper`；不得由 `busy` 推導 Wi-Fi/HTTP 不可用或建立全域 mutex。
 - 每秒 serial heartbeat 只在 USB CDC client 已連線時輸出，避免無 reader 時 TX buffer 塞滿並阻塞 Arduino loop；runtime timer、cooldown 與 Wi-Fi state machine 不得依賴 serial drain。
 - 全專案只有 shutdown coordinator 最終核准點可呼叫 `ESP.restart()`。到期 software restart 先發布 `restarting`、拒絕新 operation、bounded quiesce worker；本次 boot 曾 wake panel 時，protocol shutdown 失敗必須取消 restart並保存 `epaper_shutdown_failed`。
@@ -163,6 +164,7 @@ Arduino loop <──────────────────────
 | SPI bus | `SpiBus` mutex與唯一 lifecycle owner；BUSY wait 不持有 transaction。 |
 | E-paper protection marker | `EpaperSafetyStore`／default NVS `epaper_meta`；write 後 read-back，failure fail closed。 |
 | Runtime activity | `RuntimeEndpoints` 唯讀組合 `EpaperService`／`RuntimeActionScheduler` cached snapshot；不作 admission gate。 |
+| Boot diagnostics | `BootDiagnostics` 在 startup capture 後不可變；`ApiRouterDeps` 以 const reference 注入，Device endpoint 與 e-paper 只讀 snapshot。 |
 | Battery sample | `BatteryMonitor` critical section；loop producer 更新完整 voltage/timestamp，HTTP/serial reader 只取 cached snapshot。ADC 取樣與百分比計算不在 critical section 內。 |
 | Console staged config | `ConsoleConfigCommand`／`ConfigStaging`，只在 console runtime RAM；dirty bitset 與 fixed-size secret buffers。 |
 

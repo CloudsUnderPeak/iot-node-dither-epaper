@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <SPI.h>
-#include <esp_system.h>
 
 #include "api/ApiRouter.h"
 #include "board/BoardProfile.h"
@@ -22,6 +21,7 @@
 #include "modules/hardware/PinRegistry.h"
 #include "modules/hardware/SpiBus.h"
 #include "modules/runtime/RuntimeActionScheduler.h"
+#include "modules/runtime/BootDiagnostics.h"
 #include "modules/auth/AuthService.h"
 #include "modules/captive/CaptivePortalDnsService.h"
 #include "modules/config/ConfigService.h"
@@ -77,6 +77,7 @@ EpaperPowerProbe epaperPowerProbe;
 EpaperRefreshProbe epaperRefreshProbe;
 EpaperPaletteFrameSource epaperPaletteFrame;
 EpaperService epaperService;
+BootDiagnostics bootDiagnostics;
 ArduinoPreferencesBackend epaperCalibrationBackend;
 PreferencesEpaperCalibrationStore epaperCalibrationStore(epaperCalibrationBackend);
 EpaperCalibrationService epaperCalibrationService(epaperCalibrationStore);
@@ -138,7 +139,8 @@ Result startEpaperHardware() {
     return storageError("e-paper safety marker unavailable");
   }
   if (epaperSafetyStore.stage() == EpaperProtectionStage::Active) {
-    const bool powerOnReset = esp_reset_reason() == ESP_RST_POWERON;
+    const bool powerOnReset =
+        bootDiagnostics.snapshot().resetReason == DeviceResetReason::PowerOn;
     const bool confirmedRecovery =
         powerOnReset || ENABLE_EPAPER_CONFIRMED_POWER_CYCLE_RECOVERY;
     if (confirmedRecovery) {
@@ -265,7 +267,8 @@ Result startUserdata() {
 Result startEpaperService() {
   return epaperService.begin(
       &userDataStorage, &epdDriver, &epdTransport, &epaperSafetyStore,
-      &epaperCpuFrequency, &epaperShutdownCoordinator);
+      &epaperCpuFrequency, &epaperShutdownCoordinator,
+      bootDiagnostics.snapshot());
 }
 
 Result startEpaperCalibration() {
@@ -451,6 +454,7 @@ Result startApiRouter() {
       epaperService,
       epaperCalibrationService,
       batteryMonitor,
+      bootDiagnostics,
   };
   return apiRouter.begin(deps);
 }
@@ -583,6 +587,7 @@ void printHeartbeat() {
 }  // namespace
 
 void setup() {
+  bootDiagnostics.capture();
   // Establish CS high, DC low, and inactive-high RST before Serial startup
   // delays or any network/storage subsystem. This is logical quiesce only; it
   // never sends a panel command and must not be reported as Power OFF or Deep

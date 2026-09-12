@@ -15,6 +15,7 @@
 #include "Epd7In3E.h"
 #include "EpdTransport.h"
 #include "modules/storage/UserDataStorage.h"
+#include "modules/runtime/BootDiagnostics.h"
 
 enum class EpaperServiceState : uint8_t {
   Idle,
@@ -109,7 +110,8 @@ class EpaperService {
                EpdTransport *transport,
                EpaperSafetyStore *safetyStore,
                CpuFrequencyDriver *frequencyDriver,
-               EpaperShutdownCoordinator *shutdownCoordinator);
+               EpaperShutdownCoordinator *shutdownCoordinator,
+               const BootDiagnosticsSnapshot &bootDiagnostics);
   bool ready() const { return ready_; }
   void poll(uint32_t nowMs);
   EpaperServiceSnapshot snapshot(uint32_t nowMs) const;

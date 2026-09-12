@@ -13,6 +13,7 @@
 #include "modules/epaper/EpaperService.h"
 #include "modules/epaper/calibration/EpaperCalibrationService.h"
 #include "modules/power/BatteryMonitor.h"
+#include "modules/runtime/BootDiagnostics.h"
 #include "modules/runtime/RuntimeActionScheduler.h"
 #include "modules/storage/EmbeddedWebAssets.h"
 #include "modules/storage/FlashStorage.h"
@@ -35,6 +36,7 @@ struct ApiRouterDeps {
   EpaperService &epaperService;
   EpaperCalibrationService &epaperCalibrationService;
   BatteryMonitor &batteryMonitor;
+  const BootDiagnostics &bootDiagnostics;
 };
 
 // Lists every REST/serial URL and delegates directly to the matching endpoint.
@@ -149,6 +151,7 @@ class ApiRouter {
   EpaperService *epaperService_ = nullptr;
   EpaperCalibrationService *epaperCalibrationService_ = nullptr;
   BatteryMonitor *batteryMonitor_ = nullptr;
+  const BootDiagnostics *bootDiagnostics_ = nullptr;
   AuthEndpoints authEndpoints_;
   WifiEndpoints wifiEndpoints_;
   SystemEndpoints systemEndpoints_;

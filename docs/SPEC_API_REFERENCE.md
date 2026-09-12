@@ -282,12 +282,13 @@ Captive portal detection endpoints 皆為 `GET`、不需登入，在 AP active �
     "wifi_tx_dbm": 15,
     "config_state": "persisted",
     "config_recovery_reason": "none",
+    "diagnostics": {
+      "reset_reason": "brownout"
+    },
     "power": {
-      "battery": {
-        "voltage_mv": 3980,
-        "sample_age_ms": 42,
-        "estimated_percent": 83
-      }
+      "voltage_mv": 3980,
+      "sample_age_ms": 42,
+      "estimated_percent": 83
     }
   },
   "message": "ok"
@@ -296,9 +297,24 @@ Captive portal detection endpoints 皆為 `GET`、不需登入，在 AP active �
 
 `config_state` 可能為 `persisted`、`factory_defaults_created` 或 `recovery_defaults`。只有 recovery path 會讓 `config_recovery_reason` 不是 `none`；目前可能為 `unsupported_schema`、`storage_error` 或 `invalid_persisted_config`，且不包含設定值或其他敏感內容。
 
-`power.battery.voltage_mv` 是 FireBeetle 2 ESP32-C6 GPIO0 經板載分壓還原後的校正 mV，`sample_age_ms` 是 cached sample 的 monotonic age。`estimated_percent` 是由單節鋰電池電壓曲線推算的整數 `0`–`100`，不是 fuel-gauge 量測；電壓不在可估計範圍時為 `null`。尚未取得完整 ADC sample 時三個欄位都為 `null`，但 endpoint 仍回 `200`。
+`diagnostics` 固定為 object，`reset_reason` 固定為 non-null string，表示「導致目前這次 boot 的前一次 reset 原因」。Firmware 在 boot 初始化時讀取一次並保存 snapshot，同一次 boot 的後續查詢不會改變。允許值如下：
 
-此板載 ADC 無法判斷電池是否存在、供電來源或是否充電；即使未接電池，充電電路也可能讓 ADC 讀到電壓。因此本 resource 不提供 `charge_state`、`charging`、`battery_present` 或 `power_source`，非 null 電壓或百分比也不得解讀為已確認安裝電池或正在充電。
+| 值 | 意義 |
+| --- | --- |
+| `power_on` | 完整上電。 |
+| `external` | 外部 reset。 |
+| `software` | 軟體要求 reset。 |
+| `panic` | Exception／panic reset。 |
+| `watchdog` | Interrupt、task 或 generic watchdog reset；本版不細分。 |
+| `deep_sleep` | 從 deep sleep 喚醒後的 boot；不包含 wake source。 |
+| `brownout` | Brownout detector reset；不包含最低電壓或持續時間。 |
+| `unknown` | 未映射、無效或後續 SDK 新增值的穩定 fallback。 |
+
+此欄位不回傳 SDK enum 數字、ROM 原始字串、歷史、coredump 狀態或推測原因；重開機後會由下一次 boot snapshot 自然取代。
+
+`power.voltage_mv` 是 FireBeetle 2 ESP32-C6 GPIO0 經板載分壓還原後的校正 mV，`sample_age_ms` 是 cached sample 的 monotonic age。`estimated_percent` 是由單節鋰電池電壓曲線推算的整數 `0`–`100`，不是 fuel-gauge 量測；電壓不在可估計範圍時為 `null`。尚未取得完整 ADC sample 時三個欄位都為 `null`，但 `power` object 與三個欄位仍存在，endpoint 仍回 `200`。舊的 `power.battery` 不再提供。
+
+此板載 ADC 無法判斷電池是否存在、USB 是否存在、供電來源或是否充電；即使未接電池，充電電路也可能讓 ADC 讀到電壓。因此本 resource 不提供 `charge_state`、`charging`、`battery_present`、`usb_present` 或 `power_source`，非 null 電壓或百分比也不得解讀為已確認安裝電池或正在充電。
 
 ## Web
 
