@@ -221,6 +221,8 @@ def run_page(
         "--dump-dom",
         url,
     ]
+    if os.environ.get("CI"):
+        command[1:1] = ["--no-sandbox", "--disable-dev-shm-usage"]
     completed = subprocess.run(
         command,
         check=False,
@@ -230,8 +232,10 @@ def run_page(
         timeout=60,
     )
     if completed.returncode != 0:
+        details = completed.stderr.strip()
+        suffix = f": {details[-2000:]}" if details else ""
         raise WebTestError(
-            f"{label}: browser exited with {completed.returncode}"
+            f"{label}: browser exited with {completed.returncode}{suffix}"
         )
     try:
         extract_result(completed.stdout, label)
