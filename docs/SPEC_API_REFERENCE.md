@@ -1091,6 +1091,7 @@ Content-Disposition: inline; filename="photo.jpg"
 - `panel_state` 固定為 `inactive`、`active`、`sleeping`、`unknown`；`shutdown_method` 固定為 `none`、`power_off_then_deep_sleep`、`logical_only`。
 - `logical_only` 必須搭配 `state: unavailable`、`panel_state: unknown`、`recovery_required: full_power_cycle`、`can_draw: false`，不得表示成功 safe-off。
 - `retry_after_seconds` 在 cooldown 中向上取整；無可自行到期 cooldown 時為 `null`。Brownout + active marker 映射為 `last_operation.result: interrupted`、`error_code: brownout`、兩個 brownout bool 為 `true`，並要求 full power cycle。
+- `last_operation.error_code: marker_clear_failed` 表示冷卻後 protection marker 清除或驗證失敗，維持 `unavailable` 並每秒重試。成功後回 `idle`、`recovery_required: null`，歷史 error 保留；其他 unknown-panel／brownout 故障不自動重試。
 
 ### `GET /api/epaper/calibration`
 

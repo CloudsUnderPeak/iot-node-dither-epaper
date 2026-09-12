@@ -128,7 +128,7 @@ Arduino loop <──────────────────────
 - 成功或 wake 後失敗都依序嘗試 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5`。只有 protocol shutdown 與 `stage: shutdown_confirmed` read-back 成功才開始 180 秒 cooldown；timeout、SPI failure 或 shutdown failure 設 `panel_state: unknown` 並永久 fail closed 到完整 power cycle。
 - `main.cpp` 在任何依賴 reset reason 的 subsystem 前 capture `BootDiagnostics`，後續 Device API、e-paper status 與 marker recovery 都只使用同一份 normalized snapshot，不再次讀 SDK，也不允許 runtime event 改寫。`epaper_meta` namespace 位於 default `nvs`，不屬於 settings/data/factory reset 會清除的 `user_nvs` 或 `userdata`。Confirmed marker 重啟 180 秒 cooldown；active marker 只有 snapshot 為 `PowerOn` 才透過 `EpaperSafetyStore` clear/read-back 恢復，因本專案規定 MCU 與 HAT 共用板上 3.3 V；其他 reset reason 記錄 interrupted 並禁止自動 draw。一次性實板 recovery build 可在操作者已確認共同斷電後用 compile flag 提供同等證據，但 release 設定必須固定關閉。
 - Runtime status 只組合既有 service cached snapshot。`blocked_resources` 在 validation 是 `epaper,userdata`，transfer 是 `epaper,userdata,spi`，physical refresh 與 cooldown 只保留 `epaper`；不得由 `busy` 推導 Wi-Fi/HTTP 不可用或建立全域 mutex。
-- 每秒 serial heartbeat 只在 USB CDC client 已連線時輸出，避免無 reader 時 TX buffer 塞滿並阻塞 Arduino loop；runtime timer、cooldown 與 Wi-Fi state machine 不得依賴 serial drain。
+- 每秒 serial heartbeat 只在 USB CDC 已連線且 TX buffer 至少有 1536 bytes 空間時輸出；USB 連線不代表 host 正在讀取。TX buffer 為 2048 bytes、TX timeout 為 0，backpressure 時略過 heartbeat；runtime timer、cooldown 與 Wi-Fi state machine 不得依賴 serial drain。
 - 全專案只有 shutdown coordinator 最終核准點可呼叫 `ESP.restart()`。到期 software restart 先發布 `restarting`、拒絕新 operation、bounded quiesce worker；本次 boot 曾 wake panel 時，protocol shutdown 失敗必須取消 restart並保存 `epaper_shutdown_failed`。
 
 ## Config persistence
@@ -219,7 +219,7 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 ## Runtime restart ownership
 
 - `SystemRestartCoordinator` 使用 request／poll／progress：request 回 Accepted／AlreadyPending／Rejected，progress 為 Idle／Draining／Ready／Failed。Scheduler 只持有 `EpaperService` 的 admission owner；`EpaperShutdownCoordinator` 是 worker 完成 cleanup 後的最終硬體核准邊界，不是 scheduler 的同步旁路。
-- Boot probe 到 runtime worker 的 ownership 以成功建立 worker 為交接點。交接後 loop 不寫 protection marker；cooldown poll 僅設 bounded control flag，worker 在每次最長 10 ms queue wait 前處理 control。Draw queue depth 保持 1，control 不占 draw slot。
+- Boot probe 到 runtime worker 的 ownership 以成功建立 worker 為交接點。交接後 loop 不寫 protection marker；cooldown poll 僅設 bounded control flag，worker 在每次最長 10 ms queue wait 前自行檢查 cooldown 並處理 control，不依賴 main loop 排程。Draw queue depth 保持 1，control 不占 draw slot。
 - Snapshot mutex 只保護狀態與 admission。Cooldown clear／read-back 在 worker 鎖外執行，先保留 generation，完成後短鎖確認同代再發布；清除期間不開放 draw／upload。CPU snapshot 使用 owner 發布的 cached 值；marker stage 的唯讀跨 task snapshot 使用 atomic，持久化仍只有唯一 writer。
 - 已接受 upload 保持 reservation 到後續 draw 入列；callback 只清理自己的 session，restart 不旁路關閉檔案。已排隊 validation／draw 也屬 drain 範圍。所有 driver cleanup、CPU restoration、storage release 完成才可 ACK；Ready 是不可逆的本次核准，即使測試 restart driver 返回也不再接新工作。
 - Deadline 使用 unsigned monotonic subtraction：upload 30 秒、total 150 秒，從首次 drain 開始且不延展。Driver 預算為 2 秒 prewake、90 秒 operation watchdog、15 秒 power-off wait、2 秒 deep sleep；連同 upload 約 139 秒，餘量供短 I/O。Deadline 不強停 driver／task；超時 Failed 後由原 owner 收尾，未確認安全前保持 admission 關閉。

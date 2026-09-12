@@ -542,6 +542,9 @@ void printHeartbeatField(const char *name, uint32_t value) {
 }
 
 void printHeartbeat() {
+  // USB being connected does not mean an application is draining its bytes.
+  // Drop periodic diagnostics under backpressure rather than stalling loop().
+  if (Serial.availableForWrite() < 1536) return;
   const WifiStatus status = wifiManager.status();
   const String captiveIp = captiveDnsService.running()
                                ? captiveDnsService.captiveIp().toString()
@@ -604,7 +607,9 @@ void setup() {
   // The default USB CDC receive queue is smaller than a valid serial API
   // request. Keep the transport queue aligned with ConsoleShell's parser.
   Serial.setRxBufferSize(ConsoleShell::kInputCapacity);
+  Serial.setTxBufferSize(2048);
   Serial.begin(115200);
+  Serial.setTxTimeoutMs(0);
   delay(2000);
   Serial.println("ESP32 Wi-Fi setup firmware");
   Serial.printf("Chip model: %s, revision: %u, cores: %u\n",

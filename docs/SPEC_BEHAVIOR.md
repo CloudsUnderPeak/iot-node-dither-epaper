@@ -159,7 +159,8 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - 對外狀態固定為 `idle`、`uploading`、`queued`、`drawing`、`cooldown`、`unavailable`；client 只依 `can_upload`、`can_draw` 與 `retry_after_seconds` 判斷，不解析 message。
 - 每次實體 draw 在 panel wake 前必須把 CPU 切到並 read-back 確認 80 MHz，直到 Power OFF／Deep Sleep cleanup 完成後才恢復 160 MHz；不得以 160 MHz fallback，也不得關閉 brownout detector。
 - 每次 draw 後只有 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5` 與 persistent marker read-back 全部成功，才開始完整 180 秒 cooldown。倒數使用 monotonic wrap-safe 時差，秒數向上取整，任何圖片或 action 都沒有例外。
-- Cooldown 到期後仍須成功清除並 read-back protection marker才回 `idle`；marker 操作失敗時繼續禁止 draw。
+- Cooldown 到期後仍須成功清除並 read-back protection marker 才回 `idle`；marker 操作失敗時繼續禁止 draw，韌體以短暫 backoff 重試清除，不因一次暫時性儲存失敗永久失去恢復路徑。
+- 電子紙冷卻收尾不得依賴 serial reader 或主迴圈是否正被診斷輸出延遲；USB 連線但主機停止讀取時亦須自動恢復。
 - RST inactive-high、CS high、DC low 只代表 `logical_quiesce`，不能宣稱面板已 Power OFF／Deep Sleep。Waveshare HAT 的 RST low 會控制板上 power switch，因此只有 initialize 的短 reset pulse 可以拉低，閒置與 prewake 不得長時間保持 low。若 panel 已 wake 但 protocol shutdown 失敗，狀態固定為 `unavailable`／`panel_state: unknown`，要求 MCU 與 HAT 一起完整斷電，不得靠等待或 software restart 解鎖。
 - Boot 不自動重畫。發現 `shutdown_confirmed` marker 時從本次 boot 重新保守等待 180 秒；發現 `active` marker 時，只有 reset reason 明確為 power-on，且 MCU 與 HAT 依規定共用同一個 3.3 V 電源，才將它視為完整共同斷電並以 read-back 驗證清除。Brownout、watchdog、panic、software reset、燒錄後 reset 或其他非協調 reset 一律記錄 interrupted 並 fail closed。
 - 所有可控制的 software restart 必須先拒絕新 draw、quiesce worker，並在需要時完成 Power OFF／Deep Sleep；shutdown 失敗時取消 restart。不可攔截 reset 的 residual risk 由 marker 在下次 boot 診斷，不能宣稱已由軟體消除。

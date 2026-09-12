@@ -145,8 +145,15 @@ void EpaperService::poll(uint32_t nowMs) {
   if (!ready_) return;
   SemaphoreLock lock(mutex_);
   if (lock.locked() && !admissionClosed_ &&
-      state_ == EpaperServiceState::Cooldown && cooldown_.elapsed(nowMs) &&
-      !markerClearRunning_) markerClearPending_ = true;
+      (state_ == EpaperServiceState::Cooldown ||
+       (state_ == EpaperServiceState::Unavailable &&
+        strcmp(lastErrorCode_, "marker_clear_failed") == 0)) &&
+      cooldown_.elapsed(nowMs) &&
+      !markerClearRunning_ &&
+      (!markerClearRetryWaiting_ ||
+       static_cast<uint32_t>(nowMs - markerClearRetryAtMs_) < 0x80000000UL)) {
+    markerClearPending_ = true;
+  }
 }
 
 void EpaperService::processControl(uint32_t nowMs) {
@@ -180,7 +187,8 @@ void EpaperService::processControl(uint32_t nowMs) {
         restart = true;
       }
     }
-    if (restartProgress_ == RestartProgress::Failed && !recoveryRequired_ &&
+    if (restartProgress_ == RestartProgress::Failed &&
+        (!recoveryRequired_ || markerClearRetryWaiting_) &&
         shutdownCoordinator_ != nullptr && !shutdownCoordinator_->unavailable() &&
         !driver_->panelMayBeActive() &&
         safetyStore_->stage() != EpaperProtectionStage::Active) {
@@ -207,10 +215,19 @@ void EpaperService::processControl(uint32_t nowMs) {
     state_ = EpaperServiceState::Idle;
     phase_ = EpaperDrawPhase::None;
     panelState_ = EpaperPanelState::Sleeping;
+    recoveryRequired_ = false;
+    markerClearRetryWaiting_ = false;
+    if (restartProgress_ == RestartProgress::Failed) admissionClosed_ = false;
   } else if (!cleared) {
+    // A transient NVS/write/read-back failure must not permanently strand the
+    // panel. Keep the safety gate closed and retry after a short backoff.
+    // Preserve unavailable until a retry succeeds so clients can see that
+    // protection cleanup failed, rather than treating it as idle.
     state_ = EpaperServiceState::Unavailable;
     panelState_ = EpaperPanelState::Unknown;
     recoveryRequired_ = true;
+    markerClearRetryAtMs_ = static_cast<uint32_t>(nowMs + kMarkerClearRetryMs);
+    markerClearRetryWaiting_ = true;
     lastResult_ = "failed";
     lastErrorCode_ = "marker_clear_failed";
   }
@@ -510,6 +527,9 @@ void EpaperService::workerEntry(void *context) {
 
 void EpaperService::workerLoop() {
   while (true) {
+    // Cooldown must progress even if the main loop is delayed by a console
+    // client. Only this worker performs marker I/O.
+    poll(millis());
     processControl(millis());
     EpaperDrawAction action = EpaperDrawAction::White;
     if (xQueueReceive(queue_, &action, pdMS_TO_TICKS(10)) == pdTRUE) executeDraw(action);
@@ -637,6 +657,8 @@ void EpaperService::finishDraw(bool drawSucceeded,
     state_ = EpaperServiceState::Cooldown;
     panelState_ = EpaperPanelState::Sleeping;
     cooldown_.begin(millis());
+    markerClearRetryAtMs_ = 0;
+    markerClearRetryWaiting_ = false;
   } else {
     state_ = EpaperServiceState::Idle;
     panelState_ = EpaperPanelState::Inactive;

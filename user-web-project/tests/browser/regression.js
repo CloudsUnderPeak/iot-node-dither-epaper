@@ -1,5 +1,39 @@
 (async function () {
     var passed = [];
+    var epTimers = [];
+    var epRequests = 0;
+    var epStatus = { state: 'cooldown', retry_after_seconds: 0, can_draw: false, can_upload: false };
+    var epApp = { app: { state: {} }, i18n: { t: function (key) { return key; } }, device: {
+        live: { state: function () { return 'online'; }, subscribe: function () { return function () {}; } },
+        api: { resources: {
+            epaperCapabilities: function () { return Promise.resolve({ panel: { width: 800, height: 480, colors: 6, color_codes: [0, 1, 2, 3, 5, 6] }, image: { format: 'epdimg', header_bytes: 40, frame_bytes: 192000, upload_bytes: 192040 }, capabilities: { upload: true, refresh: true } }); },
+            epaperStatus: function () { epRequests++; return Promise.resolve(epStatus); }
+        } }
+    } };
+    harness.execute('device/device-epaper.js', { window: {
+        DitherApp: epApp,
+        setInterval: function (fn, ms) { epTimers.push({ fn: fn, ms: ms }); return epTimers.length; },
+        clearInterval: function () {},
+        setTimeout: function (fn) { fn(); }
+    }, document: { body: { classList: { toggle: function () {} } } } });
+    epApp.device.epaper.start();
+    await epApp.device.epaper.probe();
+    var initialRequests = epRequests;
+    for (var epTick = 0; epTick < 20; epTick++) {
+        epTimers.filter(function (timer) { return timer.ms === 1000; }).forEach(function (timer) { timer.fn(); });
+    }
+    harness.assert(epRequests === initialRequests, 'cooldown display ticks must not request status');
+    epStatus = { state: 'idle', can_draw: true, can_upload: true, last_operation: { result: 'success' } };
+    epTimers.filter(function (timer) { return timer.ms === 5000; }).forEach(function (timer) { timer.fn(); });
+    await epApp.device.epaper.refreshStatus();
+    harness.assert(epRequests === initialRequests + 1 && epApp.device.epaper.canDraw(), 'shared status poll restores drawing without duplicate requests');
+    epStatus = { state: 'drawing', phase: 'refreshing', can_draw: false, can_upload: false };
+    await epApp.device.epaper.refreshStatus();
+    harness.assert(epApp.app.state.blockingOperation === 'epaper', 'observed drawing locks UI');
+    epStatus = { state: 'idle', can_draw: true, can_upload: true, last_operation: { result: 'success' } };
+    await epApp.device.epaper.refreshStatus();
+    harness.assert(epApp.device.epaper.canDraw() && !epApp.app.state.blockingOperation, 'idle success unlocks after missed cooldown');
+    passed.push('E-paper zero cooldown uses only shared status polling and recovers');
     var editor = { operationRegistry: { get: function () { return { run: function (image) { return image; } }; } } };
     harness.execute('pages/dither-editor/operations/pipeline-runner.js', { window: { DitherApp: { pages: { ditherEditor: editor } } } });
     var input = new ImageData(1, 1);

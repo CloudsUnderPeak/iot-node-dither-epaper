@@ -1107,7 +1107,7 @@ Refreshing display...
 - 失敗後解除 blocking 並顯示錯誤。
 - 不提供 cancel；HTTP 202 後沒有可安全取消 physical draw 的 API contract。
 - Progress 是 time-weighted simulated percentage。每個 phase 依 expected duration 在自己的區間使用漸近曲線持續前進；相同 server phase 的輪詢不得重設 `stageStartedAt`。`refreshing` 使用最大區間 42–90%，只有 cooldown success 能到 100%。
-- Operation 完成進入 cooldown 後解除全域 lock，但所有 e-paper action 依 server `retry_after_seconds` disabled；local countdown 每 250ms 更新 deadline、只在整秒變更時 render，歸零後至少每 500ms 重查 status，直到 server 離開 cooldown 並恢復 `can_upload && can_draw`。
+- Operation 完成進入 cooldown 後解除全域 lock，但所有 e-paper action 依 server admission disabled；local countdown 每秒更新，只負責顯示。Cooldown 到期與 marker cleanup 恢復共用既有 5 秒 status polling，不新增 timer-driven request；同時請求共用 in-flight promise。重連錯過 cooldown 時，成功 idle 亦須結束已接受操作。
 
 ### EPDIMG Output Encoding
 

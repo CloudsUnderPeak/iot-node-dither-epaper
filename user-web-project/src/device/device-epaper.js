@@ -4,8 +4,7 @@
     var STATUS_SYNC_MS = 5000;
     var ACTIVE_POLL_MS = 750;
     var PROGRESS_TICK_MS = 100;
-    var COOLDOWN_TICK_MS = 250;
-    var COOLDOWN_READY_SYNC_MS = 500;
+    var COOLDOWN_TICK_MS = 1000;
     var COMPLETE_HOLD_MS = 700;
 
     var PHASES = {
@@ -35,7 +34,6 @@
     var progressTimer = null;
     var cooldownTimer = null;
     var cooldownEndsAt = 0;
-    var cooldownLastSyncAt = 0;
     var stageStartedAt = 0;
     var currentRunId = 0;
     var waiters = [];
@@ -135,17 +133,15 @@
     }
 
     function cooldownNeedsServerConfirmation() {
-        return Boolean(state.status && state.status.state === 'cooldown');
-    }
-
-    function syncCooldownReadiness() {
-        var current = Date.now();
-        if (state.mode !== 'epaper' || app.device.live.state() !== 'online'
-            || current - cooldownLastSyncAt < COOLDOWN_READY_SYNC_MS) {
-            return;
+        if (!state.status) {
+            return false;
         }
-        cooldownLastSyncAt = current;
-        refreshStatus().catch(function () {});
+        if (state.status.state === 'cooldown') {
+            return true;
+        }
+        return state.status.state === 'unavailable'
+            && state.status.last_operation
+            && state.status.last_operation.error_code === 'marker_clear_failed';
     }
 
     function ensureCooldownTimer() {
@@ -159,11 +155,8 @@
                 notify();
             }
             if (state.cooldownRemainingSeconds === 0) {
-                if (cooldownNeedsServerConfirmation()) {
-                    syncCooldownReadiness();
-                } else {
-                    stopCooldownTimer();
-                }
+                // The shared 5-second status timer owns readiness polling.
+                stopCooldownTimer();
             }
         }, COOLDOWN_TICK_MS);
     }
@@ -348,8 +341,15 @@
                 failOperation(state.operation.runId, unavailable);
             } else {
                 state.lastError = unavailable;
-                notify();
             }
+            // Marker cleanup is retried by firmware. Keep a low-frequency
+            // readiness check alive so the UI can recover without a reload.
+            if (status.last_operation
+                && status.last_operation.error_code === 'marker_clear_failed') {
+                setCooldown(0);
+                ensureCooldownTimer();
+            }
+            notify();
             return status;
         }
         if (status.state === 'idle' && state.operation.active && state.operation.accepted
@@ -359,6 +359,14 @@
         }
         if (status.state === 'idle') {
             setCooldown(0);
+            state.lastError = null;
+            // Reconnection can skip the entire cooldown status sequence.
+            if (state.operation.active && state.operation.accepted
+                && status.can_draw === true
+                && status.last_operation && status.last_operation.result === 'success') {
+                completeOperation(status);
+                return status;
+            }
         }
         notify();
         return status;

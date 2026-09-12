@@ -36,6 +36,22 @@ python tools/epaper/epaper_tool.py --ip 192.168.4.1 refresh
 python tools/epaper/epaper_tool.py --ip 192.168.4.1 status
 ```
 
+Monitor cooldown cleanup and wait for automatic recovery without sending any
+write, draw, restart, or power-cycle command:
+
+```bash
+python tools/epaper/epaper_recovery_monitor.py --ip 192.168.4.1 --interval 5 --log epaper-recovery.log
+```
+
+The monitor exits successfully when the device reports `idle` and
+`can_draw: true`. It exits with code 3 when the device reports a non-retryable
+`unavailable` condition such as brownout or `full_power_cycle` recovery.
+`marker_clear_failed` is the retryable exception. Requests are at least five
+seconds apart; the default 600-second deadline exits with code 4 if recovery
+is not confirmed, including when requests keep failing. `--duration 0` opts
+into unlimited observation. The script observes firmware recovery; it does
+not itself repair or unlock the panel.
+
 EXIF orientation is corrected first. A portrait source is then automatically
 rotated 90 degrees clockwise to match the 800×480 landscape panel; pass
 `--no-auto-rotate` to keep it upright. The default `contain` mode preserves

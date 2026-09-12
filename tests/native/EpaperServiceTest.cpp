@@ -363,7 +363,51 @@ void testRestartWaitsForStorage() {
   }
 }
 
+void testMarkerRetryRecovery() {
+  for (bool readFailure : {false, true}) {
+    Fixture f;
+    assert(f.service.requestDraw(EpaperDrawAction::White).ok());
+    nativeRunWorker();
+    nativeMillis += EpaperCooldown::kDurationMs;
+    f.persistence.clearOk = readFailure;
+    f.persistence.readError = readFailure;
+    f.service.poll(millis());
+    nativeRunWorker();
+    assert(!f.service.snapshot().canDraw);
+    f.persistence.clearOk = true;
+    f.persistence.readError = false;
+    nativeMillis += 999;
+    f.service.poll(millis());
+    nativeRunWorker();
+    assert(!f.service.snapshot().canDraw);
+    nativeMillis += 1;
+    f.service.poll(millis());
+    nativeRunWorker();
+    assert(f.service.snapshot().canDraw);
+    assert(!f.service.snapshot().recoveryRequired);
+    assert(f.safety.stage() == EpaperProtectionStage::None);
+  }
+}
+
+void testCooldownWithoutMainLoop() {
+  for (uint32_t start : {0U, 0x90000000U, UINT32_MAX - 100000U}) {
+    Fixture f;
+    nativeMillis = start;
+    assert(f.service.requestDraw(EpaperDrawAction::White).ok());
+    nativeRunWorker();
+    nativeMillis += EpaperCooldown::kDurationMs - 1;
+    nativeRunWorker();
+    assert(!f.service.snapshot().canDraw);
+    nativeMillis += 1;
+    nativeRunWorker();
+    assert(f.service.snapshot().canDraw);
+    assert(f.safety.stage() == EpaperProtectionStage::None);
+  }
+}
+
 int main(int argc, char **) {
+  testMarkerRetryRecovery();
+  testCooldownWithoutMainLoop();
   if (argc > 1) {
     Fixture f;
     auto uploaded = f.storage.beginUpload(EpaperService::kImageName, 1);

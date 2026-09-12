@@ -385,7 +385,7 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
 - Dither Editor 的 Crop ratio 只允許 Landscape 5:3（800×480）與 Portrait 3:5（480×800）。使用者仍可 pan、zoom、rotate、flip 與選 fill；Resize 不可手動輸入，Palette 不可選 preset 或編輯 swatch。
 - E-paper Device Mode 載入新圖片或 demo 時，以瀏覽器解碼後、工作圖縮小前的原始尺寸判斷初始 Crop ratio：高大於寬用 3:5，寬大於或等於高用 5:3。圖片先載入而 capability 後確認時，首次切換裝置模式套用相同規則。這只設定該圖片的初始值；使用者可手動切換，後續輪詢、校色更新、斷線重連、旋轉、翻轉或重新繪製不可覆蓋合法的 3:5／5:3 選擇。
 - 固定六色以實體面板肉眼呈現的校色值 A′ 供網頁 Result、最近色判斷與 dither 誤差擴散使用；正式繪製時依六色固定 index 轉回裝置認得的協定色 A。調整校色值應改變網頁預覽與抖動選色，但不得改變硬體 color code。
-- 原 `Export PNG` 按鈕在此模式顯示「繪製到電子紙」，並使用處理過的 credit-card/edit SVG。其下方另顯示使用 export/download SVG 的主按鈕「下載圖片專案」；兩顆按鈕底色一致。圖片專案是本機操作，裝置離線或 cooldown 期間仍可使用，且不得呼叫裝置 API；建立期間文字保持不變、按鈕暫時停用，不顯示取消文案。Standalone Mode 隱藏此按鈕。繪製完成進入 cooldown 後，全頁操作鎖解除，但繪製 action 顯示實際剩餘秒數並維持 disabled；本地倒數歸零即密集向 server 確認，`can_draw` 恢復後立即啟用。
+- 原 `Export PNG` 按鈕在此模式顯示「繪製到電子紙」，並使用處理過的 credit-card/edit SVG。其下方另顯示使用 export/download SVG 的主按鈕「下載圖片專案」；兩顆按鈕底色一致。圖片專案是本機操作，裝置離線或 cooldown 期間仍可使用，且不得呼叫裝置 API；建立期間文字保持不變、按鈕暫時停用，不顯示取消文案。Standalone Mode 隱藏此按鈕。繪製完成進入 cooldown 後，全頁操作鎖解除，但繪製 action 顯示實際剩餘秒數並維持 disabled；本地倒數歸零後透過共用的每 5 秒 status 更新確認，收到 `can_draw` 恢復後啟用，不另外增加高頻請求。
 - 全域操作 overlay 使用 spinner、目前 phase、percentage 與 progress bar。Percentage 是前端依預估時間插值的進度提示，不是 panel telemetry；`refreshing` 是最大區間，同一 phase 的重複 polling 不可重設計時，phase 超時後仍漸近移動，server 進入 cooldown success 才顯示 100%。
 - 「面板測試」頁只在 session 已確認 capability 後出現在 Menu；公開且不要求登入。頁名只由 app header 顯示；內容以「電子紙狀態」卡呈現 panel/status/cooldown，並以「面板診斷」卡提供：
   - 顯示空白：`POST /api/epaper/image/white`，不寫 stored image。

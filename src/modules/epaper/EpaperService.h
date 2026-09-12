@@ -168,12 +168,15 @@ class EpaperService : public SystemRestartCoordinator {
   bool restartAllowed_ = false;
   bool markerClearPending_ = false;
   bool markerClearRunning_ = false;
+  uint32_t markerClearRetryAtMs_ = 0;
+  bool markerClearRetryWaiting_ = false;
   RestartProgress restartProgress_ = RestartProgress::Idle;
   uint32_t restartStartedMs_ = 0;
   uint32_t operationGeneration_ = 0;
   uint32_t cpuMhz_ = 0;
   static constexpr uint32_t kUploadDrainMs = 30000;
   static constexpr uint32_t kRestartDrainMs = 150000;
+  static constexpr uint32_t kMarkerClearRetryMs = 1000;
   EpaperServiceState state_ = EpaperServiceState::Unavailable;
   EpaperDrawPhase phase_ = EpaperDrawPhase::None;
   EpaperPanelState panelState_ = EpaperPanelState::Inactive;
