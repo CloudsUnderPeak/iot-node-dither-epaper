@@ -15,6 +15,7 @@ class WifiDriver {
   virtual ~WifiDriver() = default;
   virtual void setPersistent(bool enabled) = 0;
   virtual bool setMode(WifiDriverMode mode) = 0;
+  virtual bool setTxPower(uint8_t configuredDbm) = 0;
   virtual bool setHostname(const char *hostname) = 0;
   virtual bool configureStation(const IPAddress &localIp,
                                 const IPAddress &gateway,

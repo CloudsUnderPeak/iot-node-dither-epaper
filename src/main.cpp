@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <esp_system.h>
 
 #include "api/ApiRouter.h"
 #include "board/BoardProfile.h"
@@ -53,6 +54,10 @@
 #define ENABLE_EPAPER_REFRESH_SELF_TEST 0
 #endif
 
+#ifndef ENABLE_EPAPER_CONFIRMED_POWER_CYCLE_RECOVERY
+#define ENABLE_EPAPER_CONFIRMED_POWER_CYCLE_RECOVERY 0
+#endif
+
 #if ENABLE_EPAPER_PANEL_SELF_TEST && ENABLE_EPAPER_REFRESH_SELF_TEST
 #error "Only one e-paper hardware self-test may be enabled"
 #endif
@@ -99,6 +104,8 @@ ConsoleShell consoleShell;
 
 uint32_t tick = 0;
 uint32_t lastHeartbeatMs = 0;
+bool epaperPowerCycleRecovered = false;
+const char *epaperRecoveryEvidence = "none";
 
 const char *readyLabel(bool ready) {
   return ready ? "READY" : "FAIL";
@@ -130,6 +137,18 @@ Result startEpaperHardware() {
   if (!epaperSafetyStore.begin(&epaperSafetyStorage)) {
     return storageError("e-paper safety marker unavailable");
   }
+  if (epaperSafetyStore.stage() == EpaperProtectionStage::Active) {
+    const bool powerOnReset = esp_reset_reason() == ESP_RST_POWERON;
+    const bool confirmedRecovery =
+        powerOnReset || ENABLE_EPAPER_CONFIRMED_POWER_CYCLE_RECOVERY;
+    if (confirmedRecovery) {
+      if (!epaperSafetyStore.recoverActiveAfterConfirmedPowerCycle()) {
+        return storageError("e-paper power-cycle marker recovery failed");
+      }
+      epaperPowerCycleRecovered = true;
+      epaperRecoveryEvidence = powerOnReset ? "power_on_reset" : "build_confirmed";
+    }
+  }
   if (!epaperShutdownCoordinator.begin(
           &epdDriver, &epaperSafetyStore, &restartDriver)) {
     return invalidInput("e-paper shutdown coordinator unavailable");
@@ -152,6 +171,7 @@ void reportEpaperHardware(const Result &) {
   Serial.printf(
       "epaper-hardware: board=%s, spi=%d/%d/%d, cs=%d, dc=%d, rst=%d, "
       "busy=%d, busy_level=%s, marker=%s, cpu_mhz=%u, "
+      "recovered=%s, recovery_evidence=%s, "
       "state=logical_quiesce, refresh=disabled\n",
       Board::ActiveProfile::kBoardId,
       Board::ActiveProfile::kSpi.sck,
@@ -163,10 +183,19 @@ void reportEpaperHardware(const Result &) {
       Board::ActiveProfile::kEpaper.busy,
       epaperBusyLabel(),
       epaperProtectionStageToString(epaperSafetyStore.stage()),
-      static_cast<unsigned>(epaperCpuFrequency.currentMhz()));
+      static_cast<unsigned>(epaperCpuFrequency.currentMhz()),
+      epaperPowerCycleRecovered ? "yes" : "no",
+      epaperRecoveryEvidence);
 }
 
 void runEpaperPanelSelfTest() {
+#if ENABLE_EPAPER_PANEL_SELF_TEST || ENABLE_EPAPER_REFRESH_SELF_TEST
+  if (epaperPowerCycleRecovered) {
+    Serial.println(
+        "epaper-test: skipped after power-cycle recovery, automatic retry=disabled");
+    return;
+  }
+#endif
 #if ENABLE_EPAPER_PANEL_SELF_TEST
   Serial.println(
       "epaper-self-test: armed in 5000 ms, power-only, refresh=disabled");
@@ -218,11 +247,15 @@ void runEpaperPanelSelfTest() {
 }
 
 void printWifiStatus(const WifiStatus &status) {
-  Serial.printf("wifi: mode=%s, sta_state=%s, sta_ip=%s, ap_ip=%s\n",
+  const DeviceConfig config = configService.snapshot();
+  Serial.printf(
+      "wifi: mode=%s, sta_state=%s, sta_ip=%s, ap_ip=%s, "
+      "wifi_tx_dbm=%u\n",
                 wifiModeToString(status.mode),
                 wifiLinkStateToString(status.staState),
                 status.staIp.toString().c_str(),
-                status.apIp.toString().c_str());
+                status.apIp.toString().c_str(),
+                static_cast<unsigned>(config.wifiTxDbm));
 }
 
 Result startUserdata() {
@@ -550,9 +583,10 @@ void printHeartbeat() {
 }  // namespace
 
 void setup() {
-  // Establish CS high and DC/RST low before Serial startup delays or any
-  // network/storage subsystem. This is logical quiesce only; it never sends a
-  // panel command and must not be reported as Power OFF or Deep Sleep.
+  // Establish CS high, DC low, and inactive-high RST before Serial startup
+  // delays or any network/storage subsystem. This is logical quiesce only; it
+  // never sends a panel command and must not be reported as Power OFF or Deep
+  // Sleep.
   const Result epaperHardwareResult =
       startSubsystem(subsystems[kEpaperHardwareSubsystem]);
 
@@ -581,6 +615,10 @@ void setup() {
     epaperHardware.report(epaperHardwareResult);
   }
 
+  // Diagnostic probes run before storage and network startup so their load is
+  // isolated from Wi-Fi. A production build compiles this call to a no-op.
+  runEpaperPanelSelfTest();
+
   for (size_t index = kUserdataSubsystem; index < kSubsystemCount; ++index) {
     Subsystem &subsystem = subsystems[index];
     const Result result = startSubsystem(subsystem);
@@ -593,7 +631,6 @@ void setup() {
       subsystem.report(result);
     }
   }
-  runEpaperPanelSelfTest();
 }
 
 void loop() {
@@ -631,7 +668,7 @@ void loop() {
     consoleShell.poll();
   }
 
-  if (now - lastHeartbeatMs >= 1000U) {
+  if (Serial && now - lastHeartbeatMs >= 1000U) {
     lastHeartbeatMs = now;
     printHeartbeat();
   }

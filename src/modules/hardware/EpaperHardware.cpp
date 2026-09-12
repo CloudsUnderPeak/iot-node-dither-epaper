@@ -49,7 +49,7 @@ Result claimAndQuiescePins(PinRegistry *pins) {
   pinMode(epaper.dc, OUTPUT);
   pinMode(epaper.reset, OUTPUT);
   // BUSY is active-low. Keep its fail-safe idle level high when the panel
-  // controller is held in reset and may leave the output high-impedance.
+  // controller is powered down or otherwise leaves the output high-impedance.
   pinMode(epaper.busy, INPUT_PULLUP);
   return okResult();
 }

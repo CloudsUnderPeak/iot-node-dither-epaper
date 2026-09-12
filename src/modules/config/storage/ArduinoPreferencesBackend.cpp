@@ -48,6 +48,15 @@ uint8_t ArduinoPreferencesBackend::getUChar(
   return preferences_.getUChar(key, fallback);
 }
 
+bool ArduinoPreferencesBackend::getUCharChecked(
+    const char *key, uint8_t &value) const {
+  if (!preferences_.isKey(key) || preferences_.getType(key) != PT_U8) {
+    return false;
+  }
+  value = preferences_.getUChar(key, 0);
+  return true;
+}
+
 uint16_t ArduinoPreferencesBackend::getUShort(
     const char *key, uint16_t fallback) const {
   return preferences_.getUShort(key, fallback);

@@ -135,8 +135,56 @@ void testSystemUpdatePreflightsRuntime() {
   runtime.available = true;
   response = endpoints.update(request);
   expect(response.success && config.commitCount == 1 && runtime.wifiApplyCount == 1 &&
-             strcmp(config.value.hostname, "new-device") == 0,
+             runtime.wifiTxPowerApplyCount == 0 &&
+             strcmp(config.value.hostname, "new-device") == 0 &&
+             response.data.c_str() == std::string(
+                 "{\"hostname\":\"new-device\",\"wifi_tx_dbm\":15}"),
          "hostname success must persist and guarantee Wi-Fi apply");
+
+  document.clear();
+  request = jsonRequest(document, R"({"wifi_tx_dbm":17})");
+  response = endpoints.update(request);
+  expect(response.success && config.commitCount == 2 &&
+             runtime.wifiApplyCount == 1 && runtime.wifiTxPowerApplyCount == 1 &&
+             config.value.wifiTxDbm == 17,
+         "power-only update must persist and schedule only TX power apply");
+
+  document.clear();
+  request = jsonRequest(document,
+                        R"({"hostname":"combined-host","wifi_tx_dbm":20})");
+  response = endpoints.update(request);
+  expect(response.success && config.commitCount == 3 &&
+             runtime.wifiApplyCount == 2 && runtime.wifiTxPowerApplyCount == 1 &&
+             config.value.wifiTxDbm == 20,
+         "combined update must persist atomically and use one full Wi-Fi apply");
+
+  document.clear();
+  request = jsonRequest(document, R"({"wifi_tx_dbm":null})");
+  response = endpoints.update(request);
+  expect(response.statusCode == 400 && config.commitCount == 3,
+         "null TX power must be rejected rather than treated as unlimited");
+
+  for (const char *invalid : {
+           R"({"wifi_tx_dbm":17.5})",
+           R"({"wifi_tx_dbm":"17"})",
+           R"({"wifi_tx_dbm":true})",
+           R"({"wifi_tx_dbm":21})",
+           R"({"hostname":"must-not-save","wifi_tx_dbm":1})",
+           R"({"hostname":"must-not-save","unexpected":1})",
+       }) {
+    document.clear();
+    request = jsonRequest(document, invalid);
+    response = endpoints.update(request);
+    expect(response.statusCode == 400 && config.commitCount == 3 &&
+               strcmp(config.value.hostname, "combined-host") == 0,
+           "invalid system fields must reject the whole patch");
+  }
+
+  document.clear();
+  request = jsonRequest(document, R"({})");
+  response = endpoints.update(request);
+  expect(response.statusCode == 400 && config.commitCount == 3,
+         "empty system patch must be rejected");
 }
 
 void testFactoryResetPreflightsRuntime() {

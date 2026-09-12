@@ -92,8 +92,8 @@ void testSafeBootLevels() {
   expect(nativePins[epaper.dc].mode == OUTPUT && nativePins[epaper.dc].level == LOW,
          "DC should become a low output during logical quiesce");
   expect(nativePins[epaper.reset].mode == OUTPUT &&
-             nativePins[epaper.reset].level == LOW,
-         "RST should become a low output during logical quiesce");
+             nativePins[epaper.reset].level == HIGH,
+         "RST should remain inactive-high during logical quiesce");
   expect(nativePins[epaper.busy].mode == INPUT_PULLUP &&
              nativePins[epaper.busy].level == HIGH,
          "active-low BUSY should use a fail-safe idle-high input pull-up");

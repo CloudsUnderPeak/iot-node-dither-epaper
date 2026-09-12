@@ -86,6 +86,12 @@ bool stationHasIpv4(const WifiDriver &driver) {
          driver.stationIp() != IPAddress(0, 0, 0, 0);
 }
 
+bool setActiveMode(WifiDriver &driver,
+                   WifiDriverMode mode,
+                   const DeviceConfig &config) {
+  return driver.setMode(mode) && driver.setTxPower(config.wifiTxDbm);
+}
+
 bool apRuntimeSettingsEqual(const DeviceConfig &left, const DeviceConfig &right) {
   return strcmp(left.apSsid, right.apSsid) == 0 &&
          left.apPasswordEnabled == right.apPasswordEnabled &&
@@ -215,7 +221,7 @@ Result WifiManager::apply(const DeviceConfig &config, WifiStatus &status) {
         config.wifiMode == WifiMode::ApSta
             ? WifiDriverMode::ApSta
             : WifiDriverMode::Sta;
-    if (!driver_->setMode(mode)) {
+    if (!setActiveMode(*driver_, mode, config)) {
       next.staEnabled = false;
       next.staState = WifiLinkState::Failed;
       setStatus(next);
@@ -252,7 +258,7 @@ Result WifiManager::apply(const DeviceConfig &config, WifiStatus &status) {
   }
 
   if (config.wifiMode == WifiMode::Ap) {
-    if (!driver_->setMode(WifiDriverMode::Ap)) {
+    if (!setActiveMode(*driver_, WifiDriverMode::Ap, config)) {
       next.apState = WifiApState::Failed;
       setStatus(next);
       status = next;
@@ -267,6 +273,15 @@ Result WifiManager::apply(const DeviceConfig &config, WifiStatus &status) {
   setStatus(next);
   status = next;
   return invalidInput("unsupported Wi-Fi mode");
+}
+
+Result WifiManager::applyTxPower(const DeviceConfig &config) {
+  WifiRadioGuard radioGuard(radio_, portMAX_DELAY);
+  if (!radioGuard.locked()) return networkError("Wi-Fi radio unavailable");
+  if (status().mode == WifiMode::Off) return okResult();
+  return driver_->setTxPower(config.wifiTxDbm)
+             ? okResult()
+             : networkError("failed to apply Wi-Fi TX power");
 }
 
 bool WifiManager::poll(const DeviceConfig &config) {
@@ -292,7 +307,7 @@ bool WifiManager::poll(const DeviceConfig &config) {
 
     if (current.apEnabled && runtimeSubnetsOverlap(*driver_, config)) {
       driver_->disconnectStation(false, false);
-      driver_->setMode(WifiDriverMode::Ap);
+      setActiveMode(*driver_, WifiDriverMode::Ap, config);
       current.mode = WifiMode::Ap;
       current.staEnabled = false;
       current.staState = WifiLinkState::Failed;
@@ -304,7 +319,7 @@ bool WifiManager::poll(const DeviceConfig &config) {
 
     if (config.wifiMode == WifiMode::Sta && current.apEnabled) {
       driver_->stopAp(false);
-      driver_->setMode(WifiDriverMode::Sta);
+      setActiveMode(*driver_, WifiDriverMode::Sta, config);
       current.apEnabled = false;
       current.apState = WifiApState::Disabled;
       current.apIp = IPAddress();
@@ -328,7 +343,7 @@ bool WifiManager::poll(const DeviceConfig &config) {
     current.staState = WifiLinkState::Failed;
     current.staIp = IPAddress();
     if (!current.apEnabled && config.fallbackToAp && config.apSsid[0] != '\0') {
-      if (driver_->setMode(WifiDriverMode::ApSta) &&
+      if (setActiveMode(*driver_, WifiDriverMode::ApSta, config) &&
           startSoftAp(*driver_, config, current).ok()) {
         current.mode = WifiMode::ApSta;
       } else {
@@ -343,7 +358,7 @@ bool WifiManager::poll(const DeviceConfig &config) {
   current.staState = WifiLinkState::Failed;
   current.staIp = IPAddress();
   if (config.fallbackToAp && !current.apEnabled && config.apSsid[0] != '\0') {
-    if (driver_->setMode(WifiDriverMode::ApSta) &&
+    if (setActiveMode(*driver_, WifiDriverMode::ApSta, config) &&
         startSoftAp(*driver_, config, current).ok()) {
       current.mode = WifiMode::ApSta;
     } else {
@@ -552,7 +567,7 @@ bool WifiManager::pollQueuedStaTest(const TestPollSnapshot &snapshot,
   // password for the currently connected SSID cannot produce a false pass.
   // WiFi persistence is disabled, so this does not touch product config NVS.
   driver_->disconnectStation(false, true);
-  if (!driver_->setMode(WifiDriverMode::ApSta)) {
+  if (!setActiveMode(*driver_, WifiDriverMode::ApSta, snapshot.candidate)) {
     changed = failTest(
         snapshot.testId,
         snapshot.state,
@@ -706,7 +721,8 @@ bool WifiManager::pollFinalizingStaTest(const TestPollSnapshot &snapshot,
     // Keep the radio and verified STA link alive while removing only the AP
     // interface. Passing true here would end the whole Wi-Fi driver.
     const bool apStopped = driver_->stopAp(false);
-    const bool staModeSet = driver_->setMode(WifiDriverMode::Sta);
+    const bool staModeSet = setActiveMode(
+        *driver_, WifiDriverMode::Sta, snapshot.candidate);
     if (apStopped) {
       current.apEnabled = false;
       current.apState = WifiApState::Disabled;
@@ -738,7 +754,8 @@ bool WifiManager::pollFinalizingStaTest(const TestPollSnapshot &snapshot,
       current.apEnabled = false;
       current.apState = WifiApState::Disabled;
       current.apIp = IPAddress();
-      if (!apStopped || !driver_->setMode(WifiDriverMode::ApSta) ||
+      if (!apStopped ||
+          !setActiveMode(*driver_, WifiDriverMode::ApSta, snapshot.candidate) ||
           !startSoftAp(*driver_, snapshot.candidate, current).ok() ||
           !stationHasIpv4(*driver_)) {
         setStatus(current);
@@ -796,7 +813,7 @@ Result WifiManager::restorePersistedAfterTest(const DeviceConfig &persisted,
   current.staIp = IPAddress();
 
   if (persisted.wifiMode == WifiMode::Ap) {
-    if (!driver_->setMode(WifiDriverMode::Ap)) {
+    if (!setActiveMode(*driver_, WifiDriverMode::Ap, persisted)) {
       return networkError("failed to restore AP mode");
     }
     current.mode = WifiMode::Ap;
@@ -814,9 +831,9 @@ Result WifiManager::restorePersistedAfterTest(const DeviceConfig &persisted,
 
   if (persisted.wifiMode == WifiMode::Sta || persisted.wifiMode == WifiMode::ApSta) {
     const bool retainAp = current.apEnabled || persisted.wifiMode == WifiMode::ApSta;
-    if (!driver_->setMode(retainAp
-                              ? WifiDriverMode::ApSta
-                              : WifiDriverMode::Sta)) {
+    if (!setActiveMode(*driver_,
+                       retainAp ? WifiDriverMode::ApSta : WifiDriverMode::Sta,
+                       persisted)) {
       current.staEnabled = false;
       current.staState = WifiLinkState::Failed;
       return networkError("failed to restore STA mode");

@@ -25,6 +25,7 @@ class RuntimeActionScheduler {
   void poll();
   bool ready() const;
   void scheduleWifiApply(uint32_t delayMs);
+  void scheduleWifiTxPowerApply(uint32_t delayMs);
   void scheduleSystemReset(uint32_t delayMs);
   RuntimeActionSnapshot snapshot();
 
@@ -38,11 +39,15 @@ class RuntimeActionScheduler {
   bool ready_ = false;
   bool wifiApplyPending_ = false;
   uint32_t wifiApplyDueMs_ = 0;
+  bool wifiTxPowerApplyPending_ = false;
+  uint32_t wifiTxPowerApplyDueMs_ = 0;
+  uint8_t wifiTxPowerRetryCount_ = 0;
   bool systemResetPending_ = false;
   bool systemResetFailed_ = false;
   uint32_t systemResetDueMs_ = 0;
 
   void applyPendingWifi();
+  void applyPendingWifiTxPower();
   void commitVerifiedWifiConnection();
   void rollbackFailedWifiTransition();
   void applyPendingSystemReset();

@@ -117,16 +117,47 @@ Result ConfigService::updateWifi(const DeviceConfig &source, DeviceConfig *commi
 }
 
 Result ConfigService::updateHostname(const char *hostname, DeviceConfig *committed) {
-  const Result validation = validateHostnameValue(hostname);
-  if (!validation.ok()) {
-    return validation;
+  SystemConfigUpdate update;
+  update.hostnameProvided = true;
+  update.hostname = hostname;
+  return updateSystem(update, committed);
+}
+
+Result ConfigService::updateSystem(const SystemConfigUpdate &update,
+                                   DeviceConfig *committed,
+                                   SystemConfigChanges *changes) {
+  if (!update.hostnameProvided && !update.wifiTxDbmProvided) {
+    return invalidInput("system update is empty");
+  }
+  if (update.hostnameProvided) {
+    if (update.hostname == nullptr) return invalidInput("hostname is required");
+    const Result validation = validateHostnameValue(update.hostname);
+    if (!validation.ok()) return validation;
+  }
+  if (update.wifiTxDbmProvided) {
+    const Result validation = validateWifiTxDbmValue(update.wifiTxDbm);
+    if (!validation.ok()) return validation;
   }
   if (!lock()) {
     return storageError("config service unavailable");
   }
   DeviceConfig updated = active_;
-  strlcpy(updated.hostname, hostname, sizeof(updated.hostname));
-  const Result result = saveLocked(updated, committed);
+  SystemConfigChanges actual;
+  if (update.hostnameProvided && strcmp(active_.hostname, update.hostname) != 0) {
+    strlcpy(updated.hostname, update.hostname, sizeof(updated.hostname));
+    actual.hostnameChanged = true;
+  }
+  if (update.wifiTxDbmProvided && active_.wifiTxDbm != update.wifiTxDbm) {
+    updated.wifiTxDbm = update.wifiTxDbm;
+    actual.wifiTxDbmChanged = true;
+  }
+  Result result = okResult();
+  if (actual.any()) {
+    result = saveLocked(updated, committed);
+  } else if (committed != nullptr) {
+    *committed = active_;
+  }
+  if (result.ok() && changes != nullptr) *changes = actual;
   unlock();
   return result;
 }

@@ -51,7 +51,10 @@ void EpdSpiTransport::logicalQuiesce() {
   const Board::EpaperPins pins = Board::ActiveProfile::kEpaper;
   digitalWrite(pins.cs, HIGH);
   digitalWrite(pins.dc, LOW);
-  digitalWrite(pins.reset, LOW);
+  // RST low is an active reset and also controls the HAT's power switch. A
+  // long low interval can power the driver off, so quiesce with reset high;
+  // Epd7In3E::initialize() still supplies the official 2 ms low pulse.
+  digitalWrite(pins.reset, HIGH);
 }
 
 void EpdSpiTransport::delayMs(uint32_t durationMs) {

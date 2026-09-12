@@ -11,6 +11,10 @@ main = (project / "src/main.cpp").read_text()
 platformio = (project / "platformio.ini").read_text()
 epaper_hardware = (project / "src/modules/hardware/EpaperHardware.cpp").read_text()
 epaper_service = (project / "src/modules/epaper/EpaperService.cpp").read_text()
+epaper_transport = (project / "src/modules/epaper/EpdSpiTransport.cpp").read_text()
+board_profile = (
+    project / "src/board/profiles/FireBeetle2Esp32C6Profile.h"
+).read_text()
 if "while (receivedBytes < begin.contentLength)" not in epaper_service:
     print("Stored image validation must stop at the auto-closing download length", file=sys.stderr)
     raise SystemExit(1)
@@ -21,9 +25,24 @@ if "-D ENABLE_EPAPER_PANEL_SELF_TEST=0" not in platformio:
 if "-D ENABLE_EPAPER_REFRESH_SELF_TEST=0" not in platformio:
     print("Release configuration must keep the one-shot refresh test disabled", file=sys.stderr)
     raise SystemExit(1)
+if "-D ENABLE_EPAPER_CONFIRMED_POWER_CYCLE_RECOVERY=0" not in platformio:
+    print("Release configuration must keep forced power-cycle recovery disabled", file=sys.stderr)
+    raise SystemExit(1)
+if "esp_reset_reason() == ESP_RST_POWERON" not in main:
+    print("Active e-paper markers must recover only from power-on reset evidence", file=sys.stderr)
+    raise SystemExit(1)
+if "automatic retry=disabled" not in main:
+    print("E-paper hardware tests must not retry after a power-cycle recovery", file=sys.stderr)
+    raise SystemExit(1)
 
 if "gpio_set_level" not in epaper_hardware:
     print("ESP32 e-paper outputs must preload their latches before output enable", file=sys.stderr)
+    raise SystemExit(1)
+if "kSafeResetHigh = true" not in board_profile:
+    print("E-paper RST must remain inactive-high outside the short reset pulse", file=sys.stderr)
+    raise SystemExit(1)
+if "digitalWrite(pins.reset, HIGH)" not in epaper_transport:
+    print("E-paper logical quiesce must not hold the HAT power-gating RST low", file=sys.stderr)
     raise SystemExit(1)
 if re.search(r"digitalWrite\(epaper\.(?:cs|dc|reset)", epaper_hardware):
     print("Arduino digitalWrite must not be used before e-paper output pinMode", file=sys.stderr)
@@ -36,11 +55,18 @@ if epaper_start not in main:
 if not main.index(epaper_start) < main.index("Serial.begin(115200)") < main.index("for (size_t index = kUserdataSubsystem"):
     print("E-paper logical quiesce must precede Serial delays and all other subsystems", file=sys.stderr)
     raise SystemExit(1)
+epaper_test_call = main.rindex("runEpaperPanelSelfTest();")
+if not epaper_test_call < main.index("for (size_t index = kUserdataSubsystem"):
+    print("E-paper hardware tests must run before storage and Wi-Fi startup", file=sys.stderr)
+    raise SystemExit(1)
 if "epdDriver.initialize()" in main or "transferAndRefresh" in main:
     print("Hardware-only bring-up must not initialize or refresh the panel", file=sys.stderr)
     raise SystemExit(1)
 if 'printHeartbeatField("epaper_busy", epaperBusyLabel())' not in main:
     print("Hardware bring-up must expose the read-only BUSY level in heartbeat", file=sys.stderr)
+    raise SystemExit(1)
+if "if (Serial && now - lastHeartbeatMs >= 1000U)" not in main:
+    print("USB CDC heartbeat must not block the runtime loop without a reader", file=sys.stderr)
     raise SystemExit(1)
 epaper_transfer = epaper_service.index("driver_->transferFrame(source)")
 epaper_release = epaper_service.index(
@@ -166,9 +192,11 @@ for required in ("payload_too_large", "invalid_json", "HttpJsonBody::parse"):
 for required in (
     "WiFi.softAPConfig(localIp, gateway, netmask, dns, localIp)",
     "WiFi.AP.enableDhcpCaptivePortal()",
+    "esp_wifi_set_max_tx_power(",
+    "kPlatformMaxQuarterDbm = 84",
 ):
     if required not in wifi_driver:
-        print(f"SoftAP captive DHCP setup is missing: {required}", file=sys.stderr)
+        print(f"Arduino Wi-Fi driver contract is missing: {required}", file=sys.stderr)
         raise SystemExit(1)
 if "WiFi." in wifi_manager or "millis()" in wifi_manager:
     print("WifiManager must use injected driver and clock seams", file=sys.stderr)
@@ -217,7 +245,7 @@ if not wifi_update.index("runtime_->ready()") < wifi_update.index("configService
 system_endpoints = (project / "src/api/system/SystemEndpoints.cpp").read_text()
 system_update = system_endpoints[ system_endpoints.index("Api::Response SystemEndpoints::update") : system_endpoints.index("Api::Response SystemEndpoints::reset") ]
 system_reset = system_endpoints[system_endpoints.index("Api::Response SystemEndpoints::reset") :]
-if not system_update.index("runtime_->ready()") < system_update.index("configService_->updateHostname") < system_update.index("scheduleWifiApply"):
+if not system_update.index("runtime_->ready()") < system_update.index("configService_->updateSystem") < system_update.index("scheduleWifiApply") < system_update.index("scheduleWifiTxPowerApply"):
     print("System update must preflight runtime before commit and schedule after commit", file=sys.stderr)
     raise SystemExit(1)
 

@@ -18,6 +18,18 @@ inline const char *configRecoveryReasonToString(ResultCode reason) {
   return reason == ResultCode::Ok ? "none" : "storage_error";
 }
 
+struct SystemConfigUpdate {
+  bool hostnameProvided = false;
+  const char *hostname = nullptr;
+  bool wifiTxDbmProvided = false;
+  uint8_t wifiTxDbm = kDefaultWifiTxDbm;
+};
+
+struct SystemConfigChanges {
+  bool hostnameChanged = false;
+  bool wifiTxDbmChanged = false;
+};
+
 class ConfigService {
  public:
   DeviceConfig value = defaultDeviceConfig();
@@ -56,6 +68,28 @@ class ConfigService {
     DeviceConfig updated = value;
     strlcpy(updated.hostname, hostname, sizeof(updated.hostname));
     return commitUpdated(updated, committed);
+  }
+  Result updateSystem(const SystemConfigUpdate &update,
+                      DeviceConfig *committed = nullptr,
+                      SystemConfigChanges *changes = nullptr) {
+    DeviceConfig updated = value;
+    SystemConfigChanges actual;
+    if (update.hostnameProvided && strcmp(updated.hostname, update.hostname) != 0) {
+      strlcpy(updated.hostname, update.hostname, sizeof(updated.hostname));
+      actual.hostnameChanged = true;
+    }
+    if (update.wifiTxDbmProvided && updated.wifiTxDbm != update.wifiTxDbm) {
+      updated.wifiTxDbm = update.wifiTxDbm;
+      actual.wifiTxDbmChanged = true;
+    }
+    Result result = okResult();
+    if (actual.hostnameChanged || actual.wifiTxDbmChanged) {
+      result = commitUpdated(updated, committed);
+    } else if (committed != nullptr) {
+      *committed = value;
+    }
+    if (result.ok() && changes != nullptr) *changes = actual;
+    return result;
   }
   Result updateAdminPassword(const char *password, DeviceConfig *committed = nullptr) {
     DeviceConfig updated = value;

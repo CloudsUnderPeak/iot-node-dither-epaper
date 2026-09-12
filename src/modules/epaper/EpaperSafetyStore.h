@@ -30,6 +30,7 @@ class EpaperSafetyStore {
   bool markActive();
   bool markShutdownConfirmed();
   bool clear();
+  bool recoverActiveAfterConfirmedPowerCycle();
 
   bool ready() const { return ready_; }
   EpaperProtectionStage stage() const { return stage_; }

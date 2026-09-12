@@ -1,6 +1,9 @@
 #include "ArduinoWifiDriver.h"
 
 #include <WiFi.h>
+#include <esp_wifi.h>
+
+#include "modules/config/model/DeviceConfig.h"
 
 namespace {
 wifi_mode_t toArduinoMode(WifiDriverMode mode) {
@@ -20,6 +23,21 @@ void ArduinoWifiDriver::setPersistent(bool enabled) {
 
 bool ArduinoWifiDriver::setMode(WifiDriverMode mode) {
   return WiFi.mode(toArduinoMode(mode));
+}
+
+bool ArduinoWifiDriver::setTxPower(uint8_t configuredDbm) {
+  // ESP32-C6 accepts quarter-dBm input in [8,84]. The top input maps to the
+  // current platform/country maximum (20 dBm in this SDK's mapping table).
+  constexpr int8_t kPlatformMaxQuarterDbm = 84;
+  const int8_t sdkPower = configuredDbm == kMaxWifiTxDbm
+                              ? kPlatformMaxQuarterDbm
+                              : static_cast<int8_t>(configuredDbm * 4U);
+  const esp_err_t result = esp_wifi_set_max_tx_power(sdkPower);
+  Serial.printf("wifi tx power: configured_dbm=%u, sdk_quarter_dbm=%d, result=%d\n",
+                static_cast<unsigned>(configuredDbm),
+                static_cast<int>(sdkPower),
+                static_cast<int>(result));
+  return result == ESP_OK;
 }
 
 bool ArduinoWifiDriver::setHostname(const char *hostname) {

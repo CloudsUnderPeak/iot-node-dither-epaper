@@ -203,6 +203,7 @@ Captive portal detection endpoints 皆為 `GET`、不需登入，在 AP active �
 | 欄位 | 限制 |
 | --- | --- |
 | `hostname` | 1 到 31 字元；只允許英文字母、數字、`-`；不可用 `-` 開頭或結尾。 |
+| `wifi_tx_dbm` | JSON 整數 2–20；default 15。20 表示解除專案額外上限並使用平台允許的最大功率政策；不接受 `null`、字串、布林或小數。 |
 | STA/AP SSID | 最多 32 字元；需要對應 mode 時不可為空；只允許 printable ASCII。 |
 | STA security | `interfaces.sta.security`；第一階段支援 `"wpa"` 與 `"open"`。 |
 | STA static IPv4 | `address`、`gateway`、`netmask` 必填；DNS 最多兩筆。address 與 gateway 必須是同 subnet 的可用 host address。 |
@@ -278,6 +279,7 @@ Captive portal detection endpoints 皆為 `GET`、不需登入，在 AP active �
     "heap_used_percent": 24,
     "mac_address": "AA:BB:CC:DD:EE:FF",
     "hostname": "esp32-device",
+    "wifi_tx_dbm": 15,
     "config_state": "persisted",
     "config_recovery_reason": "none",
     "power": {
@@ -764,13 +766,16 @@ Client 接著輪詢 `GET /api/wifi/connect`。此 transition 使用單一 associ
 
 ### `PUT /api/system`
 
-更新裝置層級設定。hostname 不屬於 `/api/wifi`；`GET /api/device` 會回傳目前 hostname。修改 hostname 後會在 response 送出後重新套用網路服務與 mDNS。Runtime scheduler 不可用時在持久化前回 `503 runtime_unavailable`。
+更新裝置層級設定。`hostname` 與 `wifi_tx_dbm` 至少提供一個；省略欄位保持原值，也可在同一 request 原子更新兩者。`GET /api/device` 回傳兩個 configured 值。
+
+只改功率時，response 送出後只套用 TX power，不切換 mode、不斷線、不重啟網路服務或 MCU。修改 hostname 時會重新套用 Wi-Fi 與 mDNS；同時修改兩者只做一次完整套用。20 代表解除專案額外限制並交給平台最大功率政策，不代表無限射頻功率。Runtime scheduler 不可用時在持久化前回 `503 runtime_unavailable`。
 
 Request body：
 
 ```json
 {
-  "hostname": "esp32-device"
+  "hostname": "esp32-device",
+  "wifi_tx_dbm": 17
 }
 ```
 
@@ -780,11 +785,20 @@ Request body：
 {
   "success": true,
   "data": {
-    "hostname": "esp32-device"
+    "hostname": "esp32-device",
+    "wifi_tx_dbm": 17
   },
   "message": "system updated"
 }
 ```
+
+Request 只含功率也合法：
+
+```json
+{"wifi_tx_dbm":20}
+```
+
+未知欄位回 `400 unsupported_field`；空物件回 `400 missing_field`。`wifi_tx_dbm` 的 `null`、錯誤型別、小數或超出 2–20 回 `400 invalid_field`。全部欄位先驗證才寫入；任一欄位錯誤時不得部分更新。相同 configured 值成功回傳完整 system 值，但不寫 NVS、不排程 runtime action。
 
 ### `POST /api/system/reset`
 

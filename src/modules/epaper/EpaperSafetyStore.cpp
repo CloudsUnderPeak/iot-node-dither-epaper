@@ -64,6 +64,11 @@ bool EpaperSafetyStore::clear() {
   return true;
 }
 
+bool EpaperSafetyStore::recoverActiveAfterConfirmedPowerCycle() {
+  if (stage_ != EpaperProtectionStage::Active) return false;
+  return clear();
+}
+
 const char *epaperProtectionStageToString(EpaperProtectionStage stage) {
   switch (stage) {
     case EpaperProtectionStage::None:

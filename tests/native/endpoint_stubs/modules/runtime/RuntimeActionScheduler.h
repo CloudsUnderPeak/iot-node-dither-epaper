@@ -11,6 +11,7 @@ class RuntimeActionScheduler {
  public:
   bool available = false;
   unsigned wifiApplyCount = 0;
+  unsigned wifiTxPowerApplyCount = 0;
   unsigned resetCount = 0;
   uint32_t lastWifiApplyDelayMs = 0;
   uint32_t lastResetDelayMs = 0;
@@ -21,6 +22,7 @@ class RuntimeActionScheduler {
     ++wifiApplyCount;
     lastWifiApplyDelayMs = delayMs;
   }
+  void scheduleWifiTxPowerApply(uint32_t) { ++wifiTxPowerApplyCount; }
   void scheduleSystemReset(uint32_t delayMs) {
     ++resetCount;
     lastResetDelayMs = delayMs;

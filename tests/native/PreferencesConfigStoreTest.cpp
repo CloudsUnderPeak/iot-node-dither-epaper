@@ -69,6 +69,14 @@ class FakePreferencesBackend : public PreferencesBackend {
     return static_cast<uint8_t>(getNumber(key, fallback));
   }
 
+  bool getUCharChecked(const char *key, uint8_t &value) const override {
+    const StoredValue *stored = findValue(key);
+    if (stored == nullptr || stored->type != StoredValue::Type::Number ||
+        stored->number > 0xffU) return false;
+    value = static_cast<uint8_t>(stored->number);
+    return true;
+  }
+
   uint16_t getUShort(const char *key, uint16_t fallback) const override {
     return static_cast<uint16_t>(getNumber(key, fallback));
   }
@@ -170,6 +178,7 @@ class FakePreferencesBackend : public PreferencesBackend {
 bool configsEqual(const DeviceConfig &left, const DeviceConfig &right) {
   return left.schemaVersion == right.schemaVersion &&
          left.wifiMode == right.wifiMode &&
+         left.wifiTxDbm == right.wifiTxDbm &&
          strcmp(left.hostname, right.hostname) == 0 &&
          strcmp(left.staSsid, right.staSsid) == 0 &&
          strcmp(left.staPassword, right.staPassword) == 0 &&
@@ -227,7 +236,7 @@ void testEmptyActiveAndFallbackSlots() {
 }
 
 void testEveryMutationFailurePreservesLastValidConfig() {
-  constexpr int kSaveMutationPoints = 22;
+  constexpr int kSaveMutationPoints = 23;
   const DeviceConfig initial = namedConfig("stable-host", "StablePass1");
   const DeviceConfig candidate = namedConfig("candidate-host", "Candidate1");
 
@@ -313,6 +322,48 @@ void testUnsupportedAndCorruptedSlotsArePreserved() {
            "namespace inspection failure should report storage error");
   }
 }
+
+void testWifiTxPowerCompatibilityAndValidation() {
+  {
+    FakePreferencesBackend backend;
+    PreferencesConfigStore store(backend);
+    DeviceConfig config = defaultDeviceConfig();
+    config.wifiTxDbm = 20;
+    expect(store.save(config).ok(), "20 dBm policy should persist");
+    DeviceConfig loaded;
+    expect(store.load(loaded).ok() && loaded.wifiTxDbm == 20,
+           "Wi-Fi TX power should round-trip");
+
+    backend.eraseKey("devcfg_a", "wifi_tx_dbm");
+    expect(store.load(loaded).ok() && loaded.wifiTxDbm == kDefaultWifiTxDbm,
+           "legacy slot without TX power should load the 15 dBm default");
+  }
+
+  {
+    FakePreferencesBackend backend;
+    PreferencesConfigStore store(backend);
+    expect(store.save(defaultDeviceConfig()).ok(),
+           "invalid TX power baseline should save");
+    StoredValue wrongType;
+    wrongType.type = StoredValue::Type::String;
+    wrongType.text = "15";
+    backend.namespaces["devcfg_a"]["wifi_tx_dbm"] = wrongType;
+    DeviceConfig loaded;
+    expect(store.load(loaded).code == ResultCode::StorageError,
+           "wrong NVS type for TX power should be treated as corruption");
+  }
+
+  {
+    FakePreferencesBackend backend;
+    PreferencesConfigStore store(backend);
+    expect(store.save(defaultDeviceConfig()).ok(),
+           "out-of-range TX power baseline should save");
+    backend.namespaces["devcfg_a"]["wifi_tx_dbm"].number = 21;
+    DeviceConfig loaded;
+    expect(store.load(loaded).code == ResultCode::StorageError,
+           "out-of-range persisted TX power should be treated as corruption");
+  }
+}
 }  // namespace
 
 int main() {
@@ -320,6 +371,7 @@ int main() {
   testEveryMutationFailurePreservesLastValidConfig();
   testReadbackMismatchDoesNotCommitSlot();
   testUnsupportedAndCorruptedSlotsArePreserved();
+  testWifiTxPowerCompatibilityAndValidation();
   if (failures != 0) {
     std::cerr << failures << " Preferences config store test(s) failed\n";
     return EXIT_FAILURE;

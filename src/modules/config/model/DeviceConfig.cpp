@@ -126,6 +126,7 @@ DeviceConfig defaultDeviceConfig() {
   DeviceConfig config{};
   config.schemaVersion = kDeviceConfigSchemaVersion;
   config.wifiMode = WifiMode::Ap;
+  config.wifiTxDbm = kDefaultWifiTxDbm;
   strlcpy(config.hostname, kDefaultHostname, sizeof(config.hostname));
   config.staSsid[0] = '\0';
   config.staPassword[0] = '\0';

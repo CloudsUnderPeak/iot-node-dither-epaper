@@ -28,6 +28,7 @@ void RuntimeActionScheduler::poll() {
   rollbackFailedWifiTransition();
   commitVerifiedWifiConnection();
   applyPendingWifi();
+  applyPendingWifiTxPower();
 }
 
 bool RuntimeActionScheduler::ready() const {
@@ -41,6 +42,18 @@ void RuntimeActionScheduler::scheduleWifiApply(uint32_t delayMs) {
     wifiApplyDueMs_ = dueMs;
   }
   wifiApplyPending_ = true;
+  portEXIT_CRITICAL(&pendingMux_);
+}
+
+void RuntimeActionScheduler::scheduleWifiTxPowerApply(uint32_t delayMs) {
+  const uint32_t dueMs = millis() + delayMs;
+  portENTER_CRITICAL(&pendingMux_);
+  if (!wifiTxPowerApplyPending_ ||
+      static_cast<int32_t>(dueMs - wifiTxPowerApplyDueMs_) < 0) {
+    wifiTxPowerApplyDueMs_ = dueMs;
+  }
+  wifiTxPowerApplyPending_ = true;
+  wifiTxPowerRetryCount_ = 0;
   portEXIT_CRITICAL(&pendingMux_);
 }
 
@@ -101,6 +114,50 @@ void RuntimeActionScheduler::applyPendingWifi() {
                 captiveDnsResult.message,
                 static_cast<unsigned>(captiveDnsResult.code),
                 captivePortalDnsService_->running() ? captivePortalDnsService_->captiveIp().toString().c_str() : "disabled");
+}
+
+void RuntimeActionScheduler::applyPendingWifiTxPower() {
+  bool apply = false;
+  const uint32_t now = millis();
+  portENTER_CRITICAL(&pendingMux_);
+  if (wifiTxPowerApplyPending_ &&
+      static_cast<int32_t>(now - wifiTxPowerApplyDueMs_) >= 0) {
+    wifiTxPowerApplyPending_ = false;
+    apply = true;
+  }
+  portEXIT_CRITICAL(&pendingMux_);
+  if (!apply) return;
+
+  if (wifiManager_->testBlocksScan()) {
+    portENTER_CRITICAL(&pendingMux_);
+    wifiTxPowerApplyPending_ = true;
+    wifiTxPowerApplyDueMs_ = millis() + 100U;
+    portEXIT_CRITICAL(&pendingMux_);
+    return;
+  }
+
+  const DeviceConfig config = configService_->snapshot();
+  const Result result = wifiManager_->applyTxPower(config);
+  Serial.printf("api wifi tx power: configured_dbm=%u, apply=%s (%u)\n",
+                static_cast<unsigned>(config.wifiTxDbm),
+                result.message,
+                static_cast<unsigned>(result.code));
+  if (result.ok()) {
+    portENTER_CRITICAL(&pendingMux_);
+    wifiTxPowerRetryCount_ = 0;
+    portEXIT_CRITICAL(&pendingMux_);
+    return;
+  }
+
+  portENTER_CRITICAL(&pendingMux_);
+  if (wifiTxPowerRetryCount_ < 2U) {
+    ++wifiTxPowerRetryCount_;
+    wifiTxPowerApplyPending_ = true;
+    wifiTxPowerApplyDueMs_ = millis() + 1000U;
+  } else {
+    wifiTxPowerRetryCount_ = 0;
+  }
+  portEXIT_CRITICAL(&pendingMux_);
 }
 
 void RuntimeActionScheduler::commitVerifiedWifiConnection() {

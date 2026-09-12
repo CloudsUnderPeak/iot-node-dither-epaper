@@ -68,6 +68,12 @@ class FakePreferencesBackend final : public PreferencesBackend {
     return static_cast<uint8_t>(getNumber(key, fallback));
   }
 
+  bool getUCharChecked(const char *key, uint8_t &value) const override {
+    if (!hasKey(key)) return false;
+    value = getUChar(key, 0);
+    return true;
+  }
+
   uint16_t getUShort(const char *key, uint16_t fallback) const override {
     return static_cast<uint16_t>(getNumber(key, fallback));
   }

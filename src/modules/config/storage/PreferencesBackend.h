@@ -21,6 +21,7 @@ class PreferencesBackend {
   virtual bool clear() = 0;
   virtual bool hasKey(const char *key) const = 0;
   virtual uint8_t getUChar(const char *key, uint8_t fallback) const = 0;
+  virtual bool getUCharChecked(const char *key, uint8_t &value) const = 0;
   virtual uint16_t getUShort(const char *key, uint16_t fallback) const = 0;
   virtual bool getBool(const char *key, bool fallback) const = 0;
   virtual bool getString(const char *key, char *target, size_t targetSize) const = 0;

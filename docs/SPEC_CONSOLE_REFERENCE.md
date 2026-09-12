@@ -211,7 +211,7 @@ api POST /api/auth/logout token=<token> {}
 | `GET /api/wifi/connect` | 需要 | 無 | 查詢 connect／safe-transition 進度。 |
 | `PUT /api/wifi` | 需要 | 完整 Wi-Fi config | 更新 desired configuration。 |
 | `POST /api/wifi/reconnect` | 需要 | 可省略或 `{}` | 重新套用已儲存 Wi-Fi 設定。 |
-| `PUT /api/system` | 需要 | hostname | 更新 hostname。 |
+| `PUT /api/system` | 需要 | hostname、`wifi_tx_dbm` 至少一個 | 原子更新 system configured 值；功率接受 2–20 整數，20 表示解除專案額外上限。 |
 | `POST /api/system/reset` | 需要 | 可省略或 `{}` | 清除 settings 與 user data，並重新啟動。 |
 | `POST /api/system/reset/settings` | 需要 | 可省略或 `{}` | 只清除 settings，並重新啟動。 |
 | `POST /api/system/reset/data` | 需要 | 可省略或 `{}` | 只清除 user data，並重新啟動。 |
@@ -245,6 +245,13 @@ api GET /api/wifi/connect token=<token>
 
 ```text
 api PUT /api/system token=<token> {"hostname":"esp32-device"}
+```
+
+只更新 Wi-Fi TX power；省略 hostname 不會改變它，`null` 不合法：
+
+```text
+api PUT /api/system token=<token> {"wifi_tx_dbm":15}
+api PUT /api/system token=<token> {"wifi_tx_dbm":20}
 ```
 
 變更 admin password：

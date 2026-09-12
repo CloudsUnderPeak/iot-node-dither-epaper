@@ -154,6 +154,13 @@ Result validateHostnameValue(const char *value) {
   return okResult();
 }
 
+Result validateWifiTxDbmValue(uint8_t value) {
+  if (value < kMinWifiTxDbm || value > kMaxWifiTxDbm) {
+    return invalidInput("Wi-Fi TX power must be between 2 and 20 dBm");
+  }
+  return okResult();
+}
+
 Result validateStaSsidValue(const char *value, bool required) {
   return validateSsidValue(value, required,
                            "STA SSID is required for selected Wi-Fi mode",
@@ -234,6 +241,9 @@ DeviceConfigValidation validateDeviceConfigDetailed(const DeviceConfig &config) 
 
   Result validation = validateHostnameValue(config.hostname);
   if (!validation.ok()) return {validation, DeviceConfigField::Hostname};
+
+  validation = validateWifiTxDbmValue(config.wifiTxDbm);
+  if (!validation.ok()) return {validation, DeviceConfigField::WifiTxDbm};
 
   if (static_cast<uint8_t>(config.wifiMode) > static_cast<uint8_t>(WifiMode::ApSta)) {
     return fail(DeviceConfigField::WifiMode, "invalid Wi-Fi mode");

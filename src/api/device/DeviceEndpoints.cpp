@@ -29,6 +29,7 @@ Api::Response get(const ConfigService &configService,
   data["heap_used_percent"] = heapUsedPercent;
   data["mac_address"] = macText;
   data["hostname"] = config.hostname;
+  data["wifi_tx_dbm"] = config.wifiTxDbm;
   data["config_state"] = configStartupStateToString(configService.startupState());
   data["config_recovery_reason"] = configRecoveryReasonToString(configService.recoveryReason());
   JsonObject power = data["power"].to<JsonObject>();

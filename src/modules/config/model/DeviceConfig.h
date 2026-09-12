@@ -32,11 +32,16 @@ enum class ApIpMode : uint8_t {
 #define DEVICE_CONFIG_IPV4_SIZE 16
 #define DEVICE_CONFIG_ADMIN_USERNAME_SIZE DEVICE_CONFIG_SSID_SIZE
 
+constexpr uint8_t kDefaultWifiTxDbm = 15;
+constexpr uint8_t kMinWifiTxDbm = 2;
+constexpr uint8_t kMaxWifiTxDbm = 20;
+
 // Persistent user-facing settings. Keep this structure compact because it is
 // mirrored into NVS through PreferencesConfigStore.
 struct DeviceConfig {
   uint16_t schemaVersion;
   WifiMode wifiMode;
+  uint8_t wifiTxDbm;
   char hostname[DEVICE_CONFIG_HOSTNAME_SIZE];
   // Wi-Fi credentials are stored locally on the device and must not be emitted
   // through REST responses or reusable documentation.
@@ -64,6 +69,7 @@ enum class DeviceConfigField : uint8_t {
   Schema,
   Hostname,
   WifiMode,
+  WifiTxDbm,
   StaSsid,
   StaPassword,
   StaSecurity,
@@ -99,6 +105,7 @@ const char *apIpModeToString(ApIpMode mode);
 bool apIpModeFromString(const char *value, ApIpMode &mode);
 DeviceConfig defaultDeviceConfig();
 Result validateHostnameValue(const char *value);
+Result validateWifiTxDbmValue(uint8_t value);
 Result validateStaSsidValue(const char *value, bool required);
 Result validateApSsidValue(const char *value, bool required);
 Result validateStaPasswordValue(const char *value);

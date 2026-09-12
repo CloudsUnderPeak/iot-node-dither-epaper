@@ -39,13 +39,24 @@ class FakeWifiDriver : public WifiDriver {
   unsigned disconnectAsyncCount = 0;
   unsigned apStartCount = 0;
   unsigned apStopCount = 0;
+  unsigned txPowerCount = 0;
+  unsigned modeCount = 0;
+  uint8_t lastTxDbm = 0;
+  bool txPowerResult = true;
 
   void setPersistent(bool) override {}
 
   bool setMode(WifiDriverMode requested) override {
+    ++modeCount;
     if (!modeResult) return false;
     mode = requested;
     return true;
+  }
+
+  bool setTxPower(uint8_t configuredDbm) override {
+    ++txPowerCount;
+    lastTxDbm = configuredDbm;
+    return txPowerResult;
   }
 
   bool setHostname(const char *) override { return true; }
@@ -366,6 +377,29 @@ void testFinalApFailureRollbackSuccessAndPersistenceFailure() {
            "rollback persistence failure should remain a storage failure");
   }
 }
+
+void testTxPowerPolicyUsesActiveModesAndDedicatedApply() {
+  Fixture fixture;
+  DeviceConfig config = defaultDeviceConfig();
+  config.wifiTxDbm = 20;
+  WifiStatus status;
+  expect(fixture.manager.apply(config, status).ok() &&
+             fixture.driver.lastTxDbm == 20 && fixture.driver.txPowerCount == 1,
+         "active mode startup should apply configured TX power");
+
+  const unsigned modeCount = fixture.driver.modeCount;
+  const unsigned disconnectCount = fixture.driver.disconnectCount;
+  config.wifiTxDbm = 9;
+  expect(fixture.manager.applyTxPower(config).ok() &&
+             fixture.driver.lastTxDbm == 9 &&
+             fixture.driver.modeCount == modeCount &&
+             fixture.driver.disconnectCount == disconnectCount,
+         "dedicated TX apply must not change mode or disconnect Wi-Fi");
+
+  fixture.driver.txPowerResult = false;
+  expect(!fixture.manager.applyTxPower(config).ok(),
+         "dedicated TX apply should report driver failure");
+}
 }  // namespace
 
 int main() {
@@ -375,6 +409,7 @@ int main() {
   testCandidateCommitFailureAndStationDisconnect();
   testStaGracePeriodAndFinalize();
   testFinalApFailureRollbackSuccessAndPersistenceFailure();
+  testTxPowerPolicyUsesActiveModesAndDedicatedApply();
   if (failures != 0) {
     std::cerr << failures << " Wi-Fi manager state test(s) failed\n";
     return EXIT_FAILURE;

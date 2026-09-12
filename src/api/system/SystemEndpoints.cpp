@@ -3,6 +3,15 @@
 #include "api/shared/ApiResponse.h"
 #include "api/shared/JsonReader.h"
 
+namespace {
+bool hasJsonKey(JsonObjectConst object, const char *key) {
+  for (JsonPairConst pair : object) {
+    if (strcmp(pair.key().c_str(), key) == 0) return true;
+  }
+  return false;
+}
+}  // namespace
+
 Result SystemEndpoints::begin(ConfigService *configService,
                               StorageLifecycle *storageLifecycle,
                               RuntimeActionScheduler *runtime) {
@@ -22,26 +31,59 @@ Api::Response SystemEndpoints::update(const Api::Request &request) {
 
   JsonDecodeError decodeError;
   JsonReader reader(root, "", decodeError);
-  const char *hostname = reader.requiredString("hostname", "hostname is required");
-  reader.finish({"hostname"});
+  SystemConfigUpdate update;
+  update.hostnameProvided = hasJsonKey(root, "hostname");
+  if (update.hostnameProvided) {
+    update.hostname = reader.requiredString("hostname", "hostname is required");
+  }
+  update.wifiTxDbmProvided = hasJsonKey(root, "wifi_tx_dbm");
+  if (update.wifiTxDbmProvided) {
+    JsonVariantConst value = root["wifi_tx_dbm"];
+    if (value.isNull() || !value.is<int64_t>()) {
+      return Api::problem(400, "invalid_field",
+                          "wifi_tx_dbm must be an integer",
+                          "wifi_tx_dbm");
+    } else {
+      const int64_t dbm = value.as<int64_t>();
+      if (dbm < kMinWifiTxDbm || dbm > kMaxWifiTxDbm) {
+        return Api::problem(400, "invalid_field",
+                            "wifi_tx_dbm must be between 2 and 20",
+                            "wifi_tx_dbm");
+      }
+      update.wifiTxDbm = static_cast<uint8_t>(dbm);
+    }
+  }
+  reader.finish({"hostname", "wifi_tx_dbm"});
   if (!decodeError.ok()) return Api::decodeError(decodeError);
 
-  const Result validation = validateHostnameValue(hostname);
-  if (!validation.ok()) {
-    return Api::problem(400, "invalid_field", validation.message, "hostname");
+  if (!update.hostnameProvided && !update.wifiTxDbmProvided) {
+    return Api::problem(400, "missing_field",
+                        "hostname or wifi_tx_dbm is required");
+  }
+  if (update.hostnameProvided) {
+    const Result validation = validateHostnameValue(update.hostname);
+    if (!validation.ok()) {
+      return Api::problem(400, "invalid_field", validation.message, "hostname");
+    }
   }
   if (!runtime_->ready()) {
     return Api::problem(503, "runtime_unavailable", "runtime action scheduler unavailable");
   }
   DeviceConfig updated;
-  const Result saveResult = configService_->updateHostname(hostname, &updated);
+  SystemConfigChanges changes;
+  const Result saveResult = configService_->updateSystem(update, &updated, &changes);
   if (!saveResult.ok()) {
     return Api::problem(Api::statusFor(saveResult.code), "storage_error", saveResult.message);
   }
-  runtime_->scheduleWifiApply(100);
+  if (changes.hostnameChanged) {
+    runtime_->scheduleWifiApply(100);
+  } else if (changes.wifiTxDbmChanged) {
+    runtime_->scheduleWifiTxPowerApply(100);
+  }
 
   JsonDocument data;
   data["hostname"] = updated.hostname;
+  data["wifi_tx_dbm"] = updated.wifiTxDbm;
   return Api::ok(Api::json(data), "system updated");
 }
 

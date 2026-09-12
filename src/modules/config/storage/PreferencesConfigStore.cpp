@@ -11,6 +11,7 @@ constexpr const char *kActiveSlotKey = "active";
 
 constexpr const char *kSchemaKey = "schema";
 constexpr const char *kWifiModeKey = "wifi_mode";
+constexpr const char *kWifiTxDbmKey = "wifi_tx_dbm";
 constexpr const char *kHostnameKey = "hostname";
 constexpr const char *kStaSsidKey = "sta_ssid";
 constexpr const char *kStaPassKey = "sta_pass";
@@ -79,6 +80,11 @@ Result loadSlot(PreferencesBackend &backend,
   DeviceConfig loaded = defaultDeviceConfig();
   loaded.schemaVersion = storedSchema;
   loaded.wifiMode = static_cast<WifiMode>(backend.getUChar(kWifiModeKey, 0));
+  if (backend.hasKey(kWifiTxDbmKey) &&
+      !backend.getUCharChecked(kWifiTxDbmKey, loaded.wifiTxDbm)) {
+    backend.close();
+    return storageError("config slot has invalid Wi-Fi TX power type");
+  }
   loaded.staSecurity =
       static_cast<StaSecurity>(backend.getUChar(kStaSecurityKey, 0));
   loaded.staIpMode =
@@ -124,6 +130,7 @@ bool writeSlot(PreferencesBackend &backend,
 
   bool saved = backend.clear();
   saved = saved && backend.putUChar(kWifiModeKey, static_cast<uint8_t>(config.wifiMode));
+  saved = saved && backend.putUChar(kWifiTxDbmKey, config.wifiTxDbm);
   saved = saved && backend.putString(kHostnameKey, config.hostname);
   saved = saved && backend.putString(kStaSsidKey, config.staSsid);
   saved = saved && backend.putString(kStaPassKey, config.staPassword);
@@ -151,6 +158,7 @@ bool writeSlot(PreferencesBackend &backend,
 bool configsEqual(const DeviceConfig &left, const DeviceConfig &right) {
   return left.schemaVersion == right.schemaVersion &&
          left.wifiMode == right.wifiMode &&
+         left.wifiTxDbm == right.wifiTxDbm &&
          strcmp(left.hostname, right.hostname) == 0 &&
          strcmp(left.staSsid, right.staSsid) == 0 &&
          strcmp(left.staPassword, right.staPassword) == 0 &&

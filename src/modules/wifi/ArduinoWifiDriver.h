@@ -7,6 +7,7 @@ class ArduinoWifiDriver : public WifiDriver {
  public:
   void setPersistent(bool enabled) override;
   bool setMode(WifiDriverMode mode) override;
+  bool setTxPower(uint8_t configuredDbm) override;
   bool setHostname(const char *hostname) override;
   bool configureStation(const IPAddress &localIp,
                         const IPAddress &gateway,

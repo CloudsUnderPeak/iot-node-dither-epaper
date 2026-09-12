@@ -65,8 +65,8 @@ Arduino loop <──────────────────────
 | `modules/epaper/CpuFrequencyGuard.*` | RAII 全晶片 frequency guard；panel wake 前切到並 read-back 80 MHz，cleanup 後恢復並 read-back 原頻率。 |
 | `modules/epaper/EpaperSafetyStore.*` | Default NVS `epaper_meta` protection marker、read-back verification 與 boot recovery 判定；故障 fail closed。 |
 | `modules/epaper/EpaperShutdownCoordinator.*` | Worker quiesce、protocol shutdown、logical quiesce 與 software restart 核准；失敗標記 unknown 並取消 restart。 |
-| `modules/epaper/EpaperPowerProbe.*` | Build-flag gated、預設停用的 power-only bring-up；marker 與 80 MHz guard 成功後只做 initialize、Power OFF／Deep Sleep，不傳 frame、不 refresh。 |
-| `modules/epaper/EpaperRefreshProbe.*` | Build-flag gated、預設停用的單次實機刷新 bring-up；依序執行 marker、80 MHz guard、initialize、一次 transfer/refresh、Power OFF／Deep Sleep 與頻率恢復；任何階段失敗仍執行 cleanup。 |
+| `modules/epaper/EpaperPowerProbe.*` | Build-flag gated、預設停用的 power-only bring-up；在 storage／Wi-Fi 啟動前，marker 與 80 MHz guard 成功後只做 initialize、Power OFF／Deep Sleep，不傳 frame、不 refresh。 |
+| `modules/epaper/EpaperRefreshProbe.*` | Build-flag gated、預設停用的單次實機刷新 bring-up；在 storage／Wi-Fi 啟動前依序執行 marker、80 MHz guard、initialize、一次 transfer/refresh、Power OFF／Deep Sleep 與頻率恢復；任何階段失敗仍執行 cleanup。若測試中掉電，下一次 boot 可恢復 active marker，但不得自動重試 probe。 |
 | `modules/epaper/EpaperService.*` | 唯一 operation/status owner、upload reservation、queue depth 1、worker、cooldown 與 stable error mapping。 |
 | `modules/epaper/calibration/*` | 六色色準 model/service 與 `user_nvs` 雙 slot store；EPD code identity 固定，display RGB 可持久化調整。 |
 | `modules/console/*` | Human diagnostics、userdata inspection、typed config staging／commit 與 REST-equivalent `api ...` serial adapter。 |
@@ -113,7 +113,7 @@ Arduino loop <──────────────────────
 ## E-paper hardware、format 與 runtime
 
 - Target 是 DFRobot FireBeetle 2 ESP32-C6（ESP32-C6FH4、4 MB flash、無 PSRAM）與 Waveshare 7.3inch e-Paper HAT (E)。固定 signal mapping 為 SCK GPIO23、MOSI GPIO22、CS GPIO18、DC GPIO1、RST GPIO14、BUSY GPIO21；BUSY 是 active-low `INPUT_PULLUP`，避免 controller reset 期間輸出呈高阻時漂浮；不配置 MISO。第一版不新增 power-enable，也不修改 `partitions.csv`。
-- Board profile 必須核對 exposed pin、ESP32-C6 strapping／flash／USB-JTAG 限制及板上保留功能。Boot 最早先設 CS high、DC/RST low；這只建立 logical quiesce，不能回報 protocol shutdown。
+- Board profile 必須核對 exposed pin、ESP32-C6 strapping／flash／USB-JTAG 限制及板上保留功能。Boot 最早先設 CS high、DC low、RST inactive-high；這只建立 logical quiesce，不能回報 protocol shutdown。Waveshare HAT 的 RST low 同時控制板上 power switch，logical quiesce 與 2 秒 prewake 不得長時間拉低；driver initialize 保留 high 20 ms、low 2 ms、high 20 ms 的短 reset pulse。
 - `main.cpp` 必須在 Serial、status LED、storage 與 network subsystem 之前啟動 `epaper_hardware`：先原子 claim e-paper pins、設定安全 latch 與方向，再初始化 write-only shared SPI、transport 和 driver 的 `Quiesced` software state。此階段不得呼叫 panel initialize、frame transfer 或 refresh；startup log 必須明確標示 `logical_quiesce` 與 `refresh=disabled`，任一步失敗則保持 `FAIL` 且不送 panel command。
 - `EPDIMG` 總長 192,040 bytes：magic `EPDIMG\0\0`、version 1、header size 40、width 800、height 480、frame bytes 192000、frame CRC32、non-zero uint64 generation。所有 multibyte field 為 little-endian；generation 對外以 decimal string 表達。
 - Packed frame 是 row-major，左 pixel 在 high nibble、右 pixel 在 low nibble；只允許 code `0,1,2,3,5,6`。Validator 可跨任意 input chunk 邊界收資料，依序驗證 header、每個 nibble、完整長度與 CRC，不配置 192 KB framebuffer。
@@ -125,20 +125,21 @@ Arduino loop <──────────────────────
 - `EpaperService` 使用短 mutex 保存完整 cached status，mutex 內不得操作 filesystem、SPI、NVS、JSON 或 Serial。Queue depth 固定 1；實體 draw 在低優先序 dedicated FreeRTOS worker 執行，BUSY wait sleep/yield，frame 每 4 KiB yield。
 - Worker 必須在 panel wake 前持久化 `stage: active` 並 read-back，再取得全晶片 frequency guard、設定並 read-back 80 MHz。80 MHz 涵蓋 prewake、initialize、transfer、refresh、Power OFF／Deep Sleep cleanup；全部 exit path 經 shutdown coordinator 後才恢復 160 MHz。
 - 成功或 wake 後失敗都依序嘗試 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5`。只有 protocol shutdown 與 `stage: shutdown_confirmed` read-back 成功才開始 180 秒 cooldown；timeout、SPI failure 或 shutdown failure 設 `panel_state: unknown` 並永久 fail closed 到完整 power cycle。
-- `epaper_meta` namespace 位於 default `nvs`，不屬於 settings/data/factory reset 會清除的 `user_nvs` 或 `userdata`。Boot 先讀 `esp_reset_reason()` 與 marker：confirmed marker 重啟 180 秒 cooldown；active marker搭配非協調 reset 記錄 interrupted，禁止自動 draw。
+- `epaper_meta` namespace 位於 default `nvs`，不屬於 settings/data/factory reset 會清除的 `user_nvs` 或 `userdata`。Boot 先讀 `esp_reset_reason()` 與 marker：confirmed marker 重啟 180 秒 cooldown；active marker 只有搭配 `ESP_RST_POWERON` 才透過 `EpaperSafetyStore` clear/read-back 恢復，因本專案規定 MCU 與 HAT 共用板上 3.3 V；其他 reset reason 記錄 interrupted 並禁止自動 draw。一次性實板 recovery build 可在操作者已確認共同斷電後用 compile flag 提供同等證據，但 release 設定必須固定關閉。
 - Runtime status 只組合既有 service cached snapshot。`blocked_resources` 在 validation 是 `epaper,userdata`，transfer 是 `epaper,userdata,spi`，physical refresh 與 cooldown 只保留 `epaper`；不得由 `busy` 推導 Wi-Fi/HTTP 不可用或建立全域 mutex。
+- 每秒 serial heartbeat 只在 USB CDC client 已連線時輸出，避免無 reader 時 TX buffer 塞滿並阻塞 Arduino loop；runtime timer、cooldown 與 Wi-Fi state machine 不得依賴 serial drain。
 - 全專案只有 shutdown coordinator 最終核准點可呼叫 `ESP.restart()`。到期 software restart 先發布 `restarting`、拒絕新 operation、bounded quiesce worker；本次 boot 曾 wake panel 時，protocol shutdown 失敗必須取消 restart並保存 `epaper_shutdown_failed`。
 
 ## Config persistence
 
 - `ConfigService` 是唯一 active config owner；其他模組只保存 service pointer 並取得 value snapshot。
 - Production 由 `main.cpp` 將 `ArduinoPreferencesBackend` 注入 `PreferencesConfigStore`，再將 store 注入 `ConfigService`；兩個 interface 都是持久化故障注入與 host test 的窄邊界，不承載 business rule。雙 slot、schema/read-back 與 active marker commit 演算法仍由 `PreferencesConfigStore` 唯一實作。
-- 一般 endpoint 只能使用 `updateWifi()`、`updateHostname()` 或 `updateAdminPassword()`：每個方法在同一個 service mutex 內從最新 active config 合併指定欄位群組、驗證、持久化並發布。完整 `commit()` 只供 boot/self-test 等明確的完整替換流程。
+- 一般 endpoint 只能使用 `updateWifi()`、`updateSystem()`、`updateHostname()` 或 `updateAdminPassword()`：每個方法在同一個 service mutex 內從最新 active config 合併指定欄位群組、驗證、持久化並發布。`updateSystem()` 同時回報 hostname／TX power 的實際變動並略過 no-op NVS write；完整 `commit()` 只供 boot/self-test 等明確的完整替換流程。
 - NVS 不保存整個 C++ struct/blob，也沒有 `kConfigBlobKey`。
 - Current schema 使用 `devcfg_a`、`devcfg_b` 兩個 per-key slot，以及 `devcfg_meta/active` marker。
 - Save 寫入 inactive slot，逐欄完成後最後寫 schema marker，再 read-back 驗證，最後切換 active marker；失敗時 active config 不更新。
 - Boot 先讀 active slot，再嘗試另一個有效 slot。空 NVS 才建立 factory defaults。
-- 本專案不 migration 舊 blob、舊 schema 或舊 key layout；不支援的資料不在 boot 自動覆寫，runtime 以 recovery defaults 保持 AP 可達。
+- 本專案不 migration 舊 blob、舊 schema 或一般舊 key layout；`wifi_tx_dbm` 是唯一明列的同 schema compatible-missing key，缺少時保留其他欄位並在 RAM 使用 15，boot 不補寫。該 U8 key 存在但型別錯誤或值不在 2–20 時視為 slot corruption；不支援的資料不在 boot 自動覆寫，runtime 以 recovery defaults 保持 AP 可達。
 - `ConfigService` 保存 boot load outcome；boot log、heartbeat 與 device API 公開 non-sensitive `config_state`／recovery reason，不能把 recovery defaults 誤報為正常 persisted load。
 - Reset endpoint 先確認 runtime scheduler ready，再由 `StorageLifecycle` 持久化 reset scope，最後排程 guaranteed restart；設定清除由下一次 early boot erase 整個 `user_nvs` 完成，不逐一維護 namespace 清單。
 - 一般 `PUT /api/wifi` 在 commit 後排程 Wi-Fi apply；若 `apPasswordEnabled` 相對 active config 改變，則改排程 system restart。AP password 已啟用時的 admin password update 同樣排程 system restart；未啟用時只撤銷 session。AP→STA／AP + STA candidate flow 不提前 reboot，仍由 `WifiManager` final apply 處理 AP credential。
@@ -177,6 +178,8 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 
 ## Wi-Fi runtime
 
+- `WifiManager` 每次成功啟用或轉換 STA、AP、AP + STA 後，必須立即以 `WifiDriver::setTxPower()` 套用最新 `DeviceConfig::wifiTxDbm`；初始 apply、fallback、candidate、finalize 與 rollback 路徑使用同一 helper。設定失敗必須使同步 mode apply 失敗。Off mode 不呼叫需要 active radio 的 TX-power API。
+- ESP32-C6 adapter 對 2–19 dBm 以四分之一 dBm 單位送入 `esp_wifi_set_max_tx_power()`；configured 20 使用 SDK 允許的最高參數 84，表示解除專案額外限制，由 platform/country/PHY 映射最終上限。API 只宣告 configured 值，不把 setter success 當成 RF 測量。
 - `WifiManager::apply()` 只設定 mode/IP、啟動 AP/STA 並發布 `connecting`，不等待 STA connected。
 - `WifiManager` 透過注入的 `WifiDriver` 與 monotonic clock 執行狀態機；Arduino adapter 負責 framework API mapping，`WifiRadio` 仍負責跨 task driver serialization。持久化與 candidate STA 都必須在 association 且取得非 `0.0.0.0` IPv4 後才發布 connected。
 - `WifiManager` 的 STA connect 或 AP→STA/AP+STA full-replacement request 只在 API task 複製 validated candidate、原 persisted snapshot 與排入狀態；Wi-Fi driver 操作、timeout、成功／失敗、final apply 與 persisted runtime restore 都由 loop 的 `poll()` 執行。
@@ -185,6 +188,7 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 - `WifiManager` 啟動 SoftAP 時，DHCP 必須把 AP IP 發布為 DNS server，並在 framework 支援時發布 DHCP captive portal URI；URI 發布失敗不得關閉仍可由 AP IP 直接管理的 AP。
 - Candidate `poll()` 使用單一 association 與 15 秒 deadline；三個 5 秒觀察區間不重啟 driver connect。它同時處理目前／最終 AP subnet overlap、commit 後的 5 秒 STA grace、AP+STA 最後 AP reconfigure、NVS rollback 與舊 AP runtime restore。Application timeout 必須先停止底層 STA connect，再發布 `failed`，避免 ESP-IDF 持續以 connecting state 拒絕 scan。
 - `RuntimeActionScheduler` 在 candidate verified 後以 `ConfigService::updateWifi()` 把 candidate 的 Wi-Fi 欄位合併到最新 active config；final AP apply 失敗時也只以同一入口回復 rollback snapshot 的 Wi-Fi 欄位。Candidate transaction active 時，一般 coalesced Wi-Fi apply 必須延後，不能用完整 `apply()` 中斷驗證。
+- System endpoint 只改 TX power 時排入獨立 coalesced action；consumer 取得最新 config snapshot、持有 `WifiRadio` mutex 呼叫 `WifiManager::applyTxPower()`，不得 disconnect、切 mode 或 restart mDNS/captive DNS。STA transaction 期間延後且不消耗重試；driver failure 每隔一秒重試，總嘗試上限三次。hostname 與功率同時變動只排一次完整 Wi-Fi apply。
 - 狀態改變由 `main.cpp` 的 loop 統一 restart mDNS/captive DNS；mDNS 只在 STA connected，captive DNS 只在 AP active。
 - HTTP captive fallback 必須以 TCP connection 的 local IP 判斷 request 是否由 AP 介面抵達，不得只因 runtime 有 AP IP 就攔截 STA LAN request。
 - API 必須區分 persisted `configured_mode` 與目前 runtime `mode`。

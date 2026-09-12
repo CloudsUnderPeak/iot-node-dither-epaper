@@ -77,6 +77,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 ### Mode
 
 - 支援 AP、STA、AP + STA，以及供 API/runtime 使用的 Off。
+- Wi-Fi 最大 TX power 是裝置層級持久化設定 `wifi_tx_dbm`，factory default 為 15 dBm，可設 2–20 的整數。20 代表解除專案額外限制並交由平台目前允許的最大功率政策控制；它不繞過晶片、PHY 或地區限制，也不保證每個封包的實際發射功率。
 - 使用者設定 STA 並成功連線後，AP 自動關閉。
 - 使用者設定 AP + STA 並成功連線後，AP 保留。
 - AP-only 不主動切換 STA，也不要求連外網。
@@ -137,12 +138,14 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 
 - hostname 是 system resource，不屬於 Wi-Fi resource。
 - hostname 公開讀取由 device API 提供，修改使用受保護的 system API。
+- Wi-Fi TX power configured 值由 device API 公開讀取，修改使用相同的受保護 system API；省略欄位保持原值，`null` 不代表解除上限且必須拒絕。
 - hostname 更新 response 完成後，立即重新啟動相關網路服務與 mDNS。
+- 只修改 Wi-Fi TX power 時不重新連線、不切換 mode、不重啟網路服務或 MCU；radio 為 Off 或 STA transaction 佔用中時保留設定並延後套用。即時套用失敗最多重試三次，configured 值仍保留，下一次 active mode 或後續更新再套用。
 - factory reset 需要有效管理 session。
 - reset 清除使用者設定並完成 response 後立即重新啟動；重啟後回到預設 AP setup，不得因缺少 STA credential 而失聯。
 - 完整 factory reset 清除整個 `user_nvs` 並格式化 `userdata`；settings reset 只清除整個 `user_nvs`，data reset 只格式化 `userdata`。三種 reset 都在 response 完成後重啟，且只由使用者明確選擇的 scope 執行破壞性操作。
 - 已排程的 reset/restart 優先於 Wi-Fi apply、candidate commit 與 rollback，不能因同時存在的網路 action 延後第一次可執行的重啟時機。
-- 不 migration 舊 config blob、舊 schema 或舊 key layout；遇到不支援或損壞的 current slot 時，boot 使用 recovery defaults 保持 AP 可達，且不自動覆寫該資料。Boot log、heartbeat 與 device API 必須以不含敏感資料的狀態區分 persisted config、首次建立 factory defaults 與 recovery defaults。無產品用途的 boot counter 不持久化，避免每次開機寫 flash。
+- 不 migration 舊 config blob、舊 schema 或一般舊 key layout；同 schema slot 只允許缺少後加入的 `wifi_tx_dbm`，此時在 RAM 使用 15 且不因 boot 補寫 flash。新 key 已存在但型別或範圍錯誤仍視為損壞。遇到不支援或損壞的 current slot 時，boot 使用 recovery defaults 保持 AP 可達，且不自動覆寫該資料。Boot log、heartbeat 與 device API 必須以不含敏感資料的狀態區分 persisted config、首次建立 factory defaults 與 recovery defaults。無產品用途的 boot counter 不持久化，避免每次開機寫 flash。
 
 ## E-paper 行為與安全邊界
 
@@ -155,8 +158,8 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - 每次實體 draw 在 panel wake 前必須把 CPU 切到並 read-back 確認 80 MHz，直到 Power OFF／Deep Sleep cleanup 完成後才恢復 160 MHz；不得以 160 MHz fallback，也不得關閉 brownout detector。
 - 每次 draw 後只有 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5` 與 persistent marker read-back 全部成功，才開始完整 180 秒 cooldown。倒數使用 monotonic wrap-safe 時差，秒數向上取整，任何圖片或 action 都沒有例外。
 - Cooldown 到期後仍須成功清除並 read-back protection marker才回 `idle`；marker 操作失敗時繼續禁止 draw。
-- RST low、CS high、DC low 只代表 `logical_quiesce`，不能宣稱面板已 Power OFF／Deep Sleep。若 panel 已 wake 但 protocol shutdown 失敗，狀態固定為 `unavailable`／`panel_state: unknown`，要求 MCU 與 HAT 一起完整斷電，不得靠等待或 software restart 解鎖。
-- Boot 不自動重畫。發現 `shutdown_confirmed` marker 時從本次 boot 重新保守等待 180 秒；發現 `active` marker 且前次為 brownout、watchdog、panic 或其他非協調 reset 時，記錄 interrupted 結果並 fail closed。
+- RST inactive-high、CS high、DC low 只代表 `logical_quiesce`，不能宣稱面板已 Power OFF／Deep Sleep。Waveshare HAT 的 RST low 會控制板上 power switch，因此只有 initialize 的短 reset pulse 可以拉低，閒置與 prewake 不得長時間保持 low。若 panel 已 wake 但 protocol shutdown 失敗，狀態固定為 `unavailable`／`panel_state: unknown`，要求 MCU 與 HAT 一起完整斷電，不得靠等待或 software restart 解鎖。
+- Boot 不自動重畫。發現 `shutdown_confirmed` marker 時從本次 boot 重新保守等待 180 秒；發現 `active` marker 時，只有 reset reason 明確為 power-on，且 MCU 與 HAT 依規定共用同一個 3.3 V 電源，才將它視為完整共同斷電並以 read-back 驗證清除。Brownout、watchdog、panic、software reset、燒錄後 reset 或其他非協調 reset 一律記錄 interrupted 並 fail closed。
 - 所有可控制的 software restart 必須先拒絕新 draw、quiesce worker，並在需要時完成 Power OFF／Deep Sleep；shutdown 失敗時取消 restart。不可攔截 reset 的 residual risk 由 marker 在下次 boot 診斷，不能宣稱已由軟體消除。
 - Draw 在低優先序 dedicated worker 執行，BUSY wait 必須 yield，frame 每 4 KiB yield；Wi-Fi、HTTP、console、heartbeat 與 runtime scheduler 在刷新期間仍須可排程。CPU 降頻造成的 latency 與供電穩定性需以實板驗證。
 - 全部 e-paper 專用 endpoint 與 `GET /api/runtime/status` 是明確 public exception；同網路 client 可上傳、下載及觸發 draw 是已接受的可信任網路風險，180 秒 cooldown 不是 authentication 或 abuse protection。Generic user-file API 權限不變。

@@ -24,7 +24,9 @@ struct FireBeetle2Esp32C6Profile {
   static constexpr uint8_t kEpaperSpiMode = 0;
   static constexpr bool kSafeCsHigh = true;
   static constexpr bool kSafeDcHigh = false;
-  static constexpr bool kSafeResetHigh = false;
+  // The Waveshare HAT power-gates its driver when RST stays low. Keep RST
+  // inactive-high outside the reviewed short reset pulse.
+  static constexpr bool kSafeResetHigh = true;
 
   static constexpr PinDisposition pinDisposition(int pin) {
     if (pin < 0 || pin > 30) return PinDisposition::NotExposed;

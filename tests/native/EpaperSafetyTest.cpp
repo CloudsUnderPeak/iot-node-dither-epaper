@@ -83,7 +83,7 @@ class FakeTransport final : public EpdTransport {
   bool writeData(const uint8_t *, size_t) override { return true; }
   void logicalQuiesce() override {
     ++quiesceCalls;
-    resetHigh = false;
+    resetHigh = true;
   }
   void delayMs(uint32_t durationMs) override { now += durationMs; }
   void yieldCpu() override {}
@@ -148,6 +148,28 @@ void testSafetyStore() {
          "shutdown marker must write and read back");
   expect(store.clear() && store.stage() == EpaperProtectionStage::None,
          "marker clear must verify missing state");
+
+  expect(!store.recoverActiveAfterConfirmedPowerCycle(),
+         "power-cycle recovery must reject a missing active marker");
+  expect(store.markActive() && store.recoverActiveAfterConfirmedPowerCycle() &&
+             store.stage() == EpaperProtectionStage::None,
+         "confirmed power-cycle recovery must clear and verify an active marker");
+
+  expect(store.markShutdownConfirmed() &&
+             !store.recoverActiveAfterConfirmedPowerCycle() &&
+             store.stage() == EpaperProtectionStage::ShutdownConfirmed,
+         "power-cycle recovery must not bypass a confirmed shutdown cooldown");
+  expect(store.clear(), "test should clear the confirmed marker");
+
+  FakeSafetyStorage recoveryFailureStorage;
+  EpaperSafetyStore recoveryFailureStore;
+  expect(recoveryFailureStore.begin(&recoveryFailureStorage) &&
+             recoveryFailureStore.markActive(),
+         "recovery failure store should begin active");
+  recoveryFailureStorage.clearOk = false;
+  expect(!recoveryFailureStore.recoverActiveAfterConfirmedPowerCycle() &&
+             recoveryFailureStore.stage() == EpaperProtectionStage::Active,
+         "failed power-cycle recovery must preserve the active marker");
 
   FakeSafetyStorage corrupted;
   corrupted.present = true;

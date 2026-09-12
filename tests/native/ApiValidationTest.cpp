@@ -94,6 +94,13 @@ void testEnumsAndScalarLimits() {
   expect(!validateAdminPasswordValue(longPassword).ok(), "64-character password should fail");
   expect(!validateAdminPasswordValue(nonPrintablePassword).ok(),
          "non-printable admin password should fail");
+  expect(defaultDeviceConfig().wifiTxDbm == 15,
+         "factory Wi-Fi TX power should default to 15 dBm");
+  expect(validateWifiTxDbmValue(2).ok() && validateWifiTxDbmValue(20).ok(),
+         "Wi-Fi TX power bounds should validate");
+  expect(!validateWifiTxDbmValue(1).ok() && !validateWifiTxDbmValue(21).ok() &&
+             !validateWifiTxDbmValue(0xff).ok(),
+         "Wi-Fi TX power outside 2-20 must fail");
 }
 
 void testConfigCrossFieldValidation() {

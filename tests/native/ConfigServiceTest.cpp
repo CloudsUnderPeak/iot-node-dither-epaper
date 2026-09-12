@@ -49,6 +49,11 @@ void testWifiCommitAndRollbackPreserveNewerSettings() {
          "hostname update should be persisted");
   expect(service.updateAdminPassword("Latest123").ok(),
          "admin password update should be persisted");
+  SystemConfigUpdate powerUpdate;
+  powerUpdate.wifiTxDbmProvided = true;
+  powerUpdate.wifiTxDbm = 17;
+  expect(service.updateSystem(powerUpdate).ok(),
+         "TX power update should be persisted during a candidate transaction");
   expect(service.updateWifi(candidateWifi).ok(),
          "candidate Wi-Fi fields should be persisted");
 
@@ -59,6 +64,8 @@ void testWifiCommitAndRollbackPreserveNewerSettings() {
          "candidate commit must preserve a newer hostname");
   expect(strcmp(active.adminPassword, "Latest123") == 0,
          "candidate commit must preserve a newer admin password");
+  expect(active.wifiTxDbm == 17,
+         "candidate commit must preserve newer Wi-Fi TX power");
 
   expect(service.updateHostname("after-candidate").ok(),
          "hostname should remain independently mutable after candidate commit");
@@ -74,6 +81,8 @@ void testWifiCommitAndRollbackPreserveNewerSettings() {
          "rollback must preserve the newest hostname");
   expect(strcmp(active.adminPassword, "After123") == 0,
          "rollback must preserve the newest admin password");
+  expect(active.wifiTxDbm == 17,
+         "rollback must preserve the newest Wi-Fi TX power");
 }
 
 void testIndependentUpdatesAreSerialized() {
@@ -139,6 +148,35 @@ void testTypedUpdatesValidateBeforeTruncation() {
              strcmp(service.snapshot().adminPassword, before.adminPassword) == 0,
          "invalid typed updates must not mutate active config");
 }
+
+void testSystemPatchIsAtomicAndSkipsNoOpWrites() {
+  MemoryConfigStore store;
+  ConfigService service(store);
+  expect(service.begin().ok(), "config service should initialize for system patch tests");
+
+  SystemConfigUpdate update;
+  update.hostnameProvided = true;
+  update.hostname = "power-host";
+  update.wifiTxDbmProvided = true;
+  update.wifiTxDbm = 17;
+  DeviceConfig committed;
+  SystemConfigChanges changes;
+  expect(service.updateSystem(update, &committed, &changes).ok() &&
+             changes.hostnameChanged && changes.wifiTxDbmChanged &&
+             strcmp(committed.hostname, "power-host") == 0 &&
+             committed.wifiTxDbm == 17 && store.saveCount == 1,
+         "system patch should atomically persist hostname and TX power");
+
+  changes = {};
+  expect(service.updateSystem(update, &committed, &changes).ok() &&
+             !changes.any() && store.saveCount == 1,
+         "identical system patch should not write flash");
+
+  update.wifiTxDbm = 21;
+  expect(service.updateSystem(update).code == ResultCode::InvalidInput &&
+             store.saveCount == 1 && service.snapshot().wifiTxDbm == 17,
+         "invalid TX power should reject the whole patch without persistence");
+}
 }  // namespace
 
 int main() {
@@ -146,6 +184,7 @@ int main() {
   testIndependentUpdatesAreSerialized();
   testFailedSaveDoesNotPublishCandidate();
   testTypedUpdatesValidateBeforeTruncation();
+  testSystemPatchIsAtomicAndSkipsNoOpWrites();
 
   if (failures != 0) {
     std::cerr << failures << " config service test(s) failed\n";
