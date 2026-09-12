@@ -33,17 +33,31 @@ bool AuthService::credentialsMatch(const char *username, const char *password) c
 }
 
 Result AuthService::login(const char *username, const char *password, String &token) {
+  // Fixed order: credential/session mutex -> ConfigService mutex.
+  if (!lock()) return outOfSpace("auth service unavailable");
   if (!credentialsMatch(username, password)) {
+    unlock();
     return invalidInput("invalid credentials");
-  }
-
-  if (!lock()) {
-    return outOfSpace("auth service unavailable");
   }
   activeToken_ = generateToken();
   token = activeToken_;
   unlock();
   return okResult();
+}
+
+Result AuthService::changePassword(const char *password, bool runtimeAvailable,
+                                   bool &restartRequired) {
+  restartRequired = false;
+  if (!lock()) return outOfSpace("auth service unavailable");
+  DeviceConfig committed;
+  const Result result = configService_->updateAdminPassword(
+      password, &committed, runtimeAvailable);
+  if (result.ok()) {
+    activeToken_ = "";
+    restartRequired = committed.apPasswordEnabled;
+  }
+  unlock();
+  return result;
 }
 
 bool AuthService::tokenValid(const String &token) const {

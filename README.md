@@ -130,9 +130,21 @@ make verify [IMAGE=build/.../firmware.img]
 make flash PORT=/dev/ttyACM0 [IMAGE=...] # Flash an existing verified snapshot
 make clean                              # Remove latest and imported user web; keep snapshots
 make clean all                          # Remove latest and timestamp snapshots
-make test                               # Build and run all automated tests
+make test                               # Native, tools, browser tests; no firmware build
+make test-native                        # C++ service and endpoint regressions
+make test-tools                         # Python build/release tests
+make test-all                           # Build, verify, then run all tests
 make test-web                           # Run frontend browser contracts
 ```
+
+Native tests require a C++17 compiler and the pinned ArduinoJson headers. Run
+`pio pkg install -e firebeetle2_esp32c6` to prepare dependencies without compiling
+firmware, or set `ARDUINOJSON_INCLUDE` to that pinned library’s `src` directory.
+Browser tests require Chrome/Chromium/Edge; set `DEVICE_CONSOLE_BROWSER` when it
+is not discovered automatically. Missing dependencies fail the test command.
+PR verification runs host/browser checks and separate builtin/user/none builds;
+user frontend checks use its own `test` and `test-production` targets.
+
 
 `user-web/` is generated and must not be edited manually. Its nested build is
 already minified and gzipped, so `WEB_PROCESS=auto` preserves it (`none`), while

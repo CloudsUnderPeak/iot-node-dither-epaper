@@ -25,6 +25,7 @@ void RuntimeActionScheduler::poll() {
   // This keeps a pending factory/settings/data reset from being delayed by a
   // Wi-Fi transition or another coalesced apply.
   applyPendingSystemReset();
+  if (snapshot().restartPending) return;
   rollbackFailedWifiTransition();
   commitVerifiedWifiConnection();
   applyPendingWifi();
@@ -92,7 +93,7 @@ void RuntimeActionScheduler::applyPendingWifi() {
 
   // A normal Wi-Fi apply starts by turning the radio off. Defer it while the
   // management-AP-preserving connection transaction owns the radio.
-  if (wifiManager_->testBlocksScan()) {
+  if (wifiManager_->testBlocksScan() || wifiManager_->scanBlocksRadio()) {
     scheduleWifiApply(100);
     return;
   }
@@ -100,6 +101,10 @@ void RuntimeActionScheduler::applyPendingWifi() {
   const DeviceConfig config = configService_->snapshot();
   WifiStatus status{};
   const Result applyResult = wifiManager_->apply(config, status);
+  if (applyResult.code == ResultCode::Unsupported) {
+    scheduleWifiApply(100);
+    return;
+  }
   const Result mdnsResult = mdnsService_->restart(config, status);
   const Result captiveDnsResult = captivePortalDnsService_->restart(status);
   Serial.printf("api wifi: apply %s: %s (%u)\n",
@@ -128,7 +133,7 @@ void RuntimeActionScheduler::applyPendingWifiTxPower() {
   portEXIT_CRITICAL(&pendingMux_);
   if (!apply) return;
 
-  if (wifiManager_->testBlocksScan()) {
+  if (wifiManager_->testBlocksScan() || wifiManager_->scanBlocksRadio()) {
     portENTER_CRITICAL(&pendingMux_);
     wifiTxPowerApplyPending_ = true;
     wifiTxPowerApplyDueMs_ = millis() + 100U;
@@ -191,21 +196,25 @@ void RuntimeActionScheduler::rollbackFailedWifiTransition() {
 }
 
 void RuntimeActionScheduler::applyPendingSystemReset() {
-  bool reset = false;
   const uint32_t now = millis();
+  bool start = false;
+  bool pending = false;
   portENTER_CRITICAL(&pendingMux_);
   if (systemResetPending_ && static_cast<int32_t>(now - systemResetDueMs_) >= 0) {
-    systemResetPending_ = false;
-    reset = true;
+    start = !systemResetDraining_;
+    systemResetDraining_ = true;
+    pending = true;
   }
   portEXIT_CRITICAL(&pendingMux_);
-  if (!reset) {
-    return;
-  }
+  if (!pending) return;
 
-  Serial.println("api system: scheduled restart coordination");
-  if (!restartCoordinator_->restartNow()) {
+  const bool rejected = start &&
+      restartCoordinator_->requestRestart(now) == RestartRequest::Rejected;
+  restartCoordinator_->pollRestart(now, !wifiManager_->scanBlocksRadio());
+  if (rejected || restartCoordinator_->restartProgress() == RestartProgress::Failed) {
     portENTER_CRITICAL(&pendingMux_);
+    systemResetPending_ = false;
+    systemResetDraining_ = false;
     systemResetFailed_ = true;
     portEXIT_CRITICAL(&pendingMux_);
     Serial.println("api system: restart cancelled by safety coordinator");

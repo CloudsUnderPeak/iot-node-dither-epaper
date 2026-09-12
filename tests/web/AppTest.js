@@ -329,6 +329,22 @@
     }`
   );
 
+  const tokenBeforeLeave = state.token;
+  const networksBeforeLeave = state.scanNetworks;
+  const originalFetch = window.fetch;
+  let resolveAbandonedScan;
+  window.fetch = (path, options) => path === '/api/wifi/scan'
+    ? new Promise(resolve => { resolveAbandonedScan = resolve; }) : originalFetch(path, options);
+  const abandonedScan = scanWifi();
+  DeviceConsole.app.router.navigate('hardware');
+  await waitFor(() => state.activePage === 'hardware', 'navigation during scan did not finish');
+  await abandonedScan;
+  resolveAbandonedScan(new Response(JSON.stringify({ success: true, data: { networks: [{ ssid: 'late' }] } })));
+  await delay(25);
+  assert(state.token === tokenBeforeLeave, 'route cancellation cleared token');
+  assert(state.scanNetworks === networksBeforeLeave, 'late abandoned scan changed shared state');
+  window.fetch = originalFetch;
+
   result.textContent = 'PASS';
 })().catch((error) => {
   document.getElementById('result').textContent = `FAIL: ${error.message}`;

@@ -1,6 +1,7 @@
 #include "UserDataStorage.h"
 
 #include <cstring>
+#include <cerrno>
 #include <limits>
 
 namespace {
@@ -92,6 +93,12 @@ UploadCapacity UserDataStorage::uploadCapacity() const {
   const UploadCapacity snapshot = stableCapacity_;
   portEXIT_CRITICAL(&capacityMux_);
   return snapshot;
+}
+
+bool UserDataStorage::reserveRestart() {
+  // A service that never allocated its gate cannot have an active session.
+  if (operationGate_ == nullptr) return !mounted_;
+  return tryBeginOperation(ActiveOperation::Synchronous);
 }
 
 UserDataUploadBegin UserDataStorage::beginUpload(const char *name,
@@ -345,10 +352,17 @@ UserDataDownloadBegin UserDataStorage::beginDownload(const char *name,
     endOperation();
     return begin;
   }
+  // Pinned Arduino VFS read-open reports missing paths via errno. Only a
+  // confirmed ENOENT is absence; allocation/fd/I/O failures retain metadata.
+  errno = 0;
   activeFile_ = filesystem_.open(targetPath_, FILE_READ);
+  const int openError = errno;
   if (!activeFile_ || activeFile_.isDirectory()) {
+    const bool absent = activeFile_ ? activeFile_.isDirectory() : openError == ENOENT;
     closeActiveFile();
-    begin.result = fileError(UserDataFileStatus::NotFound, "file not found");
+    begin.result = absent
+        ? fileError(UserDataFileStatus::NotFound, "file not found")
+        : fileError(UserDataFileStatus::StorageError, "failed to open user file");
     endOperation();
     return begin;
   }

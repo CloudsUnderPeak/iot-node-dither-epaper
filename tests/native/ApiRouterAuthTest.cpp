@@ -31,6 +31,7 @@ struct RouterFixture {
   explicit RouterFixture(
       DeviceResetReason resetReason = DeviceResetReason::Software)
       : diagnostics(resetReason) {
+    auth.config = &config;
     runtime.available = true;
     epaper.current.lastResetReason = deviceResetReasonToString(resetReason);
     const ApiRouterDeps deps{
@@ -101,7 +102,7 @@ void testExactRouteAuthorizationMatrix() {
       {Api::Method::Put, "/api/auth/password", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
       {Api::Method::Get, "/api/wifi", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Put, "/api/wifi", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
-      {Api::Method::Get, "/api/wifi/scan", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
+      {Api::Method::Get, "/api/wifi/scan", ApiRouter::HttpBinding::Deferred, ApiRouter::RouteMatch::Exact, true, 200},
       {Api::Method::Post, "/api/wifi/connect", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
       {Api::Method::Get, "/api/wifi/connect", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
       {Api::Method::Post, "/api/wifi/reconnect", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
@@ -422,9 +423,29 @@ void testUnknownRoutesRemainNotFound() {
            "unknown routes must remain not found regardless of credentials");
   }
 }
+void testDeferredScanPrincipal() {
+  for (auto transport : {Api::Transport::Http, Api::Transport::Serial}) {
+    RouterFixture f;
+    f.scanner.value.operationId = 77;
+    auto request = requestFor(Api::Method::Get, "/api/wifi/scan", "valid-token");
+    request.transport = transport;
+    auto response = f.router.dispatch(request);
+    expect(response.pending.id == 77 && response.pending.principal == "valid-token" &&
+               response.pending.path == "/api/wifi/scan", "scan continuation binds route and principal");
+    const auto pending = response.pending;
+    f.auth.validToken = "new-token";
+    expect(f.router.pollPending(pending, response) && response.statusCode == 401,
+           "rotated principal cannot receive old scan result");
+    f.auth.validToken = "valid-token";
+    f.scanner.value.operationId = 0;
+    expect(f.router.pollPending(pending, response) && response.statusCode == 200,
+           "HTTP and serial scan completion retains 200 envelope");
+  }
+}
 }  // namespace
 
 int main() {
+  testDeferredScanPrincipal();
   testExactRouteAuthorizationMatrix();
   testWebIdentityMatchesAcrossTransports();
   testDynamicFileAuthorizationAndTransport();

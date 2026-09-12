@@ -208,3 +208,11 @@ builtin-web/
 - 檢查正式資源沒有 remote dependency。
 - 最終整合以真實裝置 HTTP 驗證公開狀態、session、scan、save、password、hostname 與 reset。
 - 所有日期結果與未通過項目記在 `tmp/verification/`，不得把執行狀態混入規格。
+
+## Request deadlines and cancellation
+
+- API client options 支援 `timeoutMs` 與 caller `signal`；只傳明確的 method/header/body/signal 給 fetch。預設 JSON 10 秒、scan 20 秒、connection status 3 秒，集中於 request policy。Deadline race 同時涵蓋 fetch 與 response body；即使 transport 忽略 abort 仍終止等待並吸收晚到 reject，finally 清除 timer/listener。
+- Client-local code 為 `request_cancelled`、`request_timeout`、`transport_error`，不更動 server error contract。Timeout 不自動重送任何 mutation；錯誤結果不清 token，只有確定的 401 撤銷對應 session。Logout transport failure 保留 token並提示重試。
+- Router 每次 route generation 旋轉頁面自有 AbortController，取消頁面 mutation／scan／session verification；完成後仍檢查 signal／既有 generation，避免 stale DOM/state 更新。共享 ResourceStore 請求不附頁面 signal，仍由 resource version 控制提交。
+- Wi-Fi safe transition 保留 25 秒整體 deadline；每次 status timeout 為 `min(3 秒, remaining)`，poll sleep 也不超過 remaining 且可取消。到期不發新 request，草稿保留；cancel 不顯示裝置故障。
+- CSS minifier 只壓縮辨識安全的頂層空白，保留宣告 block、函式、字串、escape、URL、custom property 和 comment 內容。Production gzip 與來源 CSS 的 CSSOM／指定 computed style 必須以共用語意 fixture 驗證；不能只以 gzip/hash 成功代表語意正確。

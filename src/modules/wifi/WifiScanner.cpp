@@ -1,94 +1,140 @@
 #include "WifiScanner.h"
-
-#include <WiFi.h>
-
 #include "core/SemaphoreGuard.h"
 
-namespace {
-const char *encryptionTypeToString(wifi_auth_mode_t authMode) {
-  switch (authMode) {
-    case WIFI_AUTH_OPEN: return "open";
-    case WIFI_AUTH_WEP: return "wep";
-    case WIFI_AUTH_WPA_PSK: return "wpa";
-    case WIFI_AUTH_WPA2_PSK: return "wpa2";
-    case WIFI_AUTH_WPA_WPA2_PSK: return "wpa_wpa2";
-    case WIFI_AUTH_WPA2_ENTERPRISE: return "wpa2_enterprise";
-    case WIFI_AUTH_WPA3_PSK: return "wpa3";
-    case WIFI_AUTH_WPA2_WPA3_PSK: return "wpa2_wpa3";
-    default: return "unknown";
-  }
-}
-}  // namespace
-
-Result WifiScanner::begin(WifiRadio *radio) {
-  if (radio == nullptr) return invalidInput("missing Wi-Fi radio");
+Result WifiScanner::begin(WifiRadio *radio, WifiScanDriver *driver, WifiManager *manager) {
+  if (!radio || !driver || !manager) return invalidInput("missing scan dependencies");
   radio_ = radio;
+  driver_ = driver;
+  manager_ = manager;
   mutex_ = xSemaphoreCreateMutex();
-  return mutex_ == nullptr ? outOfSpace("failed to create Wi-Fi scan mutex") : okResult();
+  return mutex_ ? okResult() : outOfSpace("failed to create scan mutex");
 }
 
-WifiScanResult WifiScanner::scan() {
+WifiScanResult WifiScanner::start(uint32_t nowMs) {
   WifiScanResult outcome;
-  SemaphoreGuard scanGuard(mutex_, portMAX_DELAY);
-  if (!scanGuard.locked()) {
-    outcome.result = networkError("wifi scan unavailable");
+  SemaphoreGuard lock(mutex_, 0);
+  if (!lock.locked()) { outcome.busy = true; return outcome; }
+  if (state_ == State::Unavailable) {
+    outcome.result = networkError("scan unavailable after unconfirmed stop");
     return outcome;
   }
-
-  const uint32_t now = millis();
-  if (hasRun_ && now - lastCompletedMs_ < kMinIntervalMs) {
-    const uint32_t remainingMs = kMinIntervalMs - (now - lastCompletedMs_);
-    outcome.result = unsupported("wifi scan rate limited");
-    outcome.retryAfterSeconds = (remainingMs + 999U) / 1000U;
+  if (restarting_ || state_ != State::Idle || resultReady_) {
+    outcome.busy = true;
     return outcome;
   }
-
-  WifiRadioGuard radioGuard(radio_, portMAX_DELAY);
-  if (!radioGuard.locked()) {
-    outcome.result = networkError("Wi-Fi radio unavailable");
+  // Same lock order as queueStaTest: radio -> manager state. Reservation and
+  // connect admission cannot both succeed in the check-to-start gap.
+  WifiRadioGuard radioLock(radio_, 0);
+  if (!radioLock.locked()) { outcome.busy = true; return outcome; }
+  if (manager_->testBlocksScan()) { outcome.connectBusy = true; return outcome; }
+  if (manager_->staConnectionBlocksScan()) { outcome.busy = true; return outcome; }
+  if (hasRun_ && nowMs - lastCompletedMs_ < kMinIntervalMs) {
+    outcome.retryAfterSeconds = (kMinIntervalMs - (nowMs - lastCompletedMs_) + 999U) / 1000U;
     return outcome;
   }
-
-  const int networkCount = WiFi.scanNetworks(false, true);
-  hasRun_ = true;
-  lastCompletedMs_ = millis();
-  if (networkCount < 0) {
-    outcome.result = networkError("wifi scan failed");
-    return outcome;
-  }
-
-  int selected[kWifiScanMaxResults] = {};
-  for (int index = 0; index < networkCount; ++index) {
-    const int32_t rssi = WiFi.RSSI(index);
-    if (rssi <= kWifiScanMinRssi) {
-      continue;
-    }
-    size_t position = 0;
-    while (position < outcome.count && WiFi.RSSI(selected[position]) >= rssi) {
-      ++position;
-    }
-    if (position >= kWifiScanMaxResults) {
-      continue;
-    }
-    const size_t newCount = outcome.count < kWifiScanMaxResults ? outcome.count + 1 : outcome.count;
-    for (size_t cursor = newCount - 1; cursor > position; --cursor) {
-      selected[cursor] = selected[cursor - 1];
-    }
-    selected[position] = index;
-    outcome.count = newCount;
-  }
-
-  for (size_t resultIndex = 0; resultIndex < outcome.count; ++resultIndex) {
-    const int sourceIndex = selected[resultIndex];
-    WifiScanNetwork &network = outcome.networks[resultIndex];
-    network.ssid = WiFi.SSID(sourceIndex);
-    network.rssi = WiFi.RSSI(sourceIndex);
-    network.channel = WiFi.channel(sourceIndex);
-    const wifi_auth_mode_t encryptionType = WiFi.encryptionType(sourceIndex);
-    network.encryptionType = static_cast<int>(encryptionType);
-    network.encryption = encryptionTypeToString(encryptionType);
-    network.hidden = network.ssid.length() == 0;
-  }
-  WiFi.scanDelete();
+  radio_->reserveScanLocked();
+  activeId_ = nextId_++;
+  if (activeId_ == 0) activeId_ = nextId_++;
+  result_ = {};
+  interested_ = true;
+  startedMs_ = nowMs;
+  state_ = State::Starting;
+  outcome.operationId = activeId_;
   return outcome;
+}
+
+void WifiScanner::terminalLocked(uint32_t nowMs, bool success) {
+  result_.result = success ? okResult() : networkError("wifi scan failed");
+  result_.operationId = activeId_;
+  resultReady_ = interested_;
+  hasRun_ = true;
+  lastCompletedMs_ = nowMs;
+}
+
+void WifiScanner::collectLocked(int count) {
+  for (int index = 0; index < count; ++index) {
+    const auto network = driver_->network(static_cast<size_t>(index));
+    if (network.rssi <= kWifiScanMinRssi) continue;
+    size_t position = 0;
+    while (position < result_.count && result_.networks[position].rssi >= network.rssi) ++position;
+    if (position >= kWifiScanMaxResults) continue;
+    const size_t newCount = result_.count < kWifiScanMaxResults ? result_.count + 1 : result_.count;
+    for (size_t cursor = newCount - 1; cursor > position; --cursor) {
+      result_.networks[cursor] = result_.networks[cursor - 1];
+    }
+    result_.networks[position] = network;
+    result_.count = newCount;
+  }
+}
+
+void WifiScanner::poll(uint32_t nowMs, bool restarting) {
+  SemaphoreGuard lock(mutex_, 0);
+  if (!lock.locked()) return;
+  restarting_ = restarting;
+  if (state_ == State::Idle || state_ == State::Unavailable) return;
+  if (!radio_->lockScan(0)) return;
+  if (state_ == State::Starting) {
+    if (!interested_ || restarting || nowMs - startedMs_ >= kDeadlineMs) {
+      terminalLocked(nowMs, false);
+      state_ = State::Idle;
+      radio_->releaseScanLocked();
+    } else {
+      const int started = driver_->start();
+      if (started == -2) {
+        terminalLocked(nowMs, false);
+        state_ = State::Idle;
+        radio_->releaseScanLocked();
+      } else {
+        state_ = State::Scanning;
+      }
+    }
+  } else if (state_ == State::Scanning) {
+    const int count = driver_->completion();
+    if (count >= 0 && driver_->stopConfirmed()) {
+      const bool timely = nowMs - startedMs_ < kDeadlineMs && !restarting;
+      if (interested_ && timely) collectLocked(count);
+      driver_->clearResults();
+      terminalLocked(nowMs, timely);
+      state_ = State::Idle;
+      radio_->releaseScanLocked();
+    } else if (count == -2 || !interested_ || restarting || nowMs - startedMs_ >= kDeadlineMs) {
+      // The client gets a terminal result now; ownership remains until a real
+      // stop/completion ACK. scanDelete alone is never treated as stopping.
+      terminalLocked(nowMs, false);
+      driver_->requestStop();
+      stopStartedMs_ = nowMs;
+      state_ = State::Stopping;
+    }
+  } else if (state_ == State::Stopping) {
+    if (driver_->stopConfirmed()) {
+      driver_->clearResults();
+      state_ = State::Idle;
+      radio_->releaseScanLocked();
+    } else if (nowMs - stopStartedMs_ >= kStopDeadlineMs) {
+      state_ = State::Unavailable; // fail closed, retain radio reservation
+    }
+  }
+  radio_->unlock();
+}
+
+bool WifiScanner::takeResult(uint32_t operationId, WifiScanResult &result) {
+  SemaphoreGuard lock(mutex_, 0);
+  if (!lock.locked()) return false;
+  if (operationId == 0 || operationId != activeId_) {
+    result.result = networkError("scan operation is no longer active");
+    return true;
+  }
+  if (!resultReady_) return false;
+  result = result_;
+  resultReady_ = false;
+  interested_ = false;
+  result_ = {};
+  return true;
+}
+
+void WifiScanner::cancelInterest(uint32_t operationId) {
+  SemaphoreGuard lock(mutex_, portMAX_DELAY);
+  if (!lock.locked() || operationId != activeId_) return;
+  interested_ = false;
+  resultReady_ = false;
 }

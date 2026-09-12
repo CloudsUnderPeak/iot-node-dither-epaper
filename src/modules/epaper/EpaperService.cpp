@@ -45,6 +45,15 @@ Result EpaperService::begin(
     CpuFrequencyDriver *frequencyDriver,
     EpaperShutdownCoordinator *shutdownCoordinator,
     const BootDiagnosticsSnapshot &bootDiagnostics) {
+  // Establish the restart boundary even when userdata could not mount.
+  storage_ = storage;
+  mutex_ = xSemaphoreCreateMutex();
+  shutdownCoordinator_ = shutdownCoordinator;
+  safetyStore_ = safetyStore;
+  driver_ = driver;
+  frequencyDriver_ = frequencyDriver;
+  cpuMhz_ = frequencyDriver == nullptr ? 0 : frequencyDriver->currentMhz();
+  if (mutex_ == nullptr) return storageError("failed to allocate e-paper mutex");
   if (storage == nullptr || !storage->mounted() || driver == nullptr ||
       transport == nullptr || !transport->ready() || safetyStore == nullptr ||
       !safetyStore->ready() || frequencyDriver == nullptr ||
@@ -59,7 +68,6 @@ Result EpaperService::begin(
   shutdownCoordinator_ = shutdownCoordinator;
   lastResetReason_ = deviceResetReasonToString(bootDiagnostics.resetReason);
   brownoutDetected_ = bootDiagnostics.resetReason == DeviceResetReason::Brownout;
-  mutex_ = xSemaphoreCreateMutex();
   queue_ = xQueueCreate(1, sizeof(EpaperDrawAction));
   if (mutex_ == nullptr || queue_ == nullptr) {
     return storageError("failed to allocate e-paper worker resources");
@@ -96,14 +104,105 @@ Result EpaperService::begin(
   return okResult();
 }
 
+RestartRequest EpaperService::requestRestart(uint32_t nowMs) {
+  SemaphoreLock lock(mutex_);
+  if (!lock.locked()) return RestartRequest::Rejected;
+  if (restartProgress_ == RestartProgress::Draining ||
+      restartProgress_ == RestartProgress::Ready) return RestartRequest::AlreadyPending;
+  if (admissionClosed_ || storage_ == nullptr || driver_ == nullptr || safetyStore_ == nullptr ||
+      shutdownCoordinator_ == nullptr ||
+      !shutdownCoordinator_->ready() || recoveryRequired_) return RestartRequest::Rejected;
+  admissionClosed_ = true;
+  restartAllowed_ = false;
+  restartStartedMs_ = nowMs;
+  restartProgress_ = RestartProgress::Draining;
+  return RestartRequest::Accepted;
+}
+
+RestartProgress EpaperService::restartProgress() const {
+  SemaphoreLock lock(mutex_);
+  return lock.locked() ? restartProgress_ : RestartProgress::Failed;
+}
+
+void EpaperService::pollRestart(uint32_t nowMs, bool allowRestart) {
+  {
+    SemaphoreLock lock(mutex_);
+    if (!lock.locked()) return;
+    restartAllowed_ = allowRestart;
+    if (restartProgress_ == RestartProgress::Draining &&
+        (nowMs - restartStartedMs_ >= kRestartDrainMs ||
+         (state_ == EpaperServiceState::Uploading &&
+          nowMs - restartStartedMs_ >= kUploadDrainMs))) {
+      restartProgress_ = RestartProgress::Failed;
+    }
+  }
+  // With no task created, boot remains the only owner. It may approve only
+  // already safe panel state, never perform a drain on somebody else's task.
+  if (!ownsRuntime()) processControl(nowMs);
+}
+
 void EpaperService::poll(uint32_t nowMs) {
   if (!ready_) return;
   SemaphoreLock lock(mutex_);
-  if (!lock.locked() || state_ != EpaperServiceState::Cooldown ||
-      !cooldown_.elapsed(nowMs)) {
-    return;
+  if (lock.locked() && !admissionClosed_ &&
+      state_ == EpaperServiceState::Cooldown && cooldown_.elapsed(nowMs) &&
+      !markerClearRunning_) markerClearPending_ = true;
+}
+
+void EpaperService::processControl(uint32_t nowMs) {
+  bool clear = false;
+  bool restart = false;
+  uint32_t generation = 0;
+  {
+    SemaphoreLock lock(mutex_);
+    if (!lock.locked()) return;
+    const bool busy = state_ == EpaperServiceState::Uploading ||
+                      state_ == EpaperServiceState::Queued ||
+                      state_ == EpaperServiceState::Drawing || markerClearRunning_;
+    if (busy) return;
+    if (restartProgress_ == RestartProgress::Draining) {
+      if (nowMs - restartStartedMs_ >= kRestartDrainMs || recoveryRequired_ ||
+          shutdownCoordinator_->unavailable() || driver_->panelMayBeActive() ||
+          safetyStore_->stage() == EpaperProtectionStage::Active) {
+        restartProgress_ = RestartProgress::Failed;
+        if (recoveryRequired_ || shutdownCoordinator_->unavailable() ||
+            driver_->panelMayBeActive() ||
+            safetyStore_->stage() == EpaperProtectionStage::Active) {
+          recoveryRequired_ = true;
+          state_ = EpaperServiceState::Unavailable;
+          panelState_ = EpaperPanelState::Unknown;
+        }
+      } else if (restartAllowed_ && storage_->reserveRestart()) {
+        // Irrevocably claim this ACK once. Even a returning fake restart
+        // driver must leave admission closed and execute no further work.
+        restartProgress_ = RestartProgress::Ready;
+        markerClearPending_ = false;
+        restart = true;
+      }
+    }
+    if (restartProgress_ == RestartProgress::Failed && !recoveryRequired_ &&
+        shutdownCoordinator_ != nullptr && !shutdownCoordinator_->unavailable() &&
+        !driver_->panelMayBeActive() &&
+        safetyStore_->stage() != EpaperProtectionStage::Active) {
+      admissionClosed_ = false;
+    }
+    if (!admissionClosed_ && markerClearPending_) {
+      markerClearPending_ = false;
+      markerClearRunning_ = true;
+      generation = operationGeneration_;
+      clear = true;
+    }
   }
+  if (restart && !shutdownCoordinator_->restartNow()) {
+    SemaphoreLock lock(mutex_);
+    restartProgress_ = RestartProgress::Failed;
+    recoveryRequired_ = true;
+  }
+  if (!clear) return;
   const bool cleared = safetyStore_->clear();
+  SemaphoreLock lock(mutex_);
+  markerClearRunning_ = false;
+  if (generation != operationGeneration_) return;
   if (cooldown_.releaseIfElapsed(nowMs, cleared)) {
     state_ = EpaperServiceState::Idle;
     phase_ = EpaperDrawPhase::None;
@@ -124,14 +223,14 @@ EpaperServiceSnapshot EpaperService::snapshot(uint32_t nowMs) const {
   snapshot.state = state_;
   snapshot.phase = phase_;
   snapshot.panelState = panelState_;
-  snapshot.canUpload = ready_ && state_ == EpaperServiceState::Idle;
+  snapshot.canUpload = ready_ && !admissionClosed_ && state_ == EpaperServiceState::Idle;
   snapshot.canDraw = snapshot.canUpload;
   const char *drawSource = state_ == EpaperServiceState::Queued
                                ? queuedSource_
                                : lastSource_;
   const bool storedDraw = strcmp(drawSource, "uploaded") == 0 ||
                           strcmp(drawSource, "refresh") == 0;
-  snapshot.canDownload = ready_ && stored_.present &&
+  snapshot.canDownload = ready_ && !admissionClosed_ && stored_.present &&
                          state_ != EpaperServiceState::Uploading &&
                          !((state_ == EpaperServiceState::Queued ||
                             state_ == EpaperServiceState::Drawing) &&
@@ -142,7 +241,7 @@ EpaperServiceSnapshot EpaperService::snapshot(uint32_t nowMs) const {
   snapshot.retryAfterSeconds = state_ == EpaperServiceState::Cooldown
                                    ? cooldown_.retryAfterSeconds(nowMs)
                                    : 0;
-  snapshot.cpuMhz = frequencyDriver_ == nullptr ? 0 : frequencyDriver_->currentMhz();
+  snapshot.cpuMhz = cpuMhz_;
   snapshot.stored = stored_;
   snapshot.lastSource = lastSource_;
   snapshot.lastResult = lastResult_;
@@ -162,9 +261,10 @@ EpaperServiceResult EpaperService::beginUpload(size_t contentLength) {
   {
     SemaphoreLock lock(mutex_);
     if (!lock.locked()) return {EpaperServiceStatusCode::Unavailable, "e-paper unavailable"};
-    if (state_ != EpaperServiceState::Idle) {
+    if (admissionClosed_ || state_ != EpaperServiceState::Idle) {
       return {EpaperServiceStatusCode::Busy, "e-paper is busy"};
     }
+    ++operationGeneration_;
     state_ = EpaperServiceState::Uploading;
     phase_ = EpaperDrawPhase::None;
     uploadValidator_.reset();
@@ -183,6 +283,9 @@ EpaperServiceResult EpaperService::writeUpload(
     size_t index,
     const uint8_t *data,
     size_t length) {
+  if (sessionId == 0 || sessionId != uploadSessionId_) {
+    return {EpaperServiceStatusCode::UploadIncomplete, "upload session is not active"};
+  }
   if (sessionId == 0 || sessionId != uploadSessionId_ ||
       index != uploadValidator_.bytesReceived() ||
       !uploadValidator_.consume(data, length)) {
@@ -203,6 +306,9 @@ EpaperServiceResult EpaperService::writeUpload(
 }
 
 EpaperServiceResult EpaperService::finishUpload(uint32_t sessionId) {
+  if (sessionId == 0 || sessionId != uploadSessionId_) {
+    return {EpaperServiceStatusCode::UploadIncomplete, "upload session is not active"};
+  }
   if (sessionId == 0 || sessionId != uploadSessionId_ ||
       !uploadValidator_.finish()) {
     storage_->abortUpload(sessionId);
@@ -224,9 +330,16 @@ EpaperServiceResult EpaperService::finishUpload(uint32_t sessionId) {
     stored_.sizeBytes = commit.sizeBytes;
     stored_.header = uploadValidator_.header();
     stored_.validationError = EpaperImageFormat::ValidationError::None;
-    state_ = EpaperServiceState::Idle;
+    state_ = EpaperServiceState::Queued;
+    queuedSource_ = "uploaded";
+    const EpaperDrawAction action = EpaperDrawAction::Stored;
+    if (xQueueSend(queue_, &action, 0) != pdTRUE) {
+      state_ = EpaperServiceState::Idle;
+      queuedSource_ = "none";
+      return {EpaperServiceStatusCode::Busy, "e-paper queue is full"};
+    }
   }
-  return queueDraw(EpaperDrawAction::Stored, "uploaded");
+  return {EpaperServiceStatusCode::Ok, "draw queued"};
 }
 
 void EpaperService::abortUpload(uint32_t sessionId) {
@@ -237,10 +350,6 @@ void EpaperService::abortUpload(uint32_t sessionId) {
 }
 
 EpaperServiceResult EpaperService::requestDraw(EpaperDrawAction action) {
-  if (action == EpaperDrawAction::Stored) {
-    const EpaperServiceResult metadata = validateStoredImage();
-    if (!metadata.ok()) return metadata;
-  }
   const char *source = action == EpaperDrawAction::Stored
                            ? "refresh"
                            : (action == EpaperDrawAction::White ? "white"
@@ -251,17 +360,27 @@ EpaperServiceResult EpaperService::requestDraw(EpaperDrawAction action) {
 EpaperServiceResult EpaperService::queueDraw(EpaperDrawAction action,
                                              const char *source) {
   if (!ready_) return {EpaperServiceStatusCode::Unavailable, "e-paper unavailable"};
+  {
+    SemaphoreLock lock(mutex_);
+    if (!lock.locked()) return {EpaperServiceStatusCode::Unavailable, "e-paper unavailable"};
+    if (admissionClosed_ || state_ != EpaperServiceState::Idle) {
+      return {EpaperServiceStatusCode::Busy, "e-paper is busy"};
+    }
+    ++operationGeneration_;
+    state_ = EpaperServiceState::Queued;
+    phase_ = EpaperDrawPhase::None;
+    queuedSource_ = source;
+  }
+  if (action == EpaperDrawAction::Stored) {
+    const EpaperServiceResult metadata = validateStoredImage();
+    if (!metadata.ok()) {
+      SemaphoreLock lock(mutex_);
+      state_ = EpaperServiceState::Idle;
+      queuedSource_ = "none";
+      return metadata;
+    }
+  }
   SemaphoreLock lock(mutex_);
-  if (!lock.locked()) return {EpaperServiceStatusCode::Unavailable, "e-paper unavailable"};
-  if (state_ != EpaperServiceState::Idle) {
-    return {EpaperServiceStatusCode::Busy, "e-paper is busy"};
-  }
-  if (action == EpaperDrawAction::Stored && !stored_.valid) {
-    return {EpaperServiceStatusCode::ImageNotFound, "stored e-paper image not found"};
-  }
-  state_ = EpaperServiceState::Queued;
-  phase_ = EpaperDrawPhase::None;
-  queuedSource_ = source;
   if (xQueueSend(queue_, &action, 0) != pdTRUE) {
     state_ = EpaperServiceState::Idle;
     queuedSource_ = "none";
@@ -271,58 +390,89 @@ EpaperServiceResult EpaperService::queueDraw(EpaperDrawAction action,
 }
 
 EpaperServiceResult EpaperService::refreshMetadata() {
-  return validateStoredImage();
+  {
+    SemaphoreLock lock(mutex_);
+    if (!lock.locked() || !ready_) return {EpaperServiceStatusCode::Unavailable, "e-paper unavailable"};
+    if (admissionClosed_ || state_ != EpaperServiceState::Idle) {
+      return {EpaperServiceStatusCode::Busy, "e-paper is busy"};
+    }
+    ++operationGeneration_;
+    state_ = EpaperServiceState::Queued; // reservation, no worker item yet
+  }
+  const auto result = validateStoredImage();
+  SemaphoreLock lock(mutex_);
+  state_ = EpaperServiceState::Idle;
+  return result;
 }
 
 EpaperServiceResult EpaperService::validateStoredImage() {
   if (storage_ == nullptr) {
     return {EpaperServiceStatusCode::StorageUnavailable, "userdata is unavailable"};
   }
+  uint32_t generation;
+  {
+    SemaphoreLock lock(mutex_);
+    generation = operationGeneration_;
+  }
+  EpaperStoredImageMetadata candidate;
   const UserDataDownloadBegin begin = storage_->beginDownload(kImageName, "");
   if (!begin.result.ok()) {
-    SemaphoreLock lock(mutex_);
-    stored_ = {};
     if (begin.result.status == UserDataFileStatus::NotFound) {
-      return {EpaperServiceStatusCode::ImageNotFound, "stored e-paper image not found"};
+      SemaphoreLock lock(mutex_);
+      if (generation == operationGeneration_) stored_ = {};
     }
     return fromStorage(begin.result);
   }
   EpaperImageFormat::StreamingValidator validator;
   uint8_t buffer[UserDataStorage::kFileIoChunkBytes];
-  bool readOk = true;
   size_t receivedBytes = 0;
+  bool contentValid = true;
   while (receivedBytes < begin.contentLength) {
-    const UserDataReadResult read =
-        storage_->readDownload(begin.sessionId, buffer, sizeof(buffer));
+    const auto read = storage_->readDownload(begin.sessionId, buffer, sizeof(buffer));
     if (!read.result.ok() || read.bytesRead == 0) {
-      readOk = false;
-      break;
+      storage_->finishDownload(begin.sessionId);
+      return {EpaperServiceStatusCode::StorageError, "failed to read stored image"};
     }
-    if (!validator.consume(buffer, read.bytesRead)) break;
     receivedBytes += read.bytesRead;
+    // Consume the whole file even after invalid syntax, so an I/O failure
+    // cannot be mislabeled as a fully validated corrupt file.
+    if (contentValid) contentValid = validator.consume(buffer, read.bytesRead);
   }
-  storage_->finishDownload(begin.sessionId);
-  const bool valid = readOk && receivedBytes == begin.contentLength &&
-                     begin.fileSize == EpaperImageFormat::kImageBytes &&
-                     validator.finish();
+  const bool valid = contentValid && validator.finish() &&
+                     begin.fileSize == EpaperImageFormat::kImageBytes;
+  candidate.present = true;
+  candidate.valid = valid;
+  candidate.sizeBytes = begin.fileSize;
+  candidate.header = validator.header();
+  candidate.validationError = validator.error();
+  bool published = false;
   {
     SemaphoreLock lock(mutex_);
-    stored_.present = true;
-    stored_.valid = valid;
-    stored_.sizeBytes = begin.fileSize;
-    stored_.header = validator.header();
-    stored_.validationError = valid ? EpaperImageFormat::ValidationError::None
-                                    : validator.error();
+    // Every runtime validator owns admission before opening storage. This
+    // reservation excludes upload/rename until candidate publication, even
+    // if readDownload auto-releases its gate at EOF. Generic routes cannot
+    // mutate the reserved image filename.
+    published = generation == operationGeneration_;
+    if (published) stored_ = candidate;
   }
+  storage_->finishDownload(begin.sessionId);
+  if (!published) return {EpaperServiceStatusCode::Busy, "stored image validation superseded"};
   if (!valid) {
-    return {EpaperServiceStatusCode::InvalidImage,
-            "stored EPDIMG is invalid",
-            EpaperImageFormat::errorCode(validator.error())};
+    return {EpaperServiceStatusCode::InvalidImage, "stored EPDIMG is invalid",
+            EpaperImageFormat::errorCode(candidate.validationError)};
   }
   return {EpaperServiceStatusCode::Ok, "stored image valid"};
 }
 
 UserDataDownloadBegin EpaperService::beginImageDownload(const char *rangeHeader) {
+  {
+    SemaphoreLock lock(mutex_);
+    if (!lock.locked() || admissionClosed_) {
+      UserDataDownloadBegin denied;
+      denied.result = {UserDataFileStatus::Busy, "e-paper restart drain is pending"};
+      return denied;
+    }
+  }
   return storage_->beginDownload(kImageName, rangeHeader);
 }
 
@@ -360,8 +510,9 @@ void EpaperService::workerEntry(void *context) {
 
 void EpaperService::workerLoop() {
   while (true) {
+    processControl(millis());
     EpaperDrawAction action = EpaperDrawAction::White;
-    if (xQueueReceive(queue_, &action, portMAX_DELAY) == pdTRUE) executeDraw(action);
+    if (xQueueReceive(queue_, &action, pdMS_TO_TICKS(10)) == pdTRUE) executeDraw(action);
   }
 }
 
@@ -412,21 +563,26 @@ bool EpaperService::runDraw(const EpaperFrameSource &source,
                EpaperPanelState::Inactive);
   if (!safetyStore_->markActive()) {
     if (storageSessionId != 0) storage_->finishDownload(storageSessionId);
-    finishDraw(false, true, true, EpdDriverError::None);
+    finishDraw(false, false, true, EpdDriverError::None);
     return false;
   }
   if (!driver_->begin(transport_)) {
     if (storageSessionId != 0) storage_->finishDownload(storageSessionId);
-    shutdownCoordinator_->finishOperation();
-    finishDraw(false, true, true, driver_->lastError());
+    const bool safe = shutdownCoordinator_->finishOperation();
+    finishDraw(false, safe, true, driver_->lastError());
     return false;
   }
+  const uint32_t originalMhz = frequencyDriver_->currentMhz();
   CpuFrequencyGuard frequencyGuard;
   if (!frequencyGuard.acquire(frequencyDriver_)) {
     if (storageSessionId != 0) storage_->finishDownload(storageSessionId);
     const bool safe = shutdownCoordinator_->finishOperation();
-    finishDraw(false, safe, true, EpdDriverError::None);
+    finishDraw(false, safe, frequencyDriver_->currentMhz() == originalMhz, EpdDriverError::None);
     return false;
+  }
+  {
+    SemaphoreLock lock(mutex_);
+    cpuMhz_ = 80;
   }
   transport_->delayMs(2000);
   setOperation(EpaperServiceState::Drawing, EpaperDrawPhase::Initializing,
@@ -453,6 +609,11 @@ bool EpaperService::runDraw(const EpaperFrameSource &source,
                                            : EpaperPanelState::Inactive);
   const bool shutdownSafe = shutdownCoordinator_->finishOperation();
   const bool frequencyRestored = frequencyGuard.release();
+  const uint32_t restoredMhz = frequencyDriver_->currentMhz();
+  {
+    SemaphoreLock lock(mutex_);
+    cpuMhz_ = restoredMhz;
+  }
   finishDraw(drawn, shutdownSafe, frequencyRestored, error);
   return drawn && shutdownSafe && frequencyRestored;
 }

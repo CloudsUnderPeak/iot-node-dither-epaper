@@ -74,6 +74,7 @@ function fillSystemForm(device) {
 
 async function saveSystem(event) {
   event.preventDefault();
+  const signal = DeviceConsole.utils.requests.signal();
   updateSystemSaveAvailability();
   if ($('systemSaveButton').disabled) return;
   systemFormBusy = true;
@@ -82,7 +83,8 @@ async function saveSystem(event) {
   setText('systemSaveState', t('savingSystem'));
   const submittedHostname = $('hostname').value.trim();
   try {
-    const data = await resources.system.update(submittedHostname);
+    const data = await resources.system.update(submittedHostname, { signal });
+    if (signal.aborted) return;
     const savedHostname = data.hostname || submittedHostname;
     systemFormBusy = false;
     systemFormBaseline = savedHostname;
@@ -94,28 +96,32 @@ async function saveSystem(event) {
     setTransientNotice(t('systemSaved'));
     setText('systemSaveState', t('systemSaved'));
   } catch (error) {
+    if (signal.aborted) return;
     systemFormBusy = false;
     if (!$('systemForm')) return;
     updateSystemSaveAvailability();
-    setNotice(error.message, true);
-    setText('systemSaveState', error.message);
+    setNotice(DeviceConsole.utils.requests.message(error), true);
+    setText('systemSaveState', DeviceConsole.utils.requests.message(error));
   }
 }
 
 async function resetSystem() {
+  const signal = DeviceConsole.utils.requests.signal();
   const confirmButton = $('confirmResetButton');
   confirmButton.disabled = true;
   try {
-    await resources.system.reset();
+    await resources.system.reset({ signal });
+    if (signal.aborted) return;
     DeviceConsole.ui.dialog.close();
     setToken('');
     DeviceConsole.app.router.navigate('network');
     setNotice(t('restarting'));
   } catch (error) {
+    if (signal.aborted) return;
     DeviceConsole.ui.dialog.close();
-    setNotice(error.message, true);
+    setNotice(DeviceConsole.utils.requests.message(error), true);
   } finally {
-    confirmButton.disabled = false;
+    if (!signal.aborted && confirmButton.isConnected) confirmButton.disabled = false;
   }
 }
 

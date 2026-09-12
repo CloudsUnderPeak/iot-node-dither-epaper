@@ -88,6 +88,7 @@ class WifiManager {
                       uint32_t &testId);
   WifiTestStatus testStatus() const;
   bool testBlocksScan() const;
+  bool scanBlocksRadio() const { return radio_ != nullptr && radio_->scanReserved(); }
   bool staConnectionBlocksScan() const;
   Result prepareTestCommit(uint32_t testId, DeviceConfig &candidate);
   void finishTestCommit(uint32_t testId, bool committed);

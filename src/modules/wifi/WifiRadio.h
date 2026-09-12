@@ -1,6 +1,7 @@
 #pragma once
 
 #include <freertos/FreeRTOS.h>
+#include <atomic>
 #include <freertos/semphr.h>
 
 #include "../../core/Result.h"
@@ -12,9 +13,15 @@ class WifiRadio {
   bool ready() const;
   bool lock(TickType_t timeoutTicks);
   void unlock();
+  bool scanReserved() const { return scanReserved_.load(); }
+  // Only scanner owner calls these, while holding the physical radio mutex.
+  void reserveScanLocked() { scanReserved_.store(true); }
+  void releaseScanLocked() { scanReserved_.store(false); }
+  bool lockScan(TickType_t timeoutTicks);
 
  private:
   SemaphoreHandle_t mutex_ = nullptr;
+  std::atomic<bool> scanReserved_{false};
 };
 
 class WifiRadioGuard {

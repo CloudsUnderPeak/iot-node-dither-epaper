@@ -188,7 +188,7 @@ Result WifiManager::begin(WifiRadio *radio,
 
 Result WifiManager::apply(const DeviceConfig &config, WifiStatus &status) {
   WifiRadioGuard radioGuard(radio_, portMAX_DELAY);
-  if (!radioGuard.locked()) return networkError("Wi-Fi radio unavailable");
+  if (!radioGuard.locked()) return unsupported("Wi-Fi radio reserved or unavailable");
 
   if (lockTest()) {
     if (testState_ == WifiTestState::Succeeded && testCommitCompleted_) {
@@ -374,6 +374,8 @@ bool WifiManager::poll(const DeviceConfig &config) {
 Result WifiManager::queueStaTest(const DeviceConfig &candidate,
                                  const DeviceConfig &previous,
                                  uint32_t &testId) {
+  WifiRadioGuard radioGuard(radio_, 0);
+  if (!radioGuard.locked()) return unsupported("Wi-Fi radio is reserved");
   if (candidate.wifiMode != WifiMode::Sta && candidate.wifiMode != WifiMode::ApSta) {
     return invalidInput("wifi connection requires STA or AP + STA mode");
   }

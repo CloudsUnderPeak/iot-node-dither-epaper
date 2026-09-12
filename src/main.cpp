@@ -40,6 +40,7 @@
 #include "modules/wifi/ArduinoWifiDriver.h"
 #include "modules/wifi/WifiRadio.h"
 #include "modules/wifi/WifiScanner.h"
+#include "modules/wifi/ArduinoWifiScanDriver.h"
 #include "selftest/FirmwareSelfTest.h"
 
 #ifndef STATUS_LED_PIN
@@ -91,6 +92,7 @@ ArduinoWifiDriver wifiDriver;
 ArduinoMonotonicClock monotonicClock;
 WifiManager wifiManager;
 WifiScanner wifiScanner;
+ArduinoWifiScanDriver wifiScanDriver;
 EmbeddedWebAssets embeddedWebAssets;
 FlashStorage flashStorage;
 UserDataStorage userDataStorage;
@@ -426,14 +428,14 @@ Result startAuth() {
 
 Result startWifiScanner() {
   return wifiRadio.ready()
-             ? wifiScanner.begin(&wifiRadio)
+             ? wifiScanner.begin(&wifiRadio, &wifiScanDriver, &wifiManager)
              : networkError("Wi-Fi radio unavailable");
 }
 
 Result startRuntime() {
   return runtimeActions.begin(
       &configService, &wifiManager, &mdnsService, &captiveDnsService,
-      &epaperShutdownCoordinator);
+      &epaperService);
 }
 
 bool runtimeHealthy() {
@@ -644,6 +646,8 @@ void loop() {
 #endif
 
   const uint32_t now = millis();
+  wifiScanner.poll(now, runtimeActions.snapshot().restartPending);
+  apiServer.poll();
   if (epaperService.ready()) epaperService.poll(now);
   const bool epaperDrawing =
       epaperService.ready() &&
@@ -652,7 +656,7 @@ void loop() {
       subsystemHealthy(subsystems[kBatterySubsystem])) {
     batteryMonitor.poll(now);
   }
-  if (epaperCooldown.elapsed(now)) {
+  if (!epaperService.ownsRuntime() && epaperCooldown.elapsed(now)) {
     const bool markerCleared = epaperSafetyStore.clear();
     epaperCooldown.releaseIfElapsed(now, markerCleared);
   }

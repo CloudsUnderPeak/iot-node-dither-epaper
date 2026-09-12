@@ -764,11 +764,62 @@ def minify_html(text: str) -> str:
 
 
 def minify_css(text: str) -> str:
-    text = strip_js_css_comments(text)
-    text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"\s*([{}:;,>+~])\s*", r"\1", text)
-    text = re.sub(r";}", "}", text)
-    return text.strip() + "\n"
+    """Compact top-level whitespace, preserving opaque CSS token regions.
+
+    Blocks, functions, comments, strings and escapes are copied verbatim.
+    Gzip handles their redundancy without changing declaration semantics.
+    """
+    output: list[str] = []
+    depth = 0
+    parentheses = 0
+    quote = ""
+    index = 0
+    whitespace = " \t\r\n\f"
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            end = index + 1
+            while end < min(index + 7, len(text)) and text[end] in "0123456789abcdefABCDEF":
+                end += 1
+            if end == index + 1:
+                end = min(index + 2, len(text))
+            elif end < len(text) and text[end] in whitespace:
+                end += 1
+                if text[end - 1] == "\r" and end < len(text) and text[end] == "\n":
+                    end += 1
+            output.append(text[index:end])
+            index = end
+            continue
+        if quote:
+            output.append(char)
+            if char == quote:
+                quote = ""
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            end = len(text) if end < 0 else end + 2
+            output.append(text[index:end])
+            index = end
+            continue
+        elif char in "\"'":
+            quote = char
+            output.append(char)
+        elif char in whitespace and depth == 0 and parentheses == 0:
+            while index + 1 < len(text) and text[index + 1] in whitespace:
+                index += 1
+            if output:
+                output.append(" ")
+        else:
+            if char == "(":
+                parentheses += 1
+            elif char == ")":
+                parentheses = max(0, parentheses - 1)
+            elif not parentheses and char == "{":
+                depth += 1
+            elif not parentheses and char == "}":
+                depth = max(0, depth - 1)
+            output.append(char)
+        index += 1
+    return "".join(output) + "\n"
 
 
 def minify_js(text: str) -> str:

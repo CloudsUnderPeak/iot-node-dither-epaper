@@ -43,11 +43,20 @@ struct Request {
   bool addQueryParameter(const char *name, const char *value);
 };
 
+// Internal continuation handle. Never serialized into the REST envelope.
+struct PendingRequest {
+  uint32_t id = 0;
+  Method method = Method::Unknown;
+  String path;
+  String principal;
+};
+
 struct Response {
   int statusCode = 500;
   bool success = false;
   String data = "{}";
   String message = "internal error";
+  PendingRequest pending{};
 };
 
 Method methodFromString(const char *value);

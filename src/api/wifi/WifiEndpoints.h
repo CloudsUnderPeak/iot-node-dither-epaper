@@ -15,6 +15,9 @@ class WifiEndpoints {
                RuntimeActionScheduler *runtime);
   Api::Response get() const;
   Api::Response scan();
+  bool takeScan(uint32_t id, Api::Response &response);
+  void cancelScan(uint32_t id);
+  static Api::Response scanResponse(const WifiScanResult &scan);
   Api::Response update(const Api::Request &request);
   Api::Response connect(const Api::Request &request);
   Api::Response connectionStatus() const;

@@ -16,6 +16,9 @@ import threading
 from pathlib import Path
 from urllib.parse import quote
 
+from css_semantics import build_css_harness
+import epdimg_contract
+
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILTIN_INDEX = ROOT / "builtin-web/index.html"
@@ -201,7 +204,7 @@ def run_page(
     label: str,
     url: str,
     window_size: tuple[int, int] = (1280, 900),
-) -> None:
+) -> str:
     window_width, window_height = window_size
     command = [
         str(browser),
@@ -241,6 +244,7 @@ def run_page(
         )
         raise
     print(f"{label}: PASS")
+    return completed.stdout
 
 
 def main() -> int:
@@ -254,6 +258,7 @@ def main() -> int:
         browser = find_browser(args.browser)
         harness = build_application_harness()
         http_harness = build_http_application_harness()
+        css_harness = build_css_harness(ROOT, OUTPUT_ROOT)
         OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix="profile-",
@@ -286,9 +291,16 @@ def main() -> int:
                 window_size=(1680, 900),
             )
             run_http_application_test(browser, profile, http_harness)
+            run_page(browser, profile, "CSS production semantics", file_url(css_harness))
+            run_page(browser, profile, "API deadlines", file_url(TEST_ROOT / "ApiDeadlineTest.html"))
+            contract = epdimg_contract.build_harness(ROOT, OUTPUT_ROOT)
+            dom = run_page(browser, profile, "User EPDIMG encoder", file_url(contract))
+            epdimg_contract.validate_bytes(ROOT, OUTPUT_ROOT, dom)
     except (
         OSError,
         subprocess.TimeoutExpired,
+        subprocess.CalledProcessError,
+        ValueError,
         WebTestError,
     ) as error:
         print(f"web-test: {error}")

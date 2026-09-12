@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <atomic>
 
 enum class EpaperProtectionStage : uint8_t {
   None = 0,
@@ -37,7 +38,7 @@ class EpaperSafetyStore {
 
  private:
   EpaperSafetyStorage *storage_ = nullptr;
-  EpaperProtectionStage stage_ = EpaperProtectionStage::None;
+  std::atomic<EpaperProtectionStage> stage_{EpaperProtectionStage::None};
   bool ready_ = false;
 
   bool writeAndVerify(EpaperProtectionStage stage);

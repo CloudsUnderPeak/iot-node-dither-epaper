@@ -123,6 +123,7 @@ Result ApiServer::registerRoutes() {
 
     const Api::Method method = route.method;
     switch (route.httpBinding) {
+      case ApiRouter::HttpBinding::Deferred:
       case ApiRouter::HttpBinding::NoBody:
         server_.on(
             matcher,
@@ -204,7 +205,37 @@ void ApiServer::dispatchNoBody(AsyncWebServerRequest *request, Api::Method metho
   apiRequest.hasBody = request->contentLength() != 0;
   apiRequest.transport = Api::Transport::Http;
   apiRequest.token = bearerTokenFromRequest(request);
-  sendApiResponse(request, router_->dispatch(apiRequest));
+  const auto response = router_->dispatch(apiRequest);
+  if (response.pending.id == 0) {
+    sendApiResponse(request, response);
+    return;
+  }
+  const auto weak = request->pause();
+  if (!pending_.store(weak, response.pending)) {
+    router_->cancelPending(response.pending);
+    sendApiResponse(request, Api::problem(409, "wifi_scan_busy", "response slot is busy"));
+    return;
+  }
+  const uint32_t id = response.pending.id;
+  request->onDisconnect([this, id]() {
+    PendingResponseSlot<AsyncWebServerRequestPtr>::Record detached;
+    if (pending_.take(id, detached)) router_->cancelPending(detached.pending);
+  });
+}
+
+void ApiServer::poll() {
+  if (!started_) return;
+  const auto record = pending_.snapshot();
+  if (record.pending.id == 0) return;
+  PendingResponseSlot<AsyncWebServerRequestPtr>::Record detached;
+  if (record.request.expired()) {
+    if (pending_.take(record.pending.id, detached)) router_->cancelPending(detached.pending);
+    return;
+  }
+  Api::Response response;
+  if (!router_->pollPending(record.pending, response)) return;
+  if (!pending_.take(record.pending.id, detached)) return;
+  if (auto request = detached.request.lock()) sendApiResponse(request.get(), response);
 }
 
 void ApiServer::dispatchQuery(AsyncWebServerRequest *request,
@@ -295,8 +326,8 @@ void ApiServer::prepareFileUpload(AsyncWebServerRequest *request,
     }
   }
 
-  const ApiRouter::FileUploadStart start = router_->prepareFileUpload(
-      bearerTokenFromRequest(request), request->url().c_str(), declaredBytes);
+  const ApiRouter::FileUploadStart start = streams_.run([&]() { return router_->prepareFileUpload(
+      bearerTokenFromRequest(request), request->url().c_str(), declaredBytes); });
   if (!start.ready) {
     saveUploadError(*state, start.response);
     return;
@@ -305,7 +336,7 @@ void ApiServer::prepareFileUpload(AsyncWebServerRequest *request,
   state->active = true;
   const uint32_t sessionId = state->sessionId;
   request->onDisconnect([this, sessionId]() {
-    router_->abortFileUpload(sessionId);
+    streams_.run([&]() { return router_->abortFileUpload(sessionId); });
   });
 }
 
@@ -317,8 +348,8 @@ void ApiServer::bufferFileUpload(AsyncWebServerRequest *request,
   prepareFileUpload(request, total);
   FileUploadState *state = static_cast<FileUploadState *>(request->_tempObject);
   if (state == nullptr || state->failed || !state->active) return;
-  const Api::Response writeResult = router_->writeFileUpload(
-      state->sessionId, index, data, len);
+  const Api::Response writeResult = streams_.run([&]() { return router_->writeFileUpload(
+      state->sessionId, index, data, len); });
   if (!writeResult.success) saveUploadError(*state, writeResult);
 }
 
@@ -336,8 +367,8 @@ void ApiServer::handleFileUpload(AsyncWebServerRequest *request) {
   }
   const uint32_t sessionId = state->sessionId;
   state->active = false;
-  sendApiResponse(request, router_->finishFileUpload(
-      sessionId, request->url().c_str()));
+  sendApiResponse(request, streams_.run([&]() { return router_->finishFileUpload(
+      sessionId, request->url().c_str()); }));
 }
 
 void ApiServer::handleFileDownload(AsyncWebServerRequest *request) {
@@ -358,8 +389,8 @@ void ApiServer::handleFileDownload(AsyncWebServerRequest *request) {
   const String range = request->hasHeader("Range")
                            ? request->getHeader("Range")->value()
                            : String();
-  const ApiRouter::FileDownloadStart start = router_->prepareFileDownload(
-      bearerTokenFromRequest(request), path.c_str(), range.c_str());
+  const ApiRouter::FileDownloadStart start = streams_.run([&]() { return router_->prepareFileDownload(
+      bearerTokenFromRequest(request), path.c_str(), range.c_str()); });
   if (!start.ready) {
     if (start.response.statusCode == 416) {
       AsyncWebServerResponse *response = request->beginResponse(
@@ -379,13 +410,13 @@ void ApiServer::handleFileDownload(AsyncWebServerRequest *request) {
   const uint32_t sessionId = start.sessionId;
   // A zero-length callback response never asks its filler for data, so release
   // the storage gate here instead of waiting for a client disconnect.
-  if (start.contentLength == 0) router_->finishFileDownload(sessionId);
+  if (start.contentLength == 0) streams_.run([&]() { return router_->finishFileDownload(sessionId); });
   AsyncWebServerResponse *response = request->beginResponse(
       media.contentType,
       start.contentLength,
       [this, sessionId](uint8_t *buffer, size_t maxLength, size_t) {
-        const UserDataReadResult result = router_->readFileDownload(
-            sessionId, buffer, maxLength);
+        const UserDataReadResult result = streams_.run([&]() { return router_->readFileDownload(
+            sessionId, buffer, maxLength); });
         return result.result.ok() ? result.bytesRead : 0;
       });
   response->setCode(start.partial ? 206 : 200);
@@ -407,7 +438,7 @@ void ApiServer::handleFileDownload(AsyncWebServerRequest *request) {
     response->addHeader("Content-Range", contentRange);
   }
   request->onDisconnect([this, sessionId]() {
-    router_->finishFileDownload(sessionId);
+    streams_.run([&]() { return router_->finishFileDownload(sessionId); });
   });
   request->send(response);
 }
@@ -453,7 +484,7 @@ void ApiServer::prepareEpaperUpload(AsyncWebServerRequest *request,
     }
   }
   const ApiRouter::FileUploadStart start =
-      router_->prepareEpaperUpload(declaredBytes);
+      streams_.run([&]() { return router_->prepareEpaperUpload(declaredBytes); });
   if (!start.ready) {
     saveUploadError(*state, start.response);
     return;
@@ -462,7 +493,7 @@ void ApiServer::prepareEpaperUpload(AsyncWebServerRequest *request,
   state->active = true;
   const uint32_t sessionId = state->sessionId;
   request->onDisconnect([this, sessionId]() {
-    router_->abortEpaperUpload(sessionId);
+    streams_.run([&]() { return router_->abortEpaperUpload(sessionId); });
   });
 }
 
@@ -475,7 +506,7 @@ void ApiServer::bufferEpaperUpload(AsyncWebServerRequest *request,
   auto *state = static_cast<FileUploadState *>(request->_tempObject);
   if (state == nullptr || state->failed || !state->active) return;
   const Api::Response result =
-      router_->writeEpaperUpload(state->sessionId, index, data, len);
+      streams_.run([&]() { return router_->writeEpaperUpload(state->sessionId, index, data, len); });
   if (!result.success) saveUploadError(*state, result);
 }
 
@@ -494,7 +525,7 @@ void ApiServer::handleEpaperUpload(AsyncWebServerRequest *request) {
   }
   const uint32_t sessionId = state->sessionId;
   state->active = false;
-  sendApiResponse(request, router_->finishEpaperUpload(sessionId));
+  sendApiResponse(request, streams_.run([&]() { return router_->finishEpaperUpload(sessionId); }));
 }
 
 void ApiServer::handleEpaperDownload(AsyncWebServerRequest *request) {
@@ -508,7 +539,7 @@ void ApiServer::handleEpaperDownload(AsyncWebServerRequest *request) {
                            ? request->getHeader("Range")->value()
                            : String();
   const ApiRouter::FileDownloadStart start =
-      router_->prepareEpaperDownload(range.c_str());
+      streams_.run([&]() { return router_->prepareEpaperDownload(range.c_str()); });
   if (!start.ready) {
     if (start.response.statusCode == 416) {
       AsyncWebServerResponse *response = request->beginResponse(
@@ -523,13 +554,13 @@ void ApiServer::handleEpaperDownload(AsyncWebServerRequest *request) {
     return;
   }
   const uint32_t sessionId = start.sessionId;
-  if (start.contentLength == 0) router_->finishEpaperDownload(sessionId);
+  if (start.contentLength == 0) streams_.run([&]() { return router_->finishEpaperDownload(sessionId); });
   AsyncWebServerResponse *response = request->beginResponse(
       "application/octet-stream",
       start.contentLength,
       [this, sessionId](uint8_t *buffer, size_t maxLength, size_t) {
-        const UserDataReadResult result = router_->readEpaperDownload(
-            sessionId, buffer, maxLength);
+        const UserDataReadResult result = streams_.run([&]() { return router_->readEpaperDownload(
+            sessionId, buffer, maxLength); });
         return result.result.ok() ? result.bytesRead : 0;
       });
   response->setCode(start.partial ? 206 : 200);
@@ -549,7 +580,7 @@ void ApiServer::handleEpaperDownload(AsyncWebServerRequest *request) {
     response->addHeader("Content-Range", contentRange);
   }
   request->onDisconnect([this, sessionId]() {
-    router_->finishEpaperDownload(sessionId);
+    streams_.run([&]() { return router_->finishEpaperDownload(sessionId); });
   });
   request->send(response);
 }

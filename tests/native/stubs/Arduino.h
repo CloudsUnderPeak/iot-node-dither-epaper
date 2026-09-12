@@ -120,3 +120,9 @@ inline uint32_t nativeMillis = 0;
 inline uint32_t millis() {
   return nativeMillis;
 }
+
+struct NativeSerial {
+  template <typename... Args> void printf(const char *, Args...) {}
+  void println(const char *) {}
+};
+inline NativeSerial Serial;

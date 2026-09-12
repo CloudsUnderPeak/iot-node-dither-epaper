@@ -45,7 +45,8 @@ class ConfigService {
                       DeviceConfig *committed = nullptr,
                       SystemConfigChanges *changes = nullptr);
   Result updateHostname(const char *hostname, DeviceConfig *committed = nullptr);
-  Result updateAdminPassword(const char *password, DeviceConfig *committed = nullptr);
+  Result updateAdminPassword(const char *password, DeviceConfig *committed = nullptr,
+                             bool runtimeAvailable = true);
   bool ready() const;
   ConfigStartupState startupState() const;
   ResultCode recoveryReason() const;

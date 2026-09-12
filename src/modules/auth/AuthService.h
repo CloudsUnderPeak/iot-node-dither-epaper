@@ -10,6 +10,7 @@ class AuthService {
   Result begin(ConfigService *configService);
   bool credentialsMatch(const char *username, const char *password) const;
   Result login(const char *username, const char *password, String &token);
+  Result changePassword(const char *password, bool runtimeAvailable, bool &restartRequired);
   bool tokenValid(const String &token) const;
   void invalidateSession();
   bool hasActiveSession() const;

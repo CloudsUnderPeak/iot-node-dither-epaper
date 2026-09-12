@@ -242,7 +242,7 @@
       return failure(409, { code: 'wifi_scan_busy', retry_after_seconds: 1 }, 'wifi connection is using the radio');
     }
     const now = Date.now();
-    if (preview.scanBusy) return rateLimited(10);
+    if (preview.scanBusy) return failure(409, { code: 'wifi_scan_busy', retry_after_seconds: 1 }, 'wifi scan is busy');
     const elapsed = now - preview.lastScanCompletedAt;
     if (preview.lastScanCompletedAt && elapsed < SCAN_COOLDOWN_MS) {
       return rateLimited(Math.ceil((SCAN_COOLDOWN_MS - elapsed) / 1000));

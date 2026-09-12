@@ -70,12 +70,14 @@ function createLoginDialog() {
 }
 
 async function verifySession() {
+  const signal = DeviceConsole.utils.requests.signal();
+  const token = state.token;
   if (!state.token) return false;
   try {
-    await resources.auth.session();
-    return true;
-  } catch (_) {
-    setToken('');
+    await resources.auth.session({ signal });
+    return !signal.aborted;
+  } catch (error) {
+    if (!signal.aborted && state.token === token && error.status === 401) setToken('');
     return false;
   }
 }
@@ -84,17 +86,21 @@ function loginErrorMessage(error) {
   if (error && (error.code === 'unauthorized' || error.status === 401)) {
     return t('invalidAdminPassword');
   }
-  return error && error.message ? error.message : t('signInFailed');
+  return error && error.message ? DeviceConsole.utils.requests.message(error) : t('signInFailed');
 }
 
 async function openLoginDialog() {
+  const signal = DeviceConsole.utils.requests.signal();
   $('loginPassword').value = '';
   setNotice(t('loginNoticePrompt'), false, $('loginNotice'));
   if (!state.auth || !state.auth.username) {
     try {
-      state.auth = await resources.auth.get();
+      const auth = await resources.auth.get({ signal });
+      if (signal.aborted) return;
+      state.auth = auth;
     } catch (error) {
-      setNotice(error.message, true, $('loginNotice'));
+      if (signal.aborted) return;
+      setNotice(DeviceConsole.utils.requests.message(error), true, $('loginNotice'));
     }
   }
   $('loginUsername').value = state.auth && state.auth.username ? state.auth.username : '';
@@ -104,19 +110,25 @@ async function openLoginDialog() {
 
 async function login(event) {
   event.preventDefault();
+  const signal = DeviceConsole.utils.requests.signal();
   setNotice(t('signingIn'), false, $('loginNotice'));
   try {
-    const data = await resources.auth.login({ username: $('loginUsername').value.trim(), password: $('loginPassword').value });
+    const data = await resources.auth.login({
+      username: $('loginUsername').value.trim(), password: $('loginPassword').value
+    }, { signal });
+    if (signal.aborted) return;
     setToken(data.token);
     DeviceConsole.ui.dialog.close();
     DeviceConsole.app.router.acceptPending();
   } catch (error) {
+    if (signal.aborted) return;
     setNotice(loginErrorMessage(error), true, $('loginNotice'));
   }
 }
 
 async function changePassword(event) {
   event.preventDefault();
+  const signal = DeviceConsole.utils.requests.signal();
   const password = $('newAdminPassword').value;
   const apProtectionEnabled = Boolean(
     state.wifi
@@ -135,25 +147,32 @@ async function changePassword(event) {
     return;
   }
   try {
-    await resources.auth.changePassword(password);
+    await resources.auth.changePassword(password, { signal });
+    if (signal.aborted) return;
     setToken('');
     $('passwordForm').reset();
     DeviceConsole.app.router.navigate('network');
     setTransientNotice(t(apProtectionEnabled ? 'passwordChangedRestarting' : 'passwordChanged'), 4000);
   } catch (error) {
-    setNotice(error.message, true);
+    if (signal.aborted) return;
+    setNotice(DeviceConsole.utils.requests.message(error), true);
   }
 }
 
 async function logout() {
+  const signal = DeviceConsole.utils.requests.signal();
   try {
-    if (state.token) await resources.auth.logout();
-  } catch (_) {
-    // Local cleanup is still required if the token was already invalid.
-  } finally {
-    setToken('');
-    DeviceConsole.app.router.navigate('network');
+    if (state.token) await resources.auth.logout({ signal });
+  } catch (error) {
+    if (signal.aborted) return;
+    if (error.status !== 401) {
+      setNotice(DeviceConsole.utils.requests.message(error), true);
+      return;
+    }
   }
+  if (signal.aborted) return;
+  setToken('');
+  DeviceConsole.app.router.navigate('network');
 }
 
 function togglePasswordVisibility(button) {

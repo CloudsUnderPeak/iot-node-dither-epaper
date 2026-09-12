@@ -120,6 +120,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - scan result 至少提供 `ssid`、`rssi`、`channel`、`encryption_type`、`encryption` 與 `hidden`。
 - REST API 只回傳 RSSI 大於 `-75 dBm` 的網路，並從中最多回 RSSI 最強的 20 筆掃描結果；前端仍可做顯示篩選。
 - 同一時間只允許一個掃描工作；scan 與 connect 不同時操作 radio，每次掃描至少間隔 10 秒。
+- Scan 等待由非阻塞 owner 推進，HTTP／serial 等待 scan 時其他狀態查詢與 loop 工作仍可前進。第二個 scan 立即回 busy；15 秒未完成先回 scan failure，driver stop／cleanup 另有 2 秒確認期限，無 ACK 保留 radio reservation 並標示 scanner unavailable，不強制重啟裝置。
 - 持久化 STA 尚在連線時 scan 回可重試 busy，不得將 driver 的 connecting conflict 誤報為一般 scan failure；STA application timeout 必須同時停止底層連線，使 fallback AP 上的後續 scan 可用。
 
 ## 進階網路行為
@@ -162,6 +163,8 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - RST inactive-high、CS high、DC low 只代表 `logical_quiesce`，不能宣稱面板已 Power OFF／Deep Sleep。Waveshare HAT 的 RST low 會控制板上 power switch，因此只有 initialize 的短 reset pulse 可以拉低，閒置與 prewake 不得長時間保持 low。若 panel 已 wake 但 protocol shutdown 失敗，狀態固定為 `unavailable`／`panel_state: unknown`，要求 MCU 與 HAT 一起完整斷電，不得靠等待或 software restart 解鎖。
 - Boot 不自動重畫。發現 `shutdown_confirmed` marker 時從本次 boot 重新保守等待 180 秒；發現 `active` marker 時，只有 reset reason 明確為 power-on，且 MCU 與 HAT 依規定共用同一個 3.3 V 電源，才將它視為完整共同斷電並以 read-back 驗證清除。Brownout、watchdog、panic、software reset、燒錄後 reset 或其他非協調 reset 一律記錄 interrupted 並 fail closed。
 - 所有可控制的 software restart 必須先拒絕新 draw、quiesce worker，並在需要時完成 Power OFF／Deep Sleep；shutdown 失敗時取消 restart。不可攔截 reset 的 residual risk 由 marker 在下次 boot 診斷，不能宣稱已由軟體消除。
+- 到期 restart 關閉新 upload／draw admission，已接受 upload 及其後續 draw 由原 owner 完成，等待 storage session release、panel shutdown、marker read-back 與 CPU restoration 全部完成才重啟。等待時 runtime 持續回報 `restarting`，不阻塞 loop 或 HTTP callback。
+- Restart drain 從首次開始計時：upload grace 30 秒、總等待上限 150 秒，重複請求不延長。超時取消本次 software restart，原 owner 仍須安全收尾；確認完成前 admission 保持關閉，不強制 close upload 或中止 SPI。取消不清除持久化 `reset_pending`，也不立即 erase partition；下次 boot 仍依原 reset intent 處理。真正 shutdown／marker／CPU restore 失敗維持禁止操作；單純超時不宣稱面板損壞。
 - Draw 在低優先序 dedicated worker 執行，BUSY wait 必須 yield，frame 每 4 KiB yield；Wi-Fi、HTTP、console、heartbeat 與 runtime scheduler 在刷新期間仍須可排程。CPU 降頻造成的 latency 與供電穩定性需以實板驗證。
 - 全部 e-paper 專用 endpoint 與 `GET /api/runtime/status` 是明確 public exception；同網路 client 可上傳、下載及觸發 draw 是已接受的可信任網路風險，180 秒 cooldown 不是 authentication 或 abuse protection。Generic user-file API 權限不變。
 
@@ -207,3 +210,5 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - AP DHCP server 是否允許關閉？
 - AP channel 是否需要 country code／地區限制？
 - 是否需要把 Wi-Fi foundation 的 public C++ module API 文件化？
+
+- Controlled restart 核准前也會等待既有 userdata 檔案操作釋放同一 operation gate；不由 restart owner 關閉 callback 的檔案。若總等待超過 150 秒則取消本次 restart，原檔案操作仍由原 owner 收尾。取得最終核准後不再接受新檔案操作；進入 restart drain 即停止接受新的電子紙下載。

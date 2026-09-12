@@ -22,7 +22,7 @@ enum class EpaperShutdownOutcome : uint8_t {
   NotReady,
 };
 
-class EpaperShutdownCoordinator final : public SystemRestartCoordinator {
+class EpaperShutdownCoordinator final {
  public:
   bool begin(Epd7In3E *driver,
              EpaperSafetyStore *safetyStore,
@@ -32,7 +32,8 @@ class EpaperShutdownCoordinator final : public SystemRestartCoordinator {
   // before panel Power ON clears the marker; once the panel may be active,
   // protocol Power OFF and Deep Sleep plus marker read-back are mandatory.
   bool finishOperation();
-  bool restartNow() override;
+  // Only the runtime operation owner may call this after its cleanup ACK.
+  bool restartNow();
 
   bool ready() const { return ready_; }
   bool unavailable() const { return unavailable_; }

@@ -1,0 +1,116 @@
+name: Verify source and firmware
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PIO_ENV: firebeetle2_esp32c6
+
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.3'
+      - run: python -m pip install platformio==6.1.19
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-${{ runner.os }}-firebeetle2_esp32c6-6.1.19-${{ hashFiles('platformio.ini') }}
+      - name: Prepare pinned dependencies without compiling firmware
+        run: pio pkg install -e "$PIO_ENV"
+      - name: Native and tools tests
+        run: |
+          mkdir -p tmp/verification/ci
+          make test-native test-tools 2>&1 | tee tmp/verification/ci/host.log
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: host-failure
+          path: tmp/verification/ci/
+
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.3'
+      - name: Install versioned Chromium and system dependencies
+        run: |
+          python -m pip install playwright==1.62.0
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          import os
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p, open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('DEVICE_CONSOLE_BROWSER=' + p.chromium.executable_path + '\n')
+          PY
+      - name: Builtin source and processed production CSS
+        run: |
+          mkdir -p tmp/verification/ci
+          make test-web 2>&1 | tee tmp/verification/ci/builtin-browser.log
+      - name: User frontend owns its source and production tests
+        run: |
+          make -C user-web-project test TEST_FLAGS="--chrome $DEVICE_CONSOLE_BROWSER" 2>&1 | tee tmp/verification/ci/user-source.log
+          make -C user-web-project test-production TEST_FLAGS="--chrome $DEVICE_CONSOLE_BROWSER" 2>&1 | tee tmp/verification/ci/user-production.log
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: browser-failure
+          path: |
+            tmp/verification/ci/
+            tmp/web-tests/
+            user-web-project/tmp/
+
+  firmware:
+    needs: [host, browser]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        web: [builtin, user, none]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.3'
+      - run: python -m pip install platformio==6.1.19
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-${{ runner.os }}-firebeetle2_esp32c6-6.1.19-${{ hashFiles('platformio.ini') }}
+      - name: Build source then immediately verify its snapshot
+        run: |
+          mkdir -p tmp/verification/ci
+          make build WEB=${{ matrix.web }} 2>&1 | tee tmp/verification/ci/build.log
+          make verify 2>&1 | tee tmp/verification/ci/verify.log
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: firmware-${{ matrix.web }}-failure
+          path: |
+            tmp/verification/ci/
+            build/latest/*.json

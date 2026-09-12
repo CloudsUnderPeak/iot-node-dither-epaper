@@ -20,13 +20,18 @@ struct WifiScanResult {
   WifiScanNetwork networks[kWifiScanMaxResults];
   size_t count = 0;
   uint32_t retryAfterSeconds = 0;
+  uint32_t operationId = 0;
+  bool busy = false;
+  bool connectBusy = false;
 };
 
 class WifiScanner {
  public:
   WifiScanResult value;
   unsigned scanCount = 0;
-  WifiScanResult scan() {
+  bool takeResult(uint32_t, WifiScanResult &result) { result = value; return true; }
+  void cancelInterest(uint32_t) {}
+  WifiScanResult start(uint32_t) {
     ++scanCount;
     return value;
   }

@@ -68,7 +68,37 @@ Api::Response WifiEndpoints::scan() {
     data["retry_after_seconds"] = 1;
     return Api::error(409, Api::json(data), "wifi connection is using the radio");
   }
-  const WifiScanResult scanResult = wifiScanner_->scan();
+    if (runtime_->snapshot().restartPending) {
+    return Api::problem(409, "wifi_scan_busy", "system restart is pending");
+  }
+  const WifiScanResult scanResult = wifiScanner_->start(millis());
+  if (scanResult.operationId != 0) {
+    Api::Response pending;
+    pending.pending.id = scanResult.operationId;
+    return pending;
+  }
+  return scanResponse(scanResult);
+}
+
+bool WifiEndpoints::takeScan(uint32_t id, Api::Response &response) {
+  WifiScanResult result;
+  if (!wifiScanner_->takeResult(id, result)) return false;
+  response = scanResponse(result);
+  return true;
+}
+
+void WifiEndpoints::cancelScan(uint32_t id) { wifiScanner_->cancelInterest(id); }
+
+Api::Response WifiEndpoints::scanResponse(const WifiScanResult &scanResult) {
+  if (scanResult.connectBusy) {
+    return Api::problem(409, "wifi_connect_busy", "wifi connection is using the radio");
+  }
+  if (scanResult.busy) {
+    JsonDocument data;
+    data["code"] = "wifi_scan_busy";
+    data["retry_after_seconds"] = 1;
+    return Api::error(409, Api::json(data), "wifi scan is busy");
+  }
   if (scanResult.retryAfterSeconds > 0) {
     JsonDocument data;
     data["code"] = "rate_limited";

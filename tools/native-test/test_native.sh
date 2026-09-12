@@ -4,10 +4,11 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 build_dir="$project_dir/tmp/native-tests"
 pio_env="${PIO_ENV:-firebeetle2_esp32c6}"
-arduinojson_include="$project_dir/.pio/libdeps/$pio_env/ArduinoJson/src"
+arduinojson_include="${ARDUINOJSON_INCLUDE:-$project_dir/.pio/libdeps/$pio_env/ArduinoJson/src}"
+export ARDUINOJSON_INCLUDE="$arduinojson_include"
 
 if [[ ! -d "$arduinojson_include" ]]; then
-  echo "ArduinoJson headers are missing; run pio run -e $pio_env first." >&2
+  echo "ArduinoJson headers are missing; run pio pkg install -e $pio_env, or set ARDUINOJSON_INCLUDE to pinned ArduinoJson headers." >&2
   exit 1
 fi
 
@@ -259,9 +260,40 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 
 "$build_dir/api-router-auth-test"
 
-python3 -m unittest discover \
-  -s "$project_dir/tests/tools" \
-  -p 'test_*.py' \
-  -v
+g++ -std=c++17 -Wall -Wextra -Werror -pthread \
+  -I"$project_dir/tests/native/storage_router_stubs" \
+  -I"$project_dir/tests/native/endpoint_stubs" \
+  -I"$project_dir/tests/native/stubs" \
+  -I"$arduinojson_include" \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/StreamingSessionBridgeTest.cpp" \
+  "$project_dir/src/api/ApiRouter.cpp" \
+  "$project_dir/src/api/alive/AliveEndpoints.cpp" \
+  "$project_dir/src/api/auth/AuthEndpoints.cpp" \
+  "$project_dir/src/api/device/DeviceEndpoints.cpp" \
+  "$project_dir/src/api/epaper/EpaperEndpoints.cpp" \
+  "$project_dir/src/api/runtime/RuntimeEndpoints.cpp" \
+  "$project_dir/src/api/storage/StorageEndpoints.cpp" \
+  "$project_dir/src/api/storage/UserFileEndpoints.cpp" \
+  "$project_dir/src/api/system/SystemEndpoints.cpp" \
+  "$project_dir/src/api/web/WebEndpoints.cpp" \
+  "$project_dir/src/api/wifi/WifiEndpoints.cpp" \
+  "$project_dir/src/api/wifi/WifiPayload.cpp" \
+  "$project_dir/src/api/shared/ApiTypes.cpp" \
+  "$project_dir/src/api/shared/ApiResponse.cpp" \
+  "$project_dir/src/api/shared/JsonReader.cpp" \
+  "$project_dir/src/modules/config/model/DeviceConfig.cpp" \
+  "$project_dir/src/modules/config/model/DeviceConfigValidation.cpp" \
+  "$project_dir/src/modules/config/model/StrictIpv4.cpp" \
+  "$project_dir/src/modules/storage/UserDataStorage.cpp" \
+  "$project_dir/src/modules/storage/UserFilePolicy.cpp" \
+  "$project_dir/src/modules/epaper/EpaperImageFormat.cpp" \
+  "$project_dir/src/modules/epaper/calibration/EpaperCalibration.cpp" \
+  "$project_dir/src/modules/runtime/BootDiagnostics.cpp" \
+  -o "$build_dir/streaming-session-bridge-test"
+
+"$build_dir/streaming-session-bridge-test"
 
 python3 "$project_dir/tools/native-test/contract_checks.py" "$project_dir"
+
+bash "$project_dir/tools/native-test/test_services.sh"

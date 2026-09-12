@@ -39,6 +39,10 @@
   }
 
   async function handleRoute(sessionKnown = false) {
+    app.utils.requests.rotate();
+    wifiStatusPollGeneration += 1;
+    wifiFormBusy = false;
+    systemFormBusy = false;
     const version = routeVersion + 1;
     routeVersion = version;
     const route = routeFromHash();

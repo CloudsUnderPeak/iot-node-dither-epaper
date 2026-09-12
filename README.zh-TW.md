@@ -130,9 +130,21 @@ make verify [IMAGE=build/.../firmware.img]
 make flash PORT=/dev/ttyACM0 [IMAGE=...] # 燒錄已驗證的既有快照
 make clean                              # 移除 latest 與匯入的 user web，保留快照
 make clean all                          # 移除 latest 與所有時間戳快照
-make test                               # 建置並執行全部自動化測試
+make test                               # Native、tools、browser 測試，不建置 firmware
+make test-native                        # C++ service 與 endpoint regression
+make test-tools                         # Python build/release 測試
+make test-all                           # 建置、驗證，再執行全部測試
 make test-web                           # 執行前端瀏覽器契約測試
 ```
+
+Native 測試需要 C++17 編譯器與固定版本的 ArduinoJson headers。先執行
+`pio pkg install -e firebeetle2_esp32c6` 準備相依套件，無須編譯 firmware；
+也可用 `ARDUINOJSON_INCLUDE` 指定該固定版本套件的 `src` 目錄。
+Browser 測試需要 Chrome／Chromium／Edge；無法自動找到時設定
+`DEVICE_CONSOLE_BROWSER`。缺少相依套件會讓測試失敗。
+PR verification 執行 host／browser 檢查與獨立的 builtin／user／none 建置；
+使用者前端透過自己的 `test` 與 `test-production` 入口驗證。
+
 
 `user-web/` 是 generated output，不應手動編輯。子專案產物已完成 minify
 與 gzip，因此 `WEB_PROCESS=auto` 對它解析為 `none` 並保留原樣；內建前端

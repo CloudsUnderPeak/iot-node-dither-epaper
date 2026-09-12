@@ -86,17 +86,16 @@ Api::Response AuthEndpoints::updatePassword(const Api::Request &request) {
     return Api::problem(400, "invalid_field", validation.message, "password");
   }
 
-  DeviceConfig updated = configService_->snapshot();
-  if (updated.apPasswordEnabled && !runtime_->ready()) {
-    return Api::problem(503, "runtime_unavailable", "runtime action scheduler unavailable");
+  bool restartRequired = false;
+  const Result saveResult = authService_->changePassword(
+      password, runtime_->ready(), restartRequired);
+  if (saveResult.code == ResultCode::Unsupported) {
+    return Api::problem(503, "runtime_unavailable", saveResult.message);
   }
-  const Result saveResult = configService_->updateAdminPassword(password, &updated);
   if (!saveResult.ok()) {
     return Api::problem(Api::statusFor(saveResult.code), "storage_error", saveResult.message);
   }
-
-  authService_->invalidateSession();
-  if (updated.apPasswordEnabled) {
+  if (restartRequired) {
     runtime_->scheduleSystemReset(300);
   }
   return Api::ok("{\"session\":\"invalidated\"}", "admin password updated");

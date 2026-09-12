@@ -10,6 +10,12 @@ bool WifiRadio::ready() const {
 }
 
 bool WifiRadio::lock(TickType_t timeoutTicks) {
+  if (!lockScan(timeoutTicks)) return false;
+  if (scanReserved()) { unlock(); return false; }
+  return true;
+}
+
+bool WifiRadio::lockScan(TickType_t timeoutTicks) {
   return mutex_ != nullptr && xSemaphoreTake(mutex_, timeoutTicks) == pdTRUE;
 }
 

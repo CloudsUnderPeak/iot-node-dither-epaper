@@ -20,7 +20,7 @@ ifneq ($(origin COMPONENT),undefined)
 $(error COMPONENT was removed; use direct targets: make web, make demo, or make esp)
 endif
 
-.PHONY: help build prepare-user-web user-web pull push web demo esp verify verify-web clean all test test-web deploy flash
+.PHONY: help build prepare-user-web user-web pull push web demo esp verify verify-web clean all test test-native test-tools test-web test-all deploy flash
 
 help:
 	@printf '%s\n' \
@@ -41,7 +41,8 @@ help:
 		'make deploy WEB=none PORT=<port>   Build and flash without a frontend.' \
 		'make clean                         Remove latest, transients, and imported user web.' \
 		'make clean all                     Also remove timestamp snapshots.' \
-		'make test                          Build and run native/browser tests.' \
+		'make test                          Run native, tools, and browser tests without firmware build.' \
+		'make test-all                      Build, verify, and run all tests.' \
 		'' \
 		'WEB: user (default), auto, builtin, none' \
 		'WEB_PROCESS: auto (default), minify-gzip, none' \
@@ -119,9 +120,20 @@ all:
 	fi
 
 test:
-	+@$(MAKE) --no-print-directory build
+	+@$(MAKE) --no-print-directory test-native
+	+@$(MAKE) --no-print-directory test-tools
 	+@$(MAKE) --no-print-directory test-web
+
+test-native:
 	PIO_ENV="$(PIO_ENV)" bash tools/native-test/test_native.sh
+
+test-tools:
+	$(PYTHON) -m unittest discover -s tests/tools -p 'test_*.py' -v
+
+test-all:
+	+@$(MAKE) --no-print-directory build
+	+@$(MAKE) --no-print-directory verify
+	+@$(MAKE) --no-print-directory test
 
 test-web:
 	$(PYTHON) tools/web-test/run.py

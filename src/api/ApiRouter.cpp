@@ -146,7 +146,7 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
     {Api::Method::Get, "/api/wifi/scan",
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return router.wifiEndpoints_.scan();
-     }},
+     }, HttpBinding::Deferred},
     {Api::Method::Post, "/api/wifi/connect",
      +[](ApiRouter &router, const Api::Request &request, const char *) {
        return router.wifiEndpoints_.connect(request);
@@ -225,6 +225,25 @@ Result ApiRouter::begin(const ApiRouterDeps &deps) {
       &deps.configService, &deps.storageLifecycle, &deps.runtime);
 }
 
+bool ApiRouter::pollPending(const Api::PendingRequest &pending, Api::Response &response) {
+  if (pending.method != Api::Method::Get || !(pending.path == "/api/wifi/scan") || pending.id == 0) {
+    response = Api::problem(400, "invalid_field", "invalid pending request");
+    return true;
+  }
+  if (!authService_->tokenValid(pending.principal)) {
+    wifiEndpoints_.cancelScan(pending.id);
+    response = Api::unauthorized("session is no longer valid");
+    return true;
+  }
+  return wifiEndpoints_.takeScan(pending.id, response);
+}
+
+void ApiRouter::cancelPending(const Api::PendingRequest &pending) {
+  if (pending.method == Api::Method::Get && pending.path == "/api/wifi/scan") {
+    wifiEndpoints_.cancelScan(pending.id);
+  }
+}
+
 Api::Response ApiRouter::dispatch(const Api::Request &request) {
   for (const Route &route : kRoutes_) {
     char parameter[UserFilePolicy::kMaxFilenameBytes + 1]{};
@@ -234,7 +253,13 @@ Api::Response ApiRouter::dispatch(const Api::Request &request) {
         return unauthorized();
       }
     }
-    return route.handler(*this, request, parameter);
+    Api::Response response = route.handler(*this, request, parameter);
+    if (response.pending.id != 0) {
+      response.pending.method = route.method;
+      response.pending.path = route.path;
+      response.pending.principal = request.token;
+    }
+    return response;
   }
 
   return Api::problem(404, "not_found", "not found");

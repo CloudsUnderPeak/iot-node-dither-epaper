@@ -100,7 +100,7 @@ enum class EpaperDrawAction : uint8_t {
   Palette,
 };
 
-class EpaperService {
+class EpaperService : public SystemRestartCoordinator {
  public:
   static constexpr const char *kImageName = "epaper-current.epd";
   static constexpr size_t kWorkerStackBytes = 8192;
@@ -113,6 +113,10 @@ class EpaperService {
                EpaperShutdownCoordinator *shutdownCoordinator,
                const BootDiagnosticsSnapshot &bootDiagnostics);
   bool ready() const { return ready_; }
+  RestartRequest requestRestart(uint32_t nowMs) override;
+  void pollRestart(uint32_t nowMs, bool allowRestart = true) override;
+  RestartProgress restartProgress() const override;
+  bool ownsRuntime() const { return workerTask_ != nullptr; }
   void poll(uint32_t nowMs);
   EpaperServiceSnapshot snapshot(uint32_t nowMs) const;
   EpaperServiceSnapshot snapshot() const { return snapshot(millis()); }
@@ -160,6 +164,16 @@ class EpaperService {
   QueueHandle_t queue_ = nullptr;
   TaskHandle_t workerTask_ = nullptr;
   bool ready_ = false;
+  bool admissionClosed_ = false;
+  bool restartAllowed_ = false;
+  bool markerClearPending_ = false;
+  bool markerClearRunning_ = false;
+  RestartProgress restartProgress_ = RestartProgress::Idle;
+  uint32_t restartStartedMs_ = 0;
+  uint32_t operationGeneration_ = 0;
+  uint32_t cpuMhz_ = 0;
+  static constexpr uint32_t kUploadDrainMs = 30000;
+  static constexpr uint32_t kRestartDrainMs = 150000;
   EpaperServiceState state_ = EpaperServiceState::Unavailable;
   EpaperDrawPhase phase_ = EpaperDrawPhase::None;
   EpaperPanelState panelState_ = EpaperPanelState::Inactive;
@@ -179,6 +193,7 @@ class EpaperService {
 
   static void workerEntry(void *context);
   void workerLoop();
+  void processControl(uint32_t nowMs);
   void executeDraw(EpaperDrawAction action);
   bool runDraw(const EpaperFrameSource &source, uint32_t storageSessionId = 0);
   EpaperServiceResult queueDraw(EpaperDrawAction action, const char *source);

@@ -45,12 +45,16 @@ async function pollWifiTransition({
   submittedFormValue,
   generation,
   apChanged,
+  signal = DeviceConsole.utils.requests.signal(),
   deadline = Date.now() + WIFI_TRANSITION_POLL_DEADLINE_MS
 }) {
-  while (generation === wifiStatusPollGeneration && Date.now() < deadline) {
+  while (!signal.aborted && generation === wifiStatusPollGeneration && Date.now() < deadline) {
     try {
-      const status = await resources.wifi.connectionStatus();
-      if (generation !== wifiStatusPollGeneration) return;
+      const status = await resources.wifi.connectionStatus({
+        signal,
+        timeoutMs: Math.min(DeviceConsole.utils.requests.defaults.connection, deadline - Date.now())
+      });
+      if (signal.aborted || generation !== wifiStatusPollGeneration) return;
       if (status.state === 'connected') {
         wifiFormBusy = false;
         wifiBusyMessageKey = 'savingWifi';
@@ -91,12 +95,15 @@ async function pollWifiTransition({
       reportBackgroundError(
         'Wi-Fi transition polling',
         error,
-        ['transport_error']
+        ['transport_error', 'request_timeout']
       );
     }
-    await new Promise((resolve) => window.setTimeout(resolve, WIFI_TRANSITION_POLL_MS));
+    if (signal.aborted || generation !== wifiStatusPollGeneration) return;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await DeviceConsole.utils.requests.sleep(Math.min(WIFI_TRANSITION_POLL_MS, remaining), signal);
   }
-  finishWifiTransitionFailure(generation, 'wifiTransitionRetryEnded');
+  if (!signal.aborted) finishWifiTransitionFailure(generation, 'wifiTransitionRetryEnded');
 }
 
 function wifiStatusIsSettled(wifi, configuredMode) {
@@ -124,6 +131,7 @@ function retryWifiStatus(configuredMode, attempt = 0, generation = wifiStatusPol
     if (generation !== wifiStatusPollGeneration) return;
     try {
       const wifi = await refreshWifiSnapshot({ formSync: 'none' });
+      if (generation !== wifiStatusPollGeneration) return;
       if (!wifiStatusIsSettled(wifi, configuredMode)) {
         retryWifiStatus(configuredMode, attempt + 1, generation);
         return;
@@ -177,13 +185,15 @@ async function saveWifi(event) {
     !== Boolean(payload.interfaces.ap.password_enabled);
   const apChanged = comparableApSettings(previousAp) !== comparableApSettings(payload.interfaces.ap);
   const generation = ++wifiStatusPollGeneration;
+  const signal = DeviceConsole.utils.requests.signal();
   try {
-    const result = await resources.wifi.update(payload);
+    const result = await resources.wifi.update(payload, { signal });
+    if (signal.aborted || generation !== wifiStatusPollGeneration) return;
     if (result.state === 'connecting') {
       wifiBusyMessageKey = 'wifiVerifying';
       updateWifiSaveAvailability();
       setNotice(t('wifiVerifying'));
-      pollWifiTransition({ payload, submittedFormValue, generation, apChanged });
+      pollWifiTransition({ payload, submittedFormValue, generation, apChanged, signal });
       return;
     }
     invalidateResourceRequests('wifi');
@@ -200,11 +210,12 @@ async function saveWifi(event) {
     showWifiRecovery('wifiReconnectHelp');
     if (generation === wifiStatusPollGeneration) retryWifiStatus(payload.mode);
   } catch (error) {
+    if (signal.aborted || generation !== wifiStatusPollGeneration) return;
     wifiFormBusy = false;
     wifiBusyMessageKey = 'savingWifi';
     updateWifiSaveAvailability();
-    setNotice(error.message, true);
-    setText('wifiSaveState', error.message);
+    setNotice(DeviceConsole.utils.requests.message(error), true);
+    setText('wifiSaveState', DeviceConsole.utils.requests.message(error));
   }
 }
 
@@ -235,25 +246,28 @@ function startScanCooldown(seconds = 10) {
 }
 
 async function scanWifi() {
+  const signal = DeviceConsole.utils.requests.signal();
   setScanDisabled(true);
   setText('scanResultCount', t('scanning'));
   renderScanMessage(t('scanning'));
   let cooldownSeconds = 10;
   try {
-    const data = await resources.wifi.scan();
+    const data = await resources.wifi.scan({ signal });
+    if (signal.aborted) return;
     state.scanNetworks = data.networks || [];
     state.scanDetectedCount = state.scanNetworks.length;
     renderScanResults();
     setTransientNotice(t('scanComplete'));
   } catch (error) {
+    if (signal.aborted) return;
     cooldownSeconds = error.data?.retry_after_seconds || cooldownSeconds;
     const message = error.code === 'wifi_scan_busy' || error.code === 'wifi_connect_busy'
       ? t('connecting')
-      : error.message;
+      : DeviceConsole.utils.requests.message(error);
     renderScanMessage(message);
     setNotice(message, true);
   } finally {
-    startScanCooldown(cooldownSeconds);
+    if (!signal.aborted) startScanCooldown(cooldownSeconds);
   }
 }
 

@@ -1,0 +1,7 @@
+/* CSS semantic fixture version 1; retain token/selector boundaries. */
+.host { position: relative; width: 320px; height: 100px; --gap: 8px; --pad: 12px; }
+.probe { position: absolute; bottom: calc(100% + 8px); padding: calc(var(--pad) + var(--gap)); width: clamp(10px, calc(100% - max(20px, 5%)), 300px); }
+.host > .probe + .sibling { margin-left: calc(30px - 8px); }
+.probe::before { content: "a  b /* kept */"; }
+.probe/**/.active { height: 17px; }
+.host { --label: "keep  spaces"; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E"); }

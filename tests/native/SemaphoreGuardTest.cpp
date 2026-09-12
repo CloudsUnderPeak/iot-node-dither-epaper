@@ -22,9 +22,16 @@ int main() {
     SemaphoreGuard guard(semaphore, portMAX_DELAY);
     expect(guard.locked(), "guard must acquire the semaphore");
   }
-  expect(semaphore->mutex.try_lock(),
+  expect(xSemaphoreTake(semaphore, 0) == pdTRUE,
          "guard destructor must release the semaphore");
-  semaphore->mutex.unlock();
+  expect(xSemaphoreTake(semaphore, 0) != pdTRUE, "zero wait must return busy");
+  xSemaphoreGive(semaphore);
+  vSemaphoreDelete(semaphore);
+  auto binary = xSemaphoreCreateBinary();
+  expect(xSemaphoreTake(binary, 0) != pdTRUE, "binary gate starts empty");
+  xSemaphoreGive(binary);
+  expect(xSemaphoreTake(binary, 0) == pdTRUE, "binary gate accepts give");
+  vSemaphoreDelete(binary);
 
   if (failures != 0) {
     std::cerr << failures << " semaphore guard test(s) failed\n";

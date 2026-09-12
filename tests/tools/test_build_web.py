@@ -21,6 +21,28 @@ def load_tool(name: str, relative: str):
 web = load_tool("build_web_under_test", "tools/web-build/build_web.py")
 
 
+class CssSemanticsTest(unittest.TestCase):
+    def test_fixture_production_pipeline(self):
+        fixture = json.loads((PROJECT / "tests/tools/fixtures/css-semantics-v1.json").read_text())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "fixture.css").write_text(fixture["css"])
+            self.assertEqual(web.minify_files(root), 1)
+            self.assertEqual(web.gzip_output_files(root), 1)
+            processed = gzip.decompress((root / "fixture.css.gz").read_bytes()).decode()
+        for token in ("calc(100% + 4px)", "calc(var(--content-width) + 64px)",
+                      "calc(100% - 20px)", 'a  b; /*literal*/', 'a/**/b  c',
+                      '.a/**/.probe', '.a + .b', '.a ~ .c'):
+            self.assertIn(token, processed)
+        self.assertEqual(fixture["version"], 1)
+
+    def test_escape_and_function_regions(self):
+        for source in (r'.\31  a { content: "a\\b  c"; }',
+                       '@import url("data:text/css,a  b;/*c*/");',
+                       '.a { --nested: { a:  b; }; width: min(1px, calc(2px + 3px)); }'):
+            self.assertEqual(web.minify_css(source), source + "\n")
+
+
 class WebBuildTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

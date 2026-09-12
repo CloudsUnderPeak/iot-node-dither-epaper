@@ -3,9 +3,20 @@
 #include <Arduino.h>
 
 #include "core/Result.h"
+#include "modules/config/ConfigService.h"
 
 class AuthService {
  public:
+  ConfigService *config = nullptr;
+  Result changePassword(const char *password, bool runtimeAvailable, bool &restartRequired) {
+    restartRequired = false;
+    if (config == nullptr) return storageError("missing config");
+    if (config->value.apPasswordEnabled && !runtimeAvailable) return unsupported("runtime unavailable");
+    DeviceConfig committed;
+    auto result = config->updateAdminPassword(password, &committed);
+    if (result.ok()) { invalidated = true; restartRequired = committed.apPasswordEnabled; }
+    return result;
+  }
   bool invalidated = false;
   String validToken = "valid-token";
 

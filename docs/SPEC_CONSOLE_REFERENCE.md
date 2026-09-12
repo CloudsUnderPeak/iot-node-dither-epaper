@@ -282,3 +282,7 @@ api POST /api/system/reset token=<token> {}
 - `config commit` 與所有 `api ...` 寫入都經 `ApiRouter`，不建立 `wifi set ...` 這類平行 business rules。
 - Raw file transfer 是 HTTP-only；serial 只提供 JSON list／delete 與 human `ls`／`stat` inspection。
 - Console output 可能與 firmware background log 交錯；自動化程式應只把完整 JSON 行視為 `api` response，且不得假設 human output 是穩定機器介面。
+
+## Scan continuation
+
+`scan` 與 `api GET /api/wifi/scan token=<token>` 都將工作交給唯一非阻塞 scanner；等待時主 loop 繼續服務 Wi-Fi、HTTP 與 runtime。Serial 最後只輸出一次對應結果，請等待結果後再送下一條命令。API 仍使用原本 200 networks／錯誤 envelope，不新增 202 輪詢指令；完成前 token 失效時回 401。Scan request deadline 為 15 秒，driver stop ACK 另有 2 秒 cleanup 期限，未確認時不釋放 radio。輸入容量及 overflow 規則不變。

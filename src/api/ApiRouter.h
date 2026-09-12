@@ -49,6 +49,7 @@ class ApiRouter {
 
   enum class HttpBinding : uint8_t {
     NoBody,
+    Deferred,
     JsonBody,
     Query,
     RawUpload,
@@ -85,6 +86,8 @@ class ApiRouter {
 
   Result begin(const ApiRouterDeps &deps);
   Api::Response dispatch(const Api::Request &request);
+  bool pollPending(const Api::PendingRequest &pending, Api::Response &response);
+  void cancelPending(const Api::PendingRequest &pending);
   static size_t routeCount();
   static bool routeInfo(size_t index, RouteInfo &info);
   FileUploadStart prepareFileUpload(const String &token,

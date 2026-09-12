@@ -5,6 +5,8 @@
 #include <ESPAsyncWebServer.h>
 
 #include "../../core/Result.h"
+#include "PendingResponseSlot.h"
+#include "StreamingSessionBridge.h"
 #include "api/ApiRouter.h"
 #include "../storage/EmbeddedWebAssets.h"
 #include "../wifi/WifiManager.h"
@@ -17,6 +19,7 @@ class ApiServer {
                const EmbeddedWebAssets *assets,
                ApiRouter *router);
   bool started() const;
+  void poll();
 
  private:
   AsyncWebServer server_{80};
@@ -24,6 +27,8 @@ class ApiServer {
   const EmbeddedWebAssets *assets_ = nullptr;
   ApiRouter *router_ = nullptr;
   bool started_ = false;
+  StreamingSessionBridge streams_;
+  PendingResponseSlot<AsyncWebServerRequestPtr> pending_;
 
   Result registerRoutes();
   void dispatchNoBody(AsyncWebServerRequest *request, Api::Method method);

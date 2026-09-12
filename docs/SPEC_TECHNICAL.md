@@ -6,7 +6,7 @@
 
 - `main.cpp` 是唯一 composition root，直接擁有具體 service、Arduino `setup()`／`loop()`、boot order 與每個 tick 的 poll order。
 - 只供 `main.cpp` 使用的 service instances、subsystem callbacks 與 log helper 放 anonymous namespace，不另外建立只有一個使用者的 `FirmwareApp` wrapper。啟動順序、startup readiness 與 heartbeat health 由同一份 fixed-size subsystem registry 驅動，不另外維護平行 `xxxReady` flags。
-- Poll 順序固定為 runtime command、Wi-Fi state、網路服務同步、captive DNS、console、heartbeat。
+- Poll 順序固定為 scan owner／HTTP continuation、e-paper control admission、runtime command、Wi-Fi state、網路服務同步、captive DNS、console、heartbeat。
 - 不建立 service locator 或通用 application framework。Interface 只用在具有故障注入或 host test 需求的硬體／持久化邊界，不為一般單一實作額外建立抽象層。
 
 ```text
@@ -65,7 +65,7 @@ Arduino loop <──────────────────────
 | `modules/epaper/Epd7In3E.*` | 7.3inch E driver command、BUSY timeout、Power OFF／Deep Sleep 與 operation watchdog；透過 shared SPI bus 傳輸。 |
 | `modules/epaper/CpuFrequencyGuard.*` | RAII 全晶片 frequency guard；panel wake 前切到並 read-back 80 MHz，cleanup 後恢復並 read-back 原頻率。 |
 | `modules/epaper/EpaperSafetyStore.*` | Default NVS `epaper_meta` protection marker、read-back verification 與 boot recovery 判定；故障 fail closed。 |
-| `modules/epaper/EpaperShutdownCoordinator.*` | Worker quiesce、protocol shutdown、logical quiesce 與 software restart 核准；失敗標記 unknown 並取消 restart。 |
+| `modules/epaper/EpaperShutdownCoordinator.*` | Protocol shutdown、logical quiesce 與最終 software restart 核准；由 EpaperService worker 完成 runtime drain 後委派，失敗標記 unknown 並取消 restart。 |
 | `modules/epaper/EpaperPowerProbe.*` | Build-flag gated、預設停用的 power-only bring-up；在 storage／Wi-Fi 啟動前，marker 與 80 MHz guard 成功後只做 initialize、Power OFF／Deep Sleep，不傳 frame、不 refresh。 |
 | `modules/epaper/EpaperRefreshProbe.*` | Build-flag gated、預設停用的單次實機刷新 bring-up；在 storage／Wi-Fi 啟動前依序執行 marker、80 MHz guard、initialize、一次 transfer/refresh、Power OFF／Deep Sleep 與頻率恢復；任何階段失敗仍執行 cleanup。若測試中掉電，下一次 boot 可恢復 active marker，但不得自動重試 probe。 |
 | `modules/epaper/EpaperService.*` | 唯一 operation/status owner、upload reservation、queue depth 1、worker、cooldown 與 stable error mapping。 |
@@ -135,7 +135,7 @@ Arduino loop <──────────────────────
 
 - `ConfigService` 是唯一 active config owner；其他模組只保存 service pointer 並取得 value snapshot。
 - Production 由 `main.cpp` 將 `ArduinoPreferencesBackend` 注入 `PreferencesConfigStore`，再將 store 注入 `ConfigService`；兩個 interface 都是持久化故障注入與 host test 的窄邊界，不承載 business rule。雙 slot、schema/read-back 與 active marker commit 演算法仍由 `PreferencesConfigStore` 唯一實作。
-- 一般 endpoint 只能使用 `updateWifi()`、`updateSystem()`、`updateHostname()` 或 `updateAdminPassword()`：每個方法在同一個 service mutex 內從最新 active config 合併指定欄位群組、驗證、持久化並發布。`updateSystem()` 同時回報 hostname／TX power 的實際變動並略過 no-op NVS write；完整 `commit()` 只供 boot/self-test 等明確的完整替換流程。
+- 一般 endpoint 的設定更新使用 `updateWifi()`、`updateSystem()`、`updateHostname()`；密碼更新只委派 `AuthService::changePassword()`，由它呼叫 `ConfigService::updateAdminPassword()`：每個方法在同一個 service mutex 內從最新 active config 合併指定欄位群組、驗證、持久化並發布。`updateSystem()` 同時回報 hostname／TX power 的實際變動並略過 no-op NVS write；完整 `commit()` 只供 boot/self-test 等明確的完整替換流程。
 - NVS 不保存整個 C++ struct/blob，也沒有 `kConfigBlobKey`。
 - Current schema 使用 `devcfg_a`、`devcfg_b` 兩個 per-key slot，以及 `devcfg_meta/active` marker。
 - Save 寫入 inactive slot，逐欄完成後最後寫 schema marker，再 read-back 驗證，最後切換 active marker；失敗時 active config 不更新。
@@ -168,7 +168,7 @@ Arduino loop <──────────────────────
 | Battery sample | `BatteryMonitor` critical section；loop producer 更新完整 voltage/timestamp，HTTP/serial reader 只取 cached snapshot。ADC 取樣與百分比計算不在 critical section 內。 |
 | Console staged config | `ConsoleConfigCommand`／`ConfigStaging`，只在 console runtime RAM；dirty bitset 與 fixed-size secret buffers。 |
 
-Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作。同步 scan 可能等待 Wi-Fi driver，但 STA connect/apply 本身不得用等待連線的 loop。
+Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作。Scan 與 STA connect/apply 都不得用等待完成的 loop；scan 由固定 poll 推進。
 
 ## Battery monitoring
 
@@ -194,11 +194,11 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 - 狀態改變由 `main.cpp` 的 loop 統一 restart mDNS/captive DNS；mDNS 只在 STA connected，captive DNS 只在 AP active。
 - HTTP captive fallback 必須以 TCP connection 的 local IP 判斷 request 是否由 AP 介面抵達，不得只因 runtime 有 AP IP 就攔截 STA LAN request。
 - API 必須區分 persisted `configured_mode` 與目前 runtime `mode`。
-- `WifiScanner` 是唯一 `WiFi.scanNetworks()` 呼叫點；API 與 human console 共用 RSSI 大於 `-75 dBm` 的門檻、10 秒 cooldown 與最多 20 筆結果。持久化 STA application state 為 `connecting` 時由 `WifiManager` preflight scan 並回可重試 busy，不呼叫 driver scan。
+- `WifiScanner` 委派 `ArduinoWifiScanDriver` 作為唯一 `WiFi.scanNetworks()` 呼叫點；API 與 human console 共用 RSSI 大於 `-75 dBm` 的門檻、10 秒 cooldown 與最多 20 筆結果。持久化 STA application state 為 `connecting` 時由 `WifiManager` preflight scan 並回可重試 busy，不呼叫 driver scan。
 
 ## 測試、logging 與嵌入式限制
 
-- Native test 唯一入口為 `tools/native-test/test_native.sh`；目前測試 config／IPv4 validation、ConfigService 原子欄位群組更新與故障隔離、PreferencesConfigStore slot／marker fault injection、AuthService session lifecycle／concurrency、WifiManager driver/clock seam 與 timeout／IPv4／disconnect／subnet overlap／commit-finalize-rollback failure 狀態、Wi-Fi payload、response codec、HTTP JSON transport parsing、user filename／MIME／Range／cursor／inspection path、battery divider／median／sample cadence／estimate/null contract、EPDIMG header／CRC／palette streaming validation、white／palette packed frame 與 wrap-safe cooldown、board restricted-pin／原子 claim／shared SPI ownership與安全 boot level、fake transport driver command／BUSY timeout／watchdog／shutdown failure、80 MHz set/read-back/restore、`epaper_meta` marker fault injection、power-only／single-refresh probe、protocol shutdown與 restart denial、e-paper hardware 早於 Serial 與其他 subsystem 且 release self-test/refresh disabled 的 source contract、e-paper/runtime 公開 route 與 reserved-file matrix、host EPDIMG/CRC/URL/raw-upload/error/wait client、console config staging、subsystem registry start order/readiness/dynamic health、ApiRouter catalogue metadata 與 exact/dynamic runtime authorization matrix、Web identity response（包含 none／null）、generated metadata、空前端 artifact protection、web preview/minifier/deterministic gzip、release partition/manifest/path/hash protection，以及 metadata-driven HTTP registration source contract。Source contract lint 不代表 HTTP adapter、filesystem 或完整 service integration coverage。
+- Native runner 為 `tools/native-test/test_native.sh`；Python tools 測試由 `make test-tools` 獨立執行。整體自動化測試涵蓋 config／IPv4 validation、ConfigService 原子欄位群組更新與故障隔離、PreferencesConfigStore slot／marker fault injection、AuthService session lifecycle／concurrency、WifiManager driver/clock seam 與 timeout／IPv4／disconnect／subnet overlap／commit-finalize-rollback failure 狀態、Wi-Fi payload、response codec、HTTP JSON transport parsing、user filename／MIME／Range／cursor／inspection path、battery divider／median／sample cadence／estimate/null contract、EPDIMG header／CRC／palette streaming validation、white／palette packed frame 與 wrap-safe cooldown、board restricted-pin／原子 claim／shared SPI ownership與安全 boot level、fake transport driver command／BUSY timeout／watchdog／shutdown failure、80 MHz set/read-back/restore、`epaper_meta` marker fault injection、power-only／single-refresh probe、protocol shutdown與 restart denial、e-paper hardware 早於 Serial 與其他 subsystem 且 release self-test/refresh disabled 的 source contract、e-paper/runtime 公開 route 與 reserved-file matrix、host EPDIMG/CRC/URL/raw-upload/error/wait client、console config staging、subsystem registry start order/readiness/dynamic health、ApiRouter catalogue metadata 與 exact/dynamic runtime authorization matrix、Web identity response（包含 none／null）、generated metadata、空前端 artifact protection、web preview/minifier/deterministic gzip、release partition/manifest/path/hash protection，以及 metadata-driven HTTP registration source contract。Source contract lint 不代表 HTTP adapter、filesystem 或完整 service integration coverage。
 - Firmware runtime 變更至少對既有 verified production `build/latest/web/` 執行 `make esp`；需同時重建預設產品 frontend 時執行 `make build` 或 `make build WEB=user`，builtin 使用 `make build WEB=builtin`，API-only firmware 使用 `make build WEB=none`。
 - `user-web-project/` 是預設 frontend source，`user-web/` 是其 gzip-only generated import；`builtin-web/` 保存可明確選用的內建管理頁。`tools/web-build/` 負責 user import lifecycle、frontend selection／processing及 `WEB=none` 的已驗證空 production web；`tools/release-build/` 只消費 production web 並管理 generated header、binary、manifest、`firmware.img` 與快照。
 - `user-web-project/` 以 `embedded-web-dithering` remote 的 `six-color-epaper` branch 作為 `--squash` Git subtree；它不是 submodule。`make user-web pull` 必須由乾淨 worktree 拉取並建立 subtree merge commit；`make user-web push` 只接受已提交的 prefix 變更並透過本機設定的 SSH push URL 推送。同步後一律以 `make build WEB=user` 重建 nested frontend、重新匯入並檢查 app partition；不得手動複製或編輯 `user-web/`。
@@ -215,3 +215,67 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 - Serial/API/log 不得輸出 admin password、Wi-Fi password、token、MAC 或其他本機識別資料到可重用文件。
 - Arduino `String` 仍用於 framework transport、JSON response 與短生命週期 token；沒有長期 heap/fragmentation 量測證據前不做全面機械替換，優先維持現有 bounded input 與 secret clearing。
 - Build、upload、monitor、browser 與 board smoke-test 的日期結果只放 ignored `tmp/verification/`。
+
+## Runtime restart ownership
+
+- `SystemRestartCoordinator` 使用 request／poll／progress：request 回 Accepted／AlreadyPending／Rejected，progress 為 Idle／Draining／Ready／Failed。Scheduler 只持有 `EpaperService` 的 admission owner；`EpaperShutdownCoordinator` 是 worker 完成 cleanup 後的最終硬體核准邊界，不是 scheduler 的同步旁路。
+- Boot probe 到 runtime worker 的 ownership 以成功建立 worker 為交接點。交接後 loop 不寫 protection marker；cooldown poll 僅設 bounded control flag，worker 在每次最長 10 ms queue wait 前處理 control。Draw queue depth 保持 1，control 不占 draw slot。
+- Snapshot mutex 只保護狀態與 admission。Cooldown clear／read-back 在 worker 鎖外執行，先保留 generation，完成後短鎖確認同代再發布；清除期間不開放 draw／upload。CPU snapshot 使用 owner 發布的 cached 值；marker stage 的唯讀跨 task snapshot 使用 atomic，持久化仍只有唯一 writer。
+- 已接受 upload 保持 reservation 到後續 draw 入列；callback 只清理自己的 session，restart 不旁路關閉檔案。已排隊 validation／draw 也屬 drain 範圍。所有 driver cleanup、CPU restoration、storage release 完成才可 ACK；Ready 是不可逆的本次核准，即使測試 restart driver 返回也不再接新工作。
+- Deadline 使用 unsigned monotonic subtraction：upload 30 秒、total 150 秒，從首次 drain 開始且不延展。Driver 預算為 2 秒 prewake、90 秒 operation watchdog、15 秒 power-off wait、2 秒 deep sleep；連同 upload 約 139 秒，餘量供短 I/O。Deadline 不強停 driver／task；超時 Failed 後由原 owner 收尾，未確認安全前保持 admission 關閉。
+- Storage mount／worker startup failure 仍建立 restart 邊界。無 active worker 時只可核准已初始化且已知安全的 panel／marker；unknown 或 active marker 拒絕，不能因 userdata failure 永久阻斷安全 reset 修復路徑。
+
+## Credential lifecycle
+
+- 固定鎖順序是 `AuthService credential/session mutex → ConfigService mutex`。Login 在取得 credential mutex 後才讀密碼、比較並發布 token；changePassword 在相同 mutex 內保存，成功才撤銷 session，不在持鎖方法內呼叫會重鎖的 public invalidation helper。
+- ConfigService 仍是設定與 NVS 的唯一 owner。密碼更新在 config lock 內依最新 committed AP password 開關確認 runtime readiness，僅接受 scheduler 可用性值，不反向呼叫 auth／scheduler。失敗保留 active credential 與 token，成功回傳是否需要 restart；同密碼成功更新仍撤銷 session。
+- REST、serial `api` 與 typed config staging 的密碼更新共用 AuthEndpoints／AuthService；完整 config commit 只用於 boot/self-test。不得新增 runtime credential 寫入旁路。
+
+## Stored-image snapshot publication
+
+- Stored draw 與 metadata refresh 先取得 e-paper operation reservation／generation，再開啟 storage。Validation 使用 stack-local candidate，完整讀取並驗證後才在短鎖中發布本代 snapshot。已接受 operation 到發布期間不開放新 upload，因此 EOF 自動釋放 storage gate 也不會讓新 image commit 被舊 candidate 覆蓋；generic routes 不得修改 reserved image filename。
+- Busy、暫時 unavailable、open／partial read I/O error 保留最後已知 metadata，回報本次真正錯誤。只有 confirmed NotFound 清除 snapshot；完整讀取且確認 corrupt 才發布 present＋invalid 及 validation reason。Pinned Arduino VFS 的 read-open 以 `errno == ENOENT` 判定 missing，其餘失敗保守回 storage error。
+- Reservation 與 file session 都由取得者釋放；restart admission 拒絕、validation failure 與 queue failure 不可釋放別人的 session。Runtime status 不為查 metadata 掃 filesystem。
+
+## Deferred Wi-Fi scan
+
+- `WifiScanner` 擁有唯一 operation id、固定最多 20 筆 result、interest、15 秒 request deadline 與 2 秒 stop cleanup deadline。State 為 Idle／Starting／Scanning／Stopping／Unavailable；完成結果只能由 matching id take，完成後維持 10 秒 cooldown，不把舊結果當作新 request 成功。
+- `WifiRadio` 的 scan reservation 與短 mutex 分開。Scan admission 和 `WifiManager::queueStaTest()` 都使用 radio → manager state 的鎖順序；manager apply/poll/TX power 遇 reservation 不操作 driver，scheduler 延後 apply 而不遺失最新設定。Scanner poll 的 driver call 只短暫取得 radio mutex，不跨 scan 等待。
+- Arduino adapter 使用 pinned async scan／scanComplete；獨立 SCAN_DONE event ACK 證明 completion／stop。Application timeout 先發布 terminal error，只有確認 driver 結束才 scanDelete／釋放 reservation；stop 未確認超過 2 秒則 fail closed，晚到 ACK 不靜默重新開放 unknown radio。
+- Restart 先關閉 e-paper admission並啟動原有總 deadline；scheduler 以值傳入 radio 是否已完成 cleanup，未完成時 e-paper owner 不核准實體 restart。Wi-Fi cleanup 不碰 panel、不延長 150 秒 deadline；未知 radio 不以強制 restart 補救。
+- ApiRouter 的 internal PendingRequest 綁定 operation id、method/path/principal；不進入公開 envelope。Router/Endpoints 統一 admission、錯誤映射與 completion 授權；HTTP/serial 不各自實作 scan policy。
+- HTTP 使用 pinned ESPAsyncWebServer pause() 的 weak handle。單一 PendingResponseSlot 以短 mutex 管所有權，disconnect／completion 只有一個 take 成功；鎖外才呼叫 router／send，late callback 不影響新 id，不保存 raw request pointer。
+- Serial API 使用相同 PendingRequest，human scan 共用 scanner id；等待期間回到 loop，維持單一執行中命令與既有有限輸入容量，收到 terminal 結果前不開始下一個 response。不得用 busy-wait 或無界 request list。
+
+### Host verification and streaming callback boundary
+
+`make test-native`, `make test-tools` and `make test-web` run independently;
+`make test` runs each once without firmware compilation. `make test-all` builds,
+verifies the resulting snapshot, then runs those tests. Prepare pinned native
+headers with `pio pkg install -e firebeetle2_esp32c6`; alternatively point
+`ARDUINOJSON_INCLUDE` at the ArduinoJson version pinned in `platformio.ini`.
+Missing headers or browser are failures, not skipped tests.
+
+`ApiServer` routes streaming operations through `StreamingSessionBridge` so a
+body/filler callback and disconnect cannot read/write/close the same storage
+session concurrently. The bridge serializes calls into `ApiRouter`; services
+retain the operation gate, session IDs and file policy. It never encompasses
+response sending, which may reenter disconnect. Session IDs still reject late
+cleanup after a newer session starts. Native tests exercise the bridge, real
+Router/endpoints and real UserDataStorage with an injected filesystem; they do
+not establish ESPAsyncWebServer request lifetime guarantees on a device.
+
+PR and master-push verification uses independent host/browser jobs and isolated
+builtin/user/none firmware jobs. User source and production checks run through
+that project's own targets before firmware import. Verification has read-only
+repository permission and no deployment or hardware step.
+
+Final restart approval additionally calls `UserDataStorage::reserveRestart()`.
+This is a zero-wait acquisition of the existing operation gate with no filesystem
+I/O. An active generic upload/download keeps restart draining; only its original
+callback may close it. After acquisition the gate stays reserved through reboot,
+so no new file session can enter between ACK and physical restart. The same
+150-second total deadline cancels a drain that cannot acquire the gate. An
+unmounted storage service still participates without blocking recovery reset;
+its dependency is retained before runtime startup validation. New e-paper image
+downloads are denied once e-paper restart admission closes.

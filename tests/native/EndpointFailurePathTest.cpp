@@ -224,6 +224,7 @@ void testPasswordUpdatePreflightsRequiredApRestart() {
   ConfigService config;
   config.value.apPasswordEnabled = true;
   AuthService auth;
+  auth.config = &config;
   RuntimeActionScheduler runtime;
   AuthEndpoints endpoints;
   endpoints.begin(&config, &auth, &runtime);
@@ -248,6 +249,7 @@ void testPasswordUpdateWithoutApProtectionDoesNotRestart() {
   ConfigService config;
   config.value.apPasswordEnabled = false;
   AuthService auth;
+  auth.config = &config;
   RuntimeActionScheduler runtime;
   AuthEndpoints endpoints;
   endpoints.begin(&config, &auth, &runtime);

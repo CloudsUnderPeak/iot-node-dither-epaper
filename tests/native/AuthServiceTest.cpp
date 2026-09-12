@@ -1,4 +1,7 @@
 #include <atomic>
+#include <cassert>
+#include <future>
+#include <functional>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -20,6 +23,8 @@ void expect(bool condition, const char *message) {
 class MemoryConfigStore : public ConfigStore {
  public:
   DeviceConfig value = defaultDeviceConfig();
+  bool failSave = false;
+  std::function<void()> onSave;
 
   Result load(DeviceConfig &config) override {
     config = value;
@@ -27,6 +32,8 @@ class MemoryConfigStore : public ConfigStore {
   }
 
   Result save(const DeviceConfig &config) override {
+    if (onSave) onSave();
+    if (failSave) return storageError("injected failure");
     value = config;
     return okResult();
   }
@@ -94,9 +101,9 @@ void testPasswordChangeAndRebootLifecycle() {
   expect(fixture.auth.login("admin", "password", oldToken).ok(),
          "login before password change should succeed");
 
-  expect(fixture.config.updateAdminPassword("NewPassword1").ok(),
+  bool restartRequired = false;
+  expect(fixture.auth.changePassword("NewPassword1", true, restartRequired).ok(),
          "new password should persist");
-  fixture.auth.invalidateSession();
   expect(!fixture.auth.tokenValid(oldToken),
          "password-change flow must invalidate the previous session");
 
@@ -155,9 +162,80 @@ void testConcurrentLoginVerifyAndInvalidate() {
   expect(!fixture.auth.tokenValid(finalToken),
          "final invalidation should deterministically revoke the token");
 }
+void testCredentialBarrierAndFailures() {
+  AuthFixture f;
+  std::promise<void> validated, contended, releaseLogin;
+  auto release = releaseLogin.get_future();
+  String oldToken;
+  std::thread login([&] {
+    bool paused = false;
+    nativeAfterSemaphoreGive = [&] {
+      if (paused) return;
+      paused = true; // config snapshot is read, credential mutex still held
+      validated.set_value();
+      release.wait();
+    };
+    assert(f.auth.login("admin", "password", oldToken).ok());
+    nativeAfterSemaphoreGive = {};
+  });
+  validated.get_future().wait();
+  std::thread change([&] {
+    nativeSemaphoreBlocked = [&] { contended.set_value(); };
+    bool restart = false;
+    assert(f.auth.changePassword("NewPassword1", true, restart).ok());
+    nativeSemaphoreBlocked = {};
+  });
+  // Observe actual contention, not a semaphore allocation number or sleep.
+  assert(contended.get_future().wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+  releaseLogin.set_value();
+  login.join();
+  change.join();
+  assert(!f.auth.tokenValid(oldToken));
+  String current;
+  assert(f.auth.login("admin", "NewPassword1", current).ok());
+  bool restart = false;
+  f.store.failSave = true;
+  assert(!f.auth.changePassword("OtherPassword1", true, restart).ok());
+  assert(f.auth.tokenValid(current));
+  assert(f.auth.credentialsMatch("admin", "NewPassword1"));
+  f.store.failSave = false;
+  auto config = f.config.snapshot();
+  config.apPasswordEnabled = true;
+  assert(f.config.updateWifi(config).ok());
+  assert(f.auth.changePassword("OtherPassword1", false, restart).code == ResultCode::Unsupported);
+  assert(f.auth.tokenValid(current));
+  assert(f.auth.changePassword("OtherPassword1", true, restart).ok() && restart);
+  assert(!f.auth.tokenValid(current));
+}
+void testLatestApSettingBarrier() {
+  AuthFixture f;
+  String token;
+  assert(f.auth.login("admin", "password", token).ok());
+  auto updated = f.config.snapshot();
+  updated.apPasswordEnabled = true;
+  std::promise<void> saving, blocked, releaseSave;
+  auto release = releaseSave.get_future();
+  f.store.onSave = [&] { saving.set_value(); release.wait(); };
+  std::thread wifi([&] { assert(f.config.updateWifi(updated).ok()); });
+  saving.get_future().wait();
+  std::thread password([&] {
+    nativeSemaphoreBlocked = [&] { blocked.set_value(); };
+    bool restart = false;
+    assert(f.auth.changePassword("NewPassword1", false, restart).code == ResultCode::Unsupported);
+    nativeSemaphoreBlocked = {};
+  });
+  assert(blocked.get_future().wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+  releaseSave.set_value();
+  wifi.join();
+  password.join();
+  assert(f.auth.tokenValid(token));
+  assert(f.auth.credentialsMatch("admin", "password"));
+}
 }  // namespace
 
 int main() {
+  testLatestApSettingBarrier();
+  testCredentialBarrierAndFailures();
   testLoginSuccessAndFailure();
   testNewLoginAndLogoutInvalidateTokens();
   testPasswordChangeAndRebootLifecycle();

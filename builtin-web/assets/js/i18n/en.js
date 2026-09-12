@@ -1,5 +1,6 @@
 window.messages = {
   en: {
+    requestTimedOut: 'Request timed out. The result may be unknown; reconnect and check before trying again.',
     network: 'Network',
     settings: 'Settings',
     networkOverview: 'Connection status and addresses',

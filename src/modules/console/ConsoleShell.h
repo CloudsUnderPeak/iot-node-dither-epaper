@@ -38,6 +38,8 @@ class ConsoleShell {
   size_t lineLength_ = 0;
   bool discardingLine_ = false;
   bool discardedApiLine_ = false;
+  Api::PendingRequest pendingApi_;
+  uint32_t pendingHumanScan_ = 0;
   void clearLine();
   void handleLine(char *line);
   void handleHumanCommand(char *command);
@@ -50,6 +52,7 @@ class ConsoleShell {
   void printDevice() const;
   void printWifi() const;
   void printScan();
+  void printScanResult(const WifiScanResult &result);
   void printStorage() const;
   void printSession() const;
   void printApiResponse(const Api::Response &response) const;

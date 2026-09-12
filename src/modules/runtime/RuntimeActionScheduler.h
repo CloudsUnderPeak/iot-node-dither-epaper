@@ -43,6 +43,7 @@ class RuntimeActionScheduler {
   uint32_t wifiTxPowerApplyDueMs_ = 0;
   uint8_t wifiTxPowerRetryCount_ = 0;
   bool systemResetPending_ = false;
+  bool systemResetDraining_ = false;
   bool systemResetFailed_ = false;
   uint32_t systemResetDueMs_ = 0;
 

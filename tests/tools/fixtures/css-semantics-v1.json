@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "markup": "<div class='parent'><div class='probe a'></div><div class='probe b'></div><div class='probe c'></div></div>",
+  "css": ".parent { width: 300px; --content-width: 100px; }\n.a { position: relative; right: calc(100% + 4px); max-width: calc(var(--content-width) + 64px); width: calc(100% - 20px); margin-left: calc(100% - 20px); height: clamp(10px, calc(min(20px, 30px) + max(2px, 3px)), 50px); --tokens: a/**/b  c; --literal: \"a  b; /*literal*/\"; background-image: url(\"data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E\"); }\n.a + .b { width: 17px; }\n.a ~ .c { width: 19px; }\n.a::before { content: \"a  b; /*literal*/\"; }\n.a/**/.probe { padding-left: 3px; }",
+  "checks": [
+    {
+      "selector": ".a",
+      "property": "right",
+      "expected": "304px"
+    },
+    {
+      "selector": ".a",
+      "property": "max-width",
+      "expected": "164px"
+    },
+    {
+      "selector": ".a",
+      "property": "width",
+      "expected": "164px"
+    },
+    {
+      "selector": ".a",
+      "property": "height",
+      "expected": "23px"
+    },
+    {
+      "selector": ".a",
+      "property": "padding-left",
+      "expected": "3px"
+    },
+    {
+      "selector": ".b",
+      "property": "width",
+      "expected": "17px"
+    },
+    {
+      "selector": ".c",
+      "property": "width",
+      "expected": "19px"
+    },
+    {
+      "selector": ".a",
+      "pseudo": "::before",
+      "property": "content"
+    },
+    {
+      "selector": ".a",
+      "property": "background-image"
+    },
+    {
+      "selector": ".a",
+      "property": "--tokens"
+    },
+    {
+      "selector": ".a",
+      "property": "--literal"
+    },
+    {
+      "selector": ".a",
+      "property": "margin-left",
+      "expected": "280px"
+    }
+  ]
+}

@@ -70,6 +70,18 @@ void ConsoleShell::clearLine() {
 }
 
 void ConsoleShell::poll() {
+  if (pendingApi_.id != 0) {
+    Api::Response response;
+    if (!router_->pollPending(pendingApi_, response)) return;
+    pendingApi_ = {};
+    printApiResponse(response);
+  }
+  if (pendingHumanScan_ != 0) {
+    WifiScanResult result;
+    if (!wifiScanner_->takeResult(pendingHumanScan_, result)) return;
+    pendingHumanScan_ = 0;
+    printScanResult(result);
+  }
   while (Serial.available() > 0) {
     const char incoming = static_cast<char>(Serial.read());
     if (incoming == '\r') {
@@ -90,6 +102,7 @@ void ConsoleShell::poll() {
       line_[lineLength_] = '\0';
       handleLine(line_);
       clearLine();
+      if (pendingApi_.id != 0 || pendingHumanScan_ != 0) return;
       continue;
     }
     if (discardingLine_) {
@@ -204,7 +217,8 @@ void ConsoleShell::handleApiCommand(char *command) {
     request.token.setCharAt(index, '\0');
   }
   request.token.remove(0);
-  printApiResponse(response);
+  if (response.pending.id != 0) pendingApi_ = response.pending;
+  else printApiResponse(response);
 }
 
 void ConsoleShell::printHelp() const {
@@ -367,7 +381,16 @@ void ConsoleShell::printScan() {
     return;
   }
   Serial.println("Scanning nearby Wi-Fi networks...");
-  const WifiScanResult scanResult = wifiScanner_->scan();
+  const WifiScanResult scanResult = wifiScanner_->start(millis());
+  if (scanResult.operationId != 0) { pendingHumanScan_ = scanResult.operationId; return; }
+  printScanResult(scanResult);
+}
+
+void ConsoleShell::printScanResult(const WifiScanResult &scanResult) {
+  if (scanResult.busy || scanResult.connectBusy) {
+    Serial.println("Scan is busy. Try again shortly.");
+    return;
+  }
   if (scanResult.retryAfterSeconds > 0) {
     Serial.printf("Scan is cooling down. Try again in %u seconds.\n",
                   static_cast<unsigned>(scanResult.retryAfterSeconds));

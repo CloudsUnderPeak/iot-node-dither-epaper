@@ -548,6 +548,9 @@ Request body：
 - 每次掃描開始或完成後，至少間隔 10 秒才能再次掃描。
 - token 缺少或無效時回 `401`；rate limit 時回 `429`，`data.retry_after_seconds` 表示建議等待秒數。
 - 持久化 STA 尚在連線並占用 radio 時回 `409 wifi_scan_busy`，`data.retry_after_seconds` 表示建議等待秒數；connect request 占用 radio 時回 `409 wifi_connect_busy`。
+- 第二個同時 scan 立即回 `409 wifi_scan_busy`，`retry_after_seconds: 1`；仍保留完成後 10 秒 cooldown 的 `429 rate_limited`。Scan 在內部非同步執行，但原 request 最後只回一次既有 `200 networks` envelope，不新增 `202` polling contract。
+- Scan request 最多等待 15 秒；逾時沿用 `500 wifi_scan_failed`。底層 stop 尚未確認時仍拒絕新 scan；cleanup 2 秒仍無 ACK 時 scanner unavailable，後續 scan 回 `500 wifi_scan_failed`。
+- 等待期間 client disconnect 取消此 request 的結果興趣，driver 仍由 scanner 收尾；Bearer principal 在完成前已失效時回 `401 unauthorized`，不套用另一個新登入的 session。
 
 成功範例：
 
@@ -1216,5 +1219,7 @@ Storage error沿用 `storage_busy`、`storage_unavailable`、`insufficient_stora
   "message": "ok"
 }
 ```
+
+到期 restart 在等待既有 upload／draw 安全收尾期間持續回報 `restarting`，不是入列後立即清除 pending。Upload drain grace 為 30 秒、總等待上限 150 秒；超時取消本次 restart 並沿用 `last_error_code: "epaper_shutdown_failed"`，詳細原因僅寫入內部診斷。取消不代表 panel 已安全，也不清除下次 boot 的持久化 reset intent。
 
 `state` 固定為 `normal`、`degraded`、`restarting`。Validation時 blocked resources為 `epaper,userdata`，frame transfer為 `epaper,userdata,spi`，physical refresh與 cooldown只為 `epaper`；`busy: true` 不表示 HTTP 或 Wi-Fi 全部不可用。E-paper retry/cooldown的權威仍是 `/api/epaper/status`。

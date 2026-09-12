@@ -1,4 +1,5 @@
 window.messages['zh-Hant'] = {
+  requestTimedOut: '請求逾時，結果可能尚未確定；請重新連線並確認狀態後再試。',
   network: '網路',
   settings: '設定',
   networkOverview: '連線狀態與位址',

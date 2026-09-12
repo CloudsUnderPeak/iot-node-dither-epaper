@@ -100,6 +100,10 @@ class UserDataStorage {
   StorageCapacity rawCapacity() const;
   UploadCapacity uploadCapacity() const;
 
+  // Final restart ACK: no I/O, never closes another session. On success the
+  // gate remains held through reboot, including a returning test restart.
+  bool reserveRestart();
+
   UserDataUploadBegin beginUpload(const char *name, size_t declaredBytes);
   UserDataFileResult writeUpload(uint32_t sessionId,
                                  size_t index,

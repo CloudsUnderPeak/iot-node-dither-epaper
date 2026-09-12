@@ -162,13 +162,18 @@ Result ConfigService::updateSystem(const SystemConfigUpdate &update,
   return result;
 }
 
-Result ConfigService::updateAdminPassword(const char *password, DeviceConfig *committed) {
+Result ConfigService::updateAdminPassword(const char *password, DeviceConfig *committed,
+                                           bool runtimeAvailable) {
   const Result validation = validateAdminPasswordValue(password);
   if (!validation.ok()) {
     return validation;
   }
   if (!lock()) {
     return storageError("config service unavailable");
+  }
+  if (active_.apPasswordEnabled && !runtimeAvailable) {
+    unlock();
+    return unsupported("runtime action scheduler unavailable");
   }
   DeviceConfig updated = active_;
   strlcpy(updated.adminPassword, password, sizeof(updated.adminPassword));

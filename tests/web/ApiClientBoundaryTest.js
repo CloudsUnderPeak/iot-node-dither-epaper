@@ -6,8 +6,17 @@
   const mockEnabled = window.DEVICE_CONSOLE_FLAGS.mockApi === true;
   if (mockEnabled) {
     assert(window.fetch !== window.__formalFetch, 'mock adapter did not intercept fetch');
+    const login = await resources.auth.login({ username: 'admin', password: 'password' });
+    setToken(login.token);
+    const first = resources.wifi.scan();
+    const second = await resources.wifi.scan().catch(error => error);
+    assert(second.status === 409 && second.code === 'wifi_scan_busy', 'concurrent scan must be busy');
+    const completed = await first;
+    assert(Array.isArray(completed.networks), 'scan must retain networks envelope');
     const device = await resources.device.get();
     assert(device.chip_model === 'ESP32-C6', 'mock resource contract was not used');
+    await resources.auth.logout();
+    setToken('');
     assert(
       window.__formalRequests.length === 0,
       'mock API leaked a device request to formal transport'

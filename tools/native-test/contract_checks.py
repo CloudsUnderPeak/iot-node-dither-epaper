@@ -98,7 +98,7 @@ if restart_callers != ["src/modules/epaper/ArduinoRestartDriver.cpp"]:
     )
     raise SystemExit(1)
 runtime_scheduler = (project / "src/modules/runtime/RuntimeActionScheduler.cpp").read_text()
-if "restartCoordinator_->restartNow()" not in runtime_scheduler:
+if "restartCoordinator_->requestRestart(now)" not in runtime_scheduler:
     print("RuntimeActionScheduler must delegate reset to the safety coordinator", file=sys.stderr)
     raise SystemExit(1)
 
@@ -260,7 +260,10 @@ if not system_update.index("runtime_->ready()") < system_update.index("configSer
 
 auth_endpoints = (project / "src/api/auth/AuthEndpoints.cpp").read_text()
 password_update = auth_endpoints[auth_endpoints.index("Api::Response AuthEndpoints::updatePassword") :]
-if not password_update.index("runtime_->ready()") < password_update.index("configService_->updateAdminPassword") < password_update.index("invalidateSession") < password_update.index("scheduleSystemReset"):
+if ("authService_->changePassword(" not in password_update or
+        "configService_->updateAdminPassword" in password_update or
+        "invalidateSession" in password_update or
+        "runtime_->ready()" not in password_update):
     print("Password update must preflight AP restart before commit and invalidate after commit", file=sys.stderr)
     raise SystemExit(1)
 if not system_reset.index("runtime_->ready()") < system_reset.index("storageLifecycle_->requestReset") < system_reset.index("scheduleSystemReset"):
@@ -474,15 +477,15 @@ if "setTransientNotice(t('wifiConnectionReady'))" not in wifi_module or "setNoti
     raise SystemExit(1)
 
 wifi_resources = (project / "builtin-web/assets/js/core/api/resources.js").read_text()
-if "update: (body) => api('/api/wifi', { method: 'PUT', body })" not in wifi_resources:
+if "update: (body, options = {}) => api('/api/wifi', { ...options, method: 'PUT', body })" not in wifi_resources:
     print("Frontend Wi-Fi update resource is missing", file=sys.stderr)
     raise SystemExit(1)
 save_handler = wifi_module[wifi_module.index("async function saveWifi") : wifi_module.index("function openScanDialog")]
-for required in ("resources.wifi.update(payload)", "retryWifiStatus(payload.mode)"):
+for required in ("resources.wifi.update(payload, { signal })", "retryWifiStatus(payload.mode)"):
     if required not in save_handler:
         print(f"Frontend Wi-Fi update flow is missing: {required}", file=sys.stderr)
         raise SystemExit(1)
-if not save_handler.index("resources.wifi.update(payload)") < save_handler.index("retryWifiStatus(payload.mode)"):
+if not save_handler.index("resources.wifi.update(payload, { signal })") < save_handler.index("retryWifiStatus(payload.mode)"):
     print("Frontend must persist Wi-Fi before polling runtime status", file=sys.stderr)
     raise SystemExit(1)
 if "/api/wifi/test" in wifi_resources or "commitTest" in wifi_resources:

@@ -277,3 +277,9 @@ Settings 只有有效 session 才可見，所有寫入或控制 request 都帶 B
 - Network／Hardware 僅手動 Refresh，或定時自動更新；若自動更新，間隔多久？
 - 是否提示 captive portal browser 可能不穩，建議改用一般瀏覽器？
 - Open AP 時是否顯示安全警告？
+
+## 請求等待與離頁
+
+- 一般操作等待最多 10 秒、掃描最多 20 秒；Wi-Fi 切換確認每次請求最多 3 秒，整體仍最多 25 秒。逾時停止 busy feedback 並提供雙語重新連線／確認結果提示，保留尚未提交的 Wi-Fi 草稿。
+- Password、reset、Wi-Fi update 等寫入逾時代表結果未知，不自動重送；重新連線後先查狀態。逾時或離頁取消不當作認證失效，不清除 token；只有確認 unauthorized 才要求重新登入。
+- 切頁取消該頁自有請求，不顯示裝置故障，也不以晚到結果改寫已離開的畫面或較新的操作。共享的公開狀態查詢可繼續供其他 consumer 使用。
