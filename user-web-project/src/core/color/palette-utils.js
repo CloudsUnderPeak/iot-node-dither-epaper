@@ -2,6 +2,7 @@
     // Palette 共用計算工具。
     // 預設使用未加權 RGB 的 Euclidean distance。
     var DEFAULT_COLOR_DISTANCE_ID = 'euclidean-rgb';
+    var COLOR_DISTANCE_IDS = Object.freeze(['euclidean-bt709', 'euclidean-rgb', 'manhattan-bt709', 'manhattan-rgb', 'ciede2000']);
     // 依賴 core/color/color-utils.js 先載入（index.html 與 tools 的 script 順序保證）。
     var clampChannel = app.core.colorUtils.clampChannel;
 
@@ -160,19 +161,7 @@
         if (id === 'manhattan') {
             return 'manhattan-rgb';
         }
-        var metrics = app.pages
-            && app.pages.ditherEditor
-            && app.pages.ditherEditor.config
-            && app.pages.ditherEditor.config.colorDistanceMetrics;
-        var fallback = app.pages
-            && app.pages.ditherEditor
-            && app.pages.ditherEditor.constants
-            && app.pages.ditherEditor.constants.DEFAULT_COLOR_DISTANCE_ID
-            || DEFAULT_COLOR_DISTANCE_ID;
-        if (metrics && metrics.some(function (metric) { return metric.id === id; })) {
-            return id;
-        }
-        return fallback;
+        return COLOR_DISTANCE_IDS.indexOf(id) !== -1 ? id : DEFAULT_COLOR_DISTANCE_ID;
     }
 
     function createNearestColorFinder(palette, colorDistanceId) {
@@ -267,6 +256,8 @@
     }
 
     app.core.paletteUtils = {
+        colorDistanceIds: COLOR_DISTANCE_IDS,
+        defaultColorDistanceId: DEFAULT_COLOR_DISTANCE_ID,
         createNearestColorFinder: createNearestColorFinder,
         createColorDistanceMeasurer: createColorDistanceMeasurer,
         createRgbDistanceContext: createRgbDistanceContext,

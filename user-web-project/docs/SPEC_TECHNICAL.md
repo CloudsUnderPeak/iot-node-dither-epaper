@@ -9,132 +9,13 @@ Split From: SPEC_INDEX.md
 
 本文件收斂實作與架構規格，給工程實作、review、測試設計使用。產品目標、使用者行為、畫面行為與驗收節奏請看 [SPEC_BEHAVIOR.md](SPEC_BEHAVIOR.md)。文件入口與閱讀導引請先看 [SPEC_INDEX.md](SPEC_INDEX.md)。
 
-## History
+## 設計沿革與現行範圍
 
-- 2026-09-12: Project upload routing 改為 content-first；任何 PNG 檔名只要帶有效 project chunks 都進入 restore，不再以 `.dither.png` suffix 作匯入 gate，支援瀏覽器產生的 `.dither(1).png`。精確 `.dither.png` 但沒有 project chunks 仍拒絕，避免靜默載入成結果圖。
-- 2026-09-12: 新增 `project-file.js` 與 `project-workspace.js`，以標準 PNG 加私有 ancillary chunks 實作 `.dither.png` 可攜式設定檔；統一 upload routing、CRC／manifest／來源／尺寸驗證、schema/feature version gate 與原圖 Blob 還原。E-paper action 分離為裝置繪製和純本機設定檔匯出，後者不受 offline/cooldown admission 影響。
-- 2026-09-12: E-paper target policy 新增以 `originalSize` 決定新圖初始 5:3／3:5 的共用規則；Crop `onImageLoaded` 在幾何正規化前套用，首次 capability 切換也用同一規則處理非法比例，後續合法手動方向保持不變。
-- 2026-08-10: 新增 `device-epaper-calibration.js` 作為六色色準 canonical service，處理公開 GET／PUT／reset、deep-copy snapshot、revision 與 stale GET suppression。面板測試保留本地 draft；`target-policy` 改為 revision-aware 動態 palette，editor 收到變更時清 stage/image cache 並重跑 preview。
-- 2026-08-10: `target-policy.js` 的 `OUTPUT_COLORS`／`DISPLAY_COLORS` 改為共用 EPD code order `0,1,2,3,5,6`（黑、白、黃、紅、藍、綠）；韌體的 palette validation、capability `color_codes` 與六色測試 frame source 改讀同一份具名 code-order 常數。
-- 2026-08-09: E-paper effective palette 改為 `DISPLAY_COLORS`（A′），讓所有 palette mapper／dither processor 使用校色後的實體參考色；`target-policy.outputImageData()` 在 encoder boundary 以 exact RGB lookup 保留 palette index 並轉回 `OUTPUT_COLORS`（A），拒絕任何非六色色素。
-- 2026-08-09: `EpaperOperationOverlay` 共用 `.app-loading-content`、spinner、message、progress 與 progress-bar primitives，僅以 e-paper CSS 保留全畫面 blocking 層與獨立 percentage；避免啟動 loading 與操作 loading 的尺寸、動畫及 theme token 漂移。
-- 2026-08-09: E-paper frontend follow-up：phase progress 改為不受相同 status polling 重設的 time estimate 與 overtime asymptotic motion；cooldown local timer 在歸零後持續短輪詢至 server 離開 cooldown。`target-policy.js` 分離 immutable OUTPUT_COLORS 與人工可校正 DISPLAY_COLORS，viewport/display swatch 只套 display mapping，encoder 仍驗證純六色。
-- 2026-08-09: 實作 E-paper Device Mode。新增 e-paper capability/status/operation service、5:3/3:5 target policy、portrait clockwise normalization、EPDIMG encoder、global time-weighted progress overlay、cooldown admission 與 device e-paper test page；沿用既有 `/api/epaper*` contract。
-- 2026-07-29: `assets/icons/device/` 圖示來源對齊：`filter.svg` 與 `warning.svg` 改用 iot-node-bedrock builtin-web icon set 的原始 path（filter-funnel／warning），`lock.svg` 換成使用者提供的 SVG Repo lock-01（正規化為 24 viewBox、`stroke="currentColor"`、stroke-width 2、round cap/join、`aria-hidden`）。目前該目錄除 lock 外全部取自 builtin-web icon set。
-- 2026-07-29: 連線狀態卡新增 `.network-status-icon`（34px accent-soft 方塊＋accent filter icon），icon 以 `grid-row: 1 / span 2` 跨 label 與值兩列並垂直置中，說明列縮排在同一文字欄下，icon 下方不留空欄；新增 `assets/icons/device/signal.svg` 與 `globe.svg`（path 取自 iot-node-bedrock builtin-web icon set），STA 沿用 `wifi-strength-4.svg`；桌面與手機共用同一結構（手機單欄逐項）。`.network-status-grid` 桌面為三欄一列，欄寬加權（1 / 1.15 / 1.35）讓 mDNS 網址維持單行。移除 `.device-mono`：mDNS 網址與 hostname 預覽改用全站一般字體，等寬字只保留給 Help 的 matrix/kernel 格子。
-- 2026-07-29: `deviceSystemTitle`／`menuDeviceSystem` 文案改為「裝置設定」／"Device Setting"，`mockBadge` 簡化為 "PREVIEW"；`.device-grid` 與 `.network-status-grid` 在 920px 手機模式改為逐項單欄（移除 700/480 的併欄規則），且每列改為 130px 左標籤欄＋右側值（`.device-field` 兩欄、`.network-status-column` 的 value/hint 落在第二欄），不留整塊空白。
-- 2026-07-29: Web Setting 比照裝置頁改用 `panel-section` + `panel-body` 卡片並移除頁內 `h1` 與 `simple-page` 依賴；`components.css` 移除已無使用者的 `.setting-section`，新增 `.web-setting-page` 置中卡片堆疊版面（含 920px 自行捲動斷點）。
-- 2026-07-29: select 自訂箭頭抽成共用 `src/ui/select-field.js`（`app.ui.selectField.create(select)` 回傳 `.select-field` 包裝；樣式移入 components.css）；編輯器 `panel-utils.selectInput` 改回傳 `{ node, select }` 並套用包裝，crop／dither／palette feature 與 `wifi-form` 全部改走共用元件，全站 select 外觀一致。
-- 2026-07-29: 裝置頁卡片改用 components.css 的 `panel-section` + `panel-body`（`device-card-header` 承載含 badge／總空間的標題列變體），移除頁內 `h1` 與 `simple-page` 依賴；`assets/styles/device.css` 全面對齊編輯器尺寸階（輸入框 34px、字級 11–14px、間距 10–12px、圓角 6/8px），`device-form-row`／`device-toggle-row` 改為 130px 左標籤欄並在 560px 斷點收合，modal 圓角與內距同步縮小。容量圖例改為 builtin-web 式 `capacity-stats`／`capacity-stat`（`segments-N` 決定欄數、700px 以下兩欄），`wifi-form` 的 select 以 `.select-field` 包裝：`appearance:none` 隱藏原生箭頭、疊 `chevron-down.svg`，盒位使用全站統一的結尾圖示尺寸，讓各表單元件結尾的 svg 對齊。容量圖 `capacity-color-1..4` 改為圖表專用固定色階，色相取自 accent teal 與 status-busy 藍（依「深藍→深青綠→中藍→亮青綠」明度遞增排列，light 與 dark 節奏一致：light `#08569a`/`#058461`/`#5795cc`/`#49c6a7`，dark 以 `body[data-theme="dark"]` 覆寫 `#1f62a4`/`#04865d`/`#5483bb`/`#30a981`，恢復獨立 dark 覆寫、與語意 token 脫鉤但同色相），`capacity-color-5` 維持 `color-mix` 中性底色；色階經 OKLCH 明度帶、彩度下限與相鄰 CVD ΔE 驗證，`capacity-seg + capacity-seg` 加 1px `--color-surface` 分隔線。
-- 2026-07-29: `wifi-form` 的 `toggleRow()` 改為 `<div>` 外層＋只包住開關的 `<label>`，文字用 `aria-labelledby` 關聯，因此點標籤不會切換；靜態 IP 欄位透過 `wifiIpExample` placeholder 帶範例值；`wifiSecurityOpen` 改為英文 `Open`，掃描列的 `encryption` 統一 `toUpperCase()`；`scan-dialog` 新增 `.scan-tools`（篩選欄內嵌 `filter.svg`、rescan 帶 `refresh.svg` 並固定 148px 寬），倒數只改內層 label 文字以保留圖示。
-- 2026-07-29: `<details>` 的非 summary 子節點會被瀏覽器包進單一 `::details-content` 盒子，因此 `.device-advanced` 的 grid gap 只作用在 summary 之後；進階欄位間距改由明確的 `.device-advanced-body` wrapper 負責（`wifi-form` 的 `advancedPanel()`）。`.save-dock` 取消 `flex-wrap` 並在窄螢幕隱藏狀態文字讓按鈕平分；`.device-toggle-row` 改為 `justify-content: space-between`，視覺順序用 `order` 調整以維持 `input:checked + .toggle-switch-track` 的相鄰關係；`device-info` 的 `capacityCard()` 在 header 顯示分段總和。
-- 2026-07-28: 啟用完整重設：`device-api` 只保留 `systemReset()`（`POST /api/system/reset`），`pages/device-system` 新增 danger zone 與確認 dialog，成功後 `invalidateSession()` 並留常駐 notice；新增 `assets/icons/device/warning.svg` 與 `.device-danger-icon`（紅底＋既有 svg-icon 反白 filter）；device-mock 的 heap 改為固定值，`api/system/reset` 改為精確路徑並把 in-memory 狀態重設回出廠預設 AP。
-- 2026-07-28: 裝置頁樣式與資訊密度調整集中在 `assets/styles/device.css`（不動 `layout.css` / `components.css`），以 `.device-page .setting-section` 覆蓋側欄尺寸的預設卡片並新增 480px 單欄斷點；容量圖色票改由 `--color-accent-strong` / `--color-accent` / `--color-control-accent` 與 `color-mix` 推導，取消獨立的 dark 覆寫；`ui/password-field` 改為 `.password-field` 相對定位 + 疊在 input 內的 `.password-toggle`；`wifi-form` 的密碼與 AP 密碼保護說明改用 `.device-rule-hint`，`.wifi-section` / `.device-advanced` 邊框改用 `--color-border` 並讓進階區塊帶 `--color-surface-muted` 底色與 `[open] summary` 分隔線；`app-menu` 移除裝置連線小點；`device-info` 移除手動 refresh、stale badge 與 config_state 欄位；device-mock 初始 Wi-Fi mode 改為 `ap_sta`（STA 已連線）。
-- 2026-07-28: 新增開發／demo 假資料機制：`index.html` PREVIEW 區塊載入 `src/device/device-mock.js`（載入即預設啟用、`?mock=0` 關閉）；`make build` 剝除區塊並排除 mock 檔，新增 `make demo` 保留 mock 的靜態展示輸出（不 gzip）。`tools/build` 每次執行先清空並重建 `build/latest` 鏡像，內容與該次時間戳資料夾相同。
-- 2026-07-28: 新增 `src/device/` 裝置整合層（`device-api` REST client、`device-live` alive 監看、`device-gate` 離線反灰、`device-auth` 認證）與三個裝置頁（`device-info`、`device-network`、`device-system`），對接 iot-node-bedrock REST API；共用 `ui/modal`、`ui/notice`、`ui/password-field` 與 `assets/styles/device.css`。header `#app-status` 圓點改為合成裝置連線與頁面狀態。
-- 2026-07-11: 新增 app-level `project-capabilities.js` 與 Help content model/validator；Dither config 註冊可用清單、constants 註冊限制 fact，i18n 支援可重複 named/positional placeholder，Help 演算法卡片改由 registry 與 ID 文案交集產生。
-- 2026-07-11: Help page 改為 manifest 驅動的雙語文件中心；PageRouter 保存完整 route 並支援同頁 `onRouteChange`，Help 使用獨立 i18n bundle、文件 renderer、互動視覺模組與 `assets/help/` 引擎渲染比較圖。
-- 2026-07-11: `main.js` 本地化 startup gate 時透過 `applyShellCopy()` 同步 header placeholder；AppShell mount 後仍重套 shell 文案與 status。
-- 2026-07-11: Startup gate 新增單調遞增的 `setProgress()` 與動態 script resource 計數，`main.js` 依 mount、initial image settle 與 paint 更新階段進度。
-- 2026-07-11: Startup overlay 改用 theme-specific 半透明 `--color-loading-overlay`，固定從 64px header 下方開始，避免遮住 App title；`inert` 與 pointer fallback 維持全 App 鎖定。
-- 2026-07-10: `index.html` 新增 startup gate 與初始 `inert`；`main.js` 在 page entries、AppShell mount、initial image settle 與 paint 完成後解鎖，fatal load error 則保留 gate 並提供 reload。
-- 2026-07-10: Serpentine label 直接建立單一 info tip；圖示使用 `assets/icons/editor/info-circle.svg`，tip 文案走 i18n，自訂 tooltip 使用實心 theme surface 與 accent 邊線。
-- 2026-07-10: `renderActiveTool` 不得在每次 render 重新 append 已位於正確 host 的 panel，避免使 panel 內控制失焦；Resize unit number callback 只強制同步等比連動的另一欄，目前輸入欄位透過 active-element guard 保留 DOM value 與游標位置。
-- 2026-07-10: `.unit-number-input` 不直接繪製會被複合欄位裁切的 outline；其 `:focus-visible` 焦點環必須轉嫁到 `.unit-number-field` 外框。
-- 2026-07-09: i18n 新增 `zh-TW` 字典與 runtime language preference；Web Setting language 提供 `auto`、`zh-TW`、`en`，偏好與 theme 一起保存於 `settings-store.js`，切換語言會重新套用 shell/menu/目前頁面文字。
-- 2026-07-09: 導入 dither Web Worker：擴散類演算法（error diffusion、adaptive error diffusion、dot diffusion）在 HTTP serving 下可於背景執行緒執行；`file://` 或 worker 載入失敗時永久 fallback 同步路徑。preview/export 走 `pipelineRunner.runAsync`，controller 用 run id 丟棄過期 preview 結果並在 destroy 時 terminate worker。
-- 2026-07-09: feature 之間不可直接讀寫 `state.settings.<其他 feature>`；跨 feature 查詢一律透過 `featureRegistry.api(id)` 取得對方宣告的 `api` 物件，api 回 null（feature 停用）時呼叫端必須有明確降級路徑。依賴其他 feature 資料的 operation 必須用 `operation.cacheKey` 把該資料帶進 stage cache key。
-- 2026-07-09: crop feature 拆為三支 script：`crop-geometry.js`（純幾何，零依賴）、`crop-auto-background.js`（背景 preset 與 Auto 取色）、`crop-feature.js`（註冊/panel/operation）。feature manifest entry 支援 `paths` 陣列宣告多支 script，依序載入。
-- 2026-07-09: `page.js` 職責收斂：Expand 拖曳平移移至 `viewport/pixel-preview-drag.js`，preview toolbar 移至 `preview-toolbar.js`，preview timing label 可見性與定位由 `viewport/overlay-renderer.js` 管理，Empty 畫布 dropzone 改由 input feature 提供。
-- 2026-07-09: 移除 legacy 單面板狀態欄位 `settingsPanelOpen` 與 `activeTool`；`openToolPanels` 是 tool panel 開關狀態的唯一來源。
-- 2026-07-09: 面板滑桿統一走 `panelUtils.labeledRange`（數值標籤 + range + setValue/setDisabled + --range-progress），live preview hold 樣板統一走 `panelUtils.previewHoldHandlers(controller, id)`；hex 與 RGB 互轉統一由 `core.colorUtils.hexToRgb/rgbToHex` 提供。
-- 2026-07-09: GPU processor 的 WebGL 樣板（context 建立、shader 編譯、全屏 quad、texture、drawQuad、readPixels 翻轉讀回）統一由 `gpu/gl-helpers.js` 提供；adjust 與 threshold processor 只保留各自 fragment shader 與 uniform 邏輯。
-- 2026-07-07: 全域 `:focus-visible` 焦點環由 `components.css` 統一提供（`--color-accent-strong`）；隱藏或位於複合控制內的 input 可使用 `outline: none`，但焦點環必須轉嫁到可見控制外框。
-- 2026-07-06: 色彩通道 clamp 統一由 `core/color/color-utils.js` 提供：`clampByte`（round + clamp，最終整數輸出用）與 `clampChannel`（僅 clamp 保留小數，誤差擴散工作緩衝與距離計算用）；dither 模組不可再自定義 clamp。GPU threshold palette uniform 必須與 CPU `normalizedPalette` 相同做 round，維持 CPU/GPU 最近色一致。
-- 2026-07-06: RGB 色距權重的唯一來源是 `core/color/palette-utils.js` 的純量距離函式；`palette-mapping` 透過 `createRgbDistanceContext()` 取得逐像素距離 context，不可另寫距離公式。GPU shader 的 `distanceTo` 是唯一允許的重複實作，修改權重時必須同步。
-- 2026-07-06: `core` 拋出的使用者可見錯誤必須帶 `error.code`（如 `unsupported-format`、`demo-load-failed`），`message` 僅作 fallback；顯示層（controller）以 code 對應 i18n 文字，`core` 不可直接輸出 UI 文案。
-- 2026-07-06: 使用者可見 UI 字串（含 page `title`、header、tooltip、aria-label）必須走 `src/i18n/en.js`；`index.html` 內的 header 文字僅為 JS 啟動前 placeholder，由 `AppShell.applyShellText()` 以 i18n 蓋章。
-- 2026-07-06: 新增 `tools/regression/`：以 dither-benchmark headless harness 產生固定矩陣（algorithm x mapping x palette x distance，CPU backend）的 checksum baseline（`baseline.json` 入 repo）；變更 dither/palette/色彩工具前後必須跑 `python3 tools/regression/run.py`，刻意的輸出變更需人工確認後以 `--update` 更新 baseline。dither-benchmark 支援 `--distance` 參數。
-- 2026-05-16: 定調目前專案版本為 `0.1.0`；此版本號與 localStorage `schemaVersion` 分開管理。
-- 2026-05-16: 新增 `editor-mode-state-machine.js` 與 editor `mode` 狀態，集中管理 `empty`、`crop`、`edit` 轉換；重新載入圖片或 demo 時 controller 必須重建 default editor state，避免沿用上一張圖的演算法設定。
-- 2026-05-16: 明確規範 Crop mode 不執行正式 preview pipeline，非允許工具與 action 必須由 controller guard；preview toolbar 必須由 mode 決定顯示列，未啟用列要真正 hidden，且各模式 toolbar 按鈕尺寸一致。
-- 2026-05-21: Empty 模式的 upload/drop affordance 由 `page.js` 掛在 preview stage 中央，支援 hidden file input 的 Browse File 與 drop event；Image Input panel 不應顯示 Choose/Drop controls，empty canvas placeholder 必須隱藏。
-- 2026-05-21: Image Input panel 的 `New Image` 改由 hidden file input 觸發本機圖片選擇，取代舊 `Choose Image` row；目前 UI 不暴露 blank canvas 建立入口。
-- 2026-06-07: Crop 面板新增左轉 90 / 右轉 90 圖示按鈕，Flip 改為圖示按鈕；旋轉按鈕只更新 `rotation`，Flip 仍使用同一次 settings update 同步鏡射 rotation / pan，且不套用持續 active 視覺狀態。
-- 2026-06-07: 左側 tool panel 展開預設集中到 mode state machine：`empty` 只開 Image Input、載圖或展開 Crop 只開 Crop、離開 Crop 進入 `edit` 時開 Resize / Adjust / Palette / Dither，手動展開 Image Input 或 Crop 時其他面板收合。
-- 2026-06-09: editor `mode` 改為以 feature group 為單位保存 `source`、`prepare`、`edit`；feature 必須明確宣告 `panelGroup` 才會進入左側 tool dock，未宣告時預設為 `none`。
-- 2026-06-09: Crop 預設比例改為 16:9，prepare toolbar 的 crop zoom 以 `+` / `-` 顯示；Resize 固定等比且移除 Fit；Adjust 移除 Reset Default 並在 slider 左側顯示數值。
-- 2026-06-09: `onSettingChanged` lifecycle 改為廣播給 enabled features，由 feature 依 `context.id` 判斷是否處理，支援跨 feature setting 同步且避免 controller 硬寫 feature id。
-- 2026-06-09: Crop preview toolbar 的 `+` / `-` 使用 compact square button；Resize output 單邊尺寸上限集中到 `MAX_RESIZE_OUTPUT_SIZE`。
-- 2026-06-09: `constants.js` 提前於 feature scripts 載入；Resize width / height controls 改用同列 `unitNumberInput(..., 'px', ...)` 並共用 Crop 數字輸入樣式。
-- 2026-06-13: `prepare` mode 放行 edit tool rows；從 `prepare` 開啟指定 edit tool 時，state machine 只展開該 edit panel 並切入正式 preview 流程。
-- 2026-06-13: Crop frame 與 edit preview display size 統一由有內距的 preview frame fit 計算，避免模式切換時 canvas 位置或尺寸跳動。
-- 2026-06-13: `source` group 載入圖片後保留 preview toolbar 高度但隱藏所有 button rows，避免切到 `prepare` / `edit` 時 preview stage 高度改變。
-- 2026-06-13: `viewport-renderer.js` 改為 buffer 組幀後提交可見 canvas；首次進入 `edit` 且 result 尚未完成時保留上一個 preview frame。
-- 2026-06-13: preview frame fit 改用 preview stage content-box 尺寸，避免 border-box 導致 prepare / edit 之間出現微小對齊差。
-- 2026-06-13: Demo data asset 改為按下 Load Demo 時才載入；動態 script loader 改為同批並行下載、依插入順序執行。
-- 2026-06-20: Demo 圖以專案內 `assets/demo/` 圖片作為 server 模式來源；demo data asset 僅作為 `file://` fallback，並由工具產生。
-- 2026-06-27: 新增選用的 Python/Make 發佈 build，輸出 ignored `build/` 底下的時間戳子資料夾，只做 server/device 靜態檔案複製、minify 與 gzip-only 輸出；minify / gzip 預設啟用並可用 CLI 參數關閉。build 產物不支援 `file://` fallback，必須排除 generated demo data fallback。原始專案仍不可依賴 build step、npm 或 bundler 才能使用。`tools/` 底下工具必須放在各自子資料夾，以 `run.py` 作為主要 CLI 入口。
-- 2026-06-28: `tools/generate-demo-data/run.py` 改為自動偵測 `assets/demo/` 內唯一支援格式 demo 圖，產生固定入口 `assets/demo/demo-manifest.js` 與 `assets/demo/demo-data.js`；runtime 不可硬綁 demo 圖檔名或 16:9 比例。
-- 2026-06-28: Resize feature 必須在 render 後同步 width / height controls，確保 Crop ratio 變更後隱藏過的 Resize panel 不顯示舊尺寸。
-- 2026-06-28: Original palette 萃取來源改為 `prepare` group 輸出；Resize、Original palette 與 `preparedImageData` invalidation 必須延後到 prepare commit，不可在 Crop zoom/pan setting 熱路徑即時計算。
-- 2026-06-28: Edit preview 新增 Expand 檢視，內部使用 `pixel` viewMode 與同一份 Result ImageData 以真實 canvas CSS 尺寸顯示；初始 scroll 對準 Result 中心點，並讓 preview stage 可捲動、可拖曳平移。
-- 2026-07-01: Dither `errorStrength` 保持為演算法目前使用的百分比強度；Error Diffusion 將其套用到誤差擴散倍率，Bayer 演算法將其套用到 thresholdScale 並在 UI 顯示為 Dither Strength。
-- 2026-07-01: Blue Noise 64 啟用 `supportsThresholdStrength`，Dot Halftone 啟用 `supportsDotDensity`，Dot Diffusion 8x8 啟用 `supportsErrorStrength`，讓除 None 外的 Dither 演算法都能使用強度百分比。
-- 2026-07-02: Dither algorithm 切換時必須同時把 `settings.dither.errorStrength` 重設為 `DEFAULT_DITHER_ERROR_STRENGTH`，避免 Error Strength、Dither Strength 與 Dot Density 在不同 algorithm 間繼承數值。
-- 2026-06-13: `edit` 的 Original preview 改為使用 `prepare` group operations 產生的 `preparedImageData`，不直接顯示 raw source。
-- 2026-06-13: Palette 預設維持 Original；Dither 預設改為 Floyd-Steinberg error diffusion 且 Serpentine 關閉，Dither 啟用時 Palette 不先量化像素。
-- 2026-06-13: Original palette 萃取改為使用明暗錨點、灰階錨點、高飽和色相分區與加權填補，避免純頻率排序漏掉視覺重要色。
-- 2026-06-14: Dither settings 新增 `colorDistance`，由 `palette-utils` 統一提供 RGB、Manhattan、BT.709 與 CIEDE2000 最近色判斷。
-- 2026-06-14: Original palette 萃取改為 RgbQuant-style：8x8 box histogram、hue retention、`initColors: 4096` 候選上限與 BT.709 euclidean palette reduction。
-- 2026-06-14: Color Distance 將 RgbQuant-style BT.709 weighted distance 命名為 `euclidean`，`bt709` 舊 id 僅作為相容 alias。
-- 2026-06-14: Color Distance 拆成 `euclidean-bt709`、`euclidean-rgb`、`manhattan-bt709`、`manhattan-rgb` 與 `ciede2000`；舊 id 只作為 alias。
-- 2026-08-11: `DEFAULT_COLOR_DISTANCE_ID` 與 standalone palette fallback 改為 `euclidean-rgb`；有效的既有 settings 不做遷移。
-- 2026-06-14: Dither settings 新增 `errorStrength`，Error Diffusion 以百分比控制誤差擴散倍率，預設 100%。
-- 2026-06-14: Original palette 重新對齊 RgbQuant `method: 2` 的 `buildPal()` 行為，完整排序 2D histogram 後再 reduce，不使用 `initColors` 候選截斷。
-- 2026-06-14: 將 RgbQuant 以 MIT vendored library 納入 `src/vendor/`，由 `rgbquant-adapter.js` 統一提供 Original palette 萃取與支援的 Error Diffusion。
-- 2026-06-14: Error Strength 對齊 dithering-studio-main，統一以 `errorStrength / 100` 乘上 error diffusion 擴散係數，UI step 為 5%。
-- 2026-06-14: Dither 預設改回 `none`，Error Strength UI step 改為 1%。
-- 2026-06-14: Error Strength UI step 改為 2%。
-- 2026-06-14: Palette color input 的 `input` 事件只同步 state，不排正式 preview；`change` 時才排 preview，避免調色盤互動被 render 打斷。
-- 2026-06-14: Palette settings 新增 `originalPaletteSize`，Original palette 可用 Colors 在 2 到 32 色間重新萃取。
-- 2026-06-14: Palette swatches 使用 8 欄 grid，限制每列最多 8 個色票。
-- 2026-06-14: Dither 預設改回 `floyd-steinberg`。
-- 2026-06-14: Dither Serpentine 改用 `panelUtils.toggleSwitchInput()`；Crop 手機版維持 2x2 grid；range input 套用主題 accent 色。
-- 2026-06-14: Crop settings 新增 `backgroundPreset` / `backgroundColor`，preview renderer 與正式 crop operation 共用 transform fill color。
-- 2026-06-14: Crop preview overlay 改以 canvas rect + `layout.frame` 對齊，修正窄版長條圖框選與正式 crop output 偏移。
-- 2026-06-14: 將 edit effects 的 `operation.pipeline.draggable` 改為 `false`，保留 sortable 架構但關閉目前工具列拖曳排序。
-- 2026-06-14: 新增控制元件 accent 色，讓 slider 與 Toggle Switch 使用較淡的控制元件狀態色。
-- 2026-06-14: Edit preview 的 Original / Result 切換改用 `.setting-choice` radio 結構，對齊 Web Setting Theme 選項。
-- 2026-06-15: Crop Fill 新增 `auto` preset，使用低解析 transformed crop frame 邊界取樣估算填色，並用小幅色差穩定化降低旋轉閃爍。
-- 2026-06-15: Crop Fill 預設 `backgroundPreset` 改為 `auto`。
-- 2026-06-15: Preview stage 透明區域背景 token 改為柔和灰白 5x5 分組細網格 pattern，不再使用 checker token。
-- 2026-06-15: Preview stage 網格改為重用既有 surface / border 灰階 tokens，不新增 preview pattern 專用色彩 tokens。
-- 2026-06-15: Dither Editor `entry.js` 將 feature scripts 與後續 page scripts 併入同一載入波次，降低 GitHub Pages 首次載入瀑布。
-- 2026-06-15: `index.html` 的 classic scripts 改用 `defer`，讓共用基礎檔與 page entries 可並行下載並依序執行。
-- 2026-06-15: 將 Crop overlay sizing / positioning 與 pointer mapping 從 `page.js` 拆到 `viewport/overlay-renderer.js` 與 `viewport/pointer-mapper.js`。
-- 2026-06-15: 左側 feature dock 圖示改用 `assets/icons/editor/` 的本地 SVG 檔案，取代 ASCII placeholder。
-- 2026-06-16: `src/ui/svg-icons.js` 新增共用 SVG icon helper，供 app shell、feature panel、preview toolbar 與 action button 以外部 SVG image 重用本地 SVG。
-- 2026-06-16: Header Menu button 改用本地 SVG menu icon 顯示圖示，並繼承目前 theme color。
-- 2026-06-16: Tool accordion chevrons 與 Web Setting theme sun / moon icons 改用外部 SVG image，直接引用本地 SVG asset。
-- 2026-06-16: Light / Dark theme token 收斂為共享語意色階，移除單一元件專用的 drop、idle status、add 與 scroll hover 色票。
-- 2026-06-16: Crop pointer mapper 新增雙 pointer pinch zoom，讓觸控螢幕可用雙指縮放調整 crop zoom。
-- 2026-06-16: Palette 新增色票 button 使用圓形外框包住加號；Original Colors 的 unitless number field 必須以獨立 grid 欄保留 stepper 前緩衝，降低窄螢幕誤觸 input。
-- 2026-06-18: 正式 preview pipeline 完成後記錄 `previewRenderDurationMs`，由 `page.js` 在 edit Result 圖片右下角顯示 preview 計時 label，並由 `SHOW_PREVIEW_TIMING_LABEL` 控制顯示。
-- 2026-06-19: preview 計時 label 改由 `previewTimingLabel.phase` 管理 rendering/done/hidden，完成後由 controller 依設定延遲排程自動隱藏。
-- 2026-06-19: preview 計時 label 自動隱藏時只更新 label DOM，不可觸發整頁 render，避免關閉正在操作的 panel form。
-- 2026-06-22: Edit Result preview canvas 不使用 `image-rendering: pixelated` 縮小 dither 結果；縮小顯示交給瀏覽器正常重採樣，避免 preview alias 與 export PNG 觀感大幅落差。
-- 2026-06-18: `pipeline-runner.js` 新增可選 Stage Cache；controller 在 preview、prepared original 與 live preview base 使用同一份 in-memory cache，換圖與銷毀時清空，Export 維持完整正式 pipeline 重跑。
-- 2026-06-18: RgbQuant adapter 限縮為 Original palette 萃取入口；Error Diffusion 改由專案內建 processor 執行，並參考 dithering-studio-main 將 hot loop 改為 typed array、本地 nearest-index palette search 與 Floyd-Steinberg fast path。
-- 2026-06-18: Error Diffusion 內建 processor 在擴散誤差寫回工作緩衝時必須 clamp 到 `0..255`，避免 Error Strength 增大時累積誤差爆掉造成破圖。
-- 2026-06-18: Dither 演算法改為使用 `dither-algorithm-registry.js` 註冊；演算法 metadata 指向 processor id，Dither feature 不再硬寫 ordered / pattern / error diffusion 分派。
-- 2026-06-18: Dither 演算法精簡為 Floyd-Steinberg、Atkinson、Jarvis-Judice-Ninke、Sierra Lite、Stevenson-Arce、Adaptive FS 3x3、Bayer 4x4、Bayer 8x8、Blue Noise 64、Dot Diffusion 8x8 與 Dot Halftone。
-- 2026-06-19: Palette Mapping 改為 dither strategy 介面，processor 只呼叫 `mapColor()` / `mapThresholdColor()`，不再依 `pair-mix` / `tri-mix` id 分支。
-- 2026-06-19: Dither CPU hot path 新增保守快取：Dot Diffusion 預算 class recipient offsets、generic Error Diffusion 快取 matrix offsets、Ordered / Pattern threshold lookup 使用預先攤平表，不改演算法 kernel 或 threshold 語意。
-- 2026-06-19: 新增 `threshold-dither-processor.js` 作為 WebGL threshold dither fast path；Ordered / Dot Halftone 類在 Nearest Color 與 Pair Mix mapping 可走 GPU，Tri Mix 或 WebGL 不可用時保留 CPU fallback。
-- 2026-06-19: Tri Mix CPU hot path 預先列出 top-6 candidate 的三色組合並攤平 barycentric loop；不得改 top candidate 數量、組合順序、權重 clamp/normalize 或 threshold 選色規則。
-- 2026-06-19: 新增共用 Palette Mapping 層，支援 Nearest Color 與 Pair Mix；Algorithm metadata 不再註冊 Pair Mix 組合項。
-- 2026-06-27: MVP 移除未完成的 IndexedDB workspace 持久化路徑；`settings-store.js` 只透過 localStorage 保存 app shell preference/theme，Dither Editor 工作圖片與 pipeline/settings 僅透過 page module in-memory cache 在同一次 SPA 頁面切換期間保留。
+最初以 standalone 編輯器起步，目前已包含同源 ESP32 裝置管理、電子紙輸出與可攜式 PNG 專案。下列章節描述現行契約；早期逐日變更由 git history 保留。
+
+- Classic scripts 與本地資產保留 `file://` 直接使用；Python/Make 發佈建置是選用的 HTTP 資產處理流程。
+- 圖片與 workspace 不自動寫入 browser storage；切頁使用記憶體狀態，跨 session 由使用者明確匯出／匯入 `.dither.png`。
+- 顯示色盤與 EPDIMG 協定色盤分離，校色不改變既有六色 code 或檔案格式。
 
 ## Plug-and-Play 架構要求
 
@@ -166,7 +47,7 @@ HTML + CSS + classic JavaScript scripts + Canvas API
 
 運行限制：
 
-- 不使用後端。
+- Standalone 不需要後端服務；Device Mode 使用既有同源 ESP32 REST API。
 - 不使用 React、Vue、TypeScript 或其他前端框架。
 - 不使用 CDN。
 - 不在 runtime 下載外部資源。
@@ -174,7 +55,7 @@ HTML + CSS + classic JavaScript scripts + Canvas API
 - 使用者必須能直接雙擊 `index.html` 使用，不可要求另外執行 `python -m http.server` 或其他本機指令。
 - 開發時可用 VS Code Live Server 預覽，但正式使用方式不能依賴 Live Server。
 - 原始專案必須不依賴 build step；不可要求 npm install、npm run build 或 bundler 才能使用。可提供選用的 Python/Make 發佈 build，輸出到 ignored `build/` 底下的時間戳子資料夾，只做 server/device 靜態檔案複製、minify 與 gzip-only 輸出，不改變 runtime 載入架構。minify 與 gzip 預設都必須啟用，且必須能用 CLI 參數分別關閉；啟用 gzip 時，輸出資料夾內只保留 gzip 後的 `.gz` 檔，不保留同名未壓縮檔。同一秒內多次 build 不可覆蓋既有輸出。
-- MVP 以 Standalone Mode 為主；下一版可加入 ESP32 Device Mode。
+- Standalone 與 capability 驅動的 E-paper Device Mode 均為現行功能。
 
 因為要支援直接雙擊 `index.html`，不要使用 JavaScript ES Modules 的 `import` / `export`。多檔案仍然可以拆分，但要用 classic `<script>` 依序載入，並透過單一 namespace 暴露模組。
 
@@ -193,14 +74,14 @@ window.DitherApp.pages = window.DitherApp.pages || {};
 - `Blob`
 - `URL.createObjectURL`
 - `createImageBitmap`
-- `fetch`，只能用於讀取專案內同源 demo assets，不可用於第三方 API 或遠端圖片
+- `fetch`，用於專案內同源 assets 與裝置 REST API，不載入第三方 API 或遠端圖片
 - `HTMLCanvasElement`
 - `CanvasRenderingContext2D`
 - `ImageData`
 - `DragEvent`
 - `PointerEvent`
 - `localStorage`
-- `Web Worker`，第二階段後再加入
+- `Web Worker`，HTTP 下用於 diffusion；file 模式或 runtime failure 使用 CPU fallback，取消除外
 
 ## 頁面切換架構
 
@@ -1016,11 +897,11 @@ pipeline 順序也必須由 enabled features 的 `pipelineStage` 與 `pipelineOr
 - 全域 migration 負責 `schemaVersion` 與 state shape。
 - feature migration 負責該 feature 自己的 settings。
 
-每份文件同時帶全域 `schemaVersion`、`rendererVersion` 與各 feature 的 `version`。目前只接受 schema v1／feature v1，未知新版必須 fail closed；加入新版時須保留逐版 migration、不可猜測未知欄位語意。舊資料含已停用或不存在的 feature settings 時，預設不套用到 UI，也不得讓 preview/export crash。
+每份文件同時帶全域 `schemaVersion`、`rendererVersion` 與各 feature 的 `version`。目前 schema／renderer 為 v1，各既有 feature 宣告 version 1；版本由各 feature persistence contract 決定，未知／不支援版本必須拒絕，不猜測欄位語意。舊資料含已停用或不存在的 feature settings 時，預設不套用到 UI，也不得讓 preview/export crash。
 
 ## 可攜式圖片設定檔
 
-`src/core/storage/project-file.js` 負責容器、PNG chunk、CRC 與基礎內容驗證；`src/pages/dither-editor/project-workspace.js` 負責 editor state manifest、feature version/settings 驗證與 restore candidate。匯入必須先完整驗證並算出結果，成功後才一次替換目前 state，避免半套用。
+`src/core/storage/project-file.js` 負責容器、PNG chunk、CRC 與基礎內容驗證；`src/pages/dither-editor/project-workspace.js` 負責共同 manifest、feature set／version、pipeline 與 restore candidate；個別 settings 委派 feature.persistence。匯入必須先完整驗證並算出結果，成功後才一次替換目前 state，避免半套用。
 
 匯出檔名固定為 `<safe-base>.dither.png`，但匯入不得要求檔名維持不變。容器是標準 PNG，IDAT 保存正式 pipeline 的最終結果，讓一般 PC 圖片檢視器直接看到 dither 後畫面；IEND 前加入三個私有 ancillary chunks：
 
@@ -1080,7 +961,8 @@ src/device/
 ### 認證與 session
 
 - token 由 `POST /api/auth/login` 取得，存 localStorage（key 走 `storage-keys.js`）；裝置重開機或他人登入即失效，本地只是快取，有效性以 `GET /api/auth/session` 為準。
-- 所有帶 token 的 request 收到 401 時，`device-api` 觸發全域 unauthorized 事件 → `device-auth` 清 token 並通知訂閱者，受保護頁面退回鎖定卡。login 本身的 401 是帳密錯誤，不觸發全域登出。
+- `device-api` 在每次 setToken／清除時推進 session epoch；request 擷取 epoch／token identity。僅帶 token 且仍屬當前 epoch 的 401 才發布 unauthorized(epoch)，auth listener 再確認 epoch 才清除／通知。login 401 不觸發全域登出；同 token 再設定也形成新 epoch。
+- ensureSession 成功與 logout cleanup 必須仍屬原 epoch；登入 dialog 的 generation／closed guard 阻止舊成功或失敗更新新 dialog／token。不因關閉 dialog 發出全域 logout。
 - session 驗證失敗但屬 transport 錯誤時保留 token，待裝置恢復後重新驗證，避免離線時誤登出。
 - login dialog 為全站共用 modal；username 由公開 `GET /api/auth` 取得（固定 `admin`、唯讀），成功後原地解鎖目前頁面，不跳頁。Menu 底部在持有 token 時顯示登出。
 - 修改管理員密碼成功、AP 密碼保護開關變更（裝置重啟）時，前端主動 `invalidateSession()`。
@@ -1497,10 +1379,38 @@ function runPipeline(sourceImageData, state) {
 
 - Stage Cache 只保存 in-memory `ImageData`，不可寫入 localStorage、IndexedDB 或其他 browser storage。
 - controller 擁有單一 Stage Cache，`runPreview()`、`updatePreparedPreview()` 與 live preview base 可共用；換新圖、重建 state 或 `destroy()` 時必須清空。
-- Stage Cache 必須有固定容量上限，避免大圖連續設定變更時無限制保留 `ImageData`。
+- Cache owner 預設限制 32 MiB retained pixel buffers 與 32 entries，以 LRU 淘汰至兩者都成立。以實際 backing ArrayBuffer identity／byteLength 計數，partial view 計整個 buffer，alias 使用引用數不重複計算。零 budget 關閉 cache；超大單筆不入 cache但仍回傳結果，不清空其他可用小 entry。
+- clear 同時清 entries、buffer references 與 retainedBytes，並遞增 generation；舊 async 結果不得回填。同步／async runner 共用 accounting。此限制不包含 source、Canvas、Worker 複本、暫存陣列或 GPU texture，不能解讀為整頁 RAM 上限。
 - 預設 cache key 只包含 operation 自己的 settings；若 operation 讀取其他 feature state 或 pipeline enabled 狀態，該 operation 必須提供 `cacheKey()`。例如 `Palette` 會讀取 Dither 啟用狀態與 Dither settings，因此必須把這些值納入額外 cache key。
 - Operation 不可修改 upstream `ImageData`；cache 會重用 operation 回傳的 `ImageData`。若 operation 為 no-op 並回傳原物件，下游 stage identity 應保持與輸入相同，讓後續 stage 可重用。
 - Export 不使用 preview Stage Cache，也不直接使用暫存 preview bitmap；它仍從工作圖執行完整正式 pipeline，確保輸出與最新 settings 一致。
+
+## Editor job 與 source ownership
+
+`controller.js` 的窄 job owner 管理 generation、active job、最新 pending preview 與 dispose。最多一份 active computation 和一份可被取代的 pending preview；heavy export/import 不接受重複 admission。開始 heavy job 時作廢 preview並在必要時終止自己的 Worker。匯出 snapshot 深拷貝可變 settings／pipeline／target，EPDIMG 邊界也使用同次擷取的校色色盤，保留 immutable ImageData／Blob reference；不對整個 state 做 JSON round-trip。
+
+每個 stage 前、async 結果後、fallback 前與 state／DOM commit 前檢查 job。取消使用 `job_cancelled`，reason 為 superseded／disposed／explicit；Worker failure 使用獨立 code，只有有效 job 能 fallback。同步 CPU loop 無法被外部事件搶占，此契約保證取消後不再開始下一份重算。destroy 作廢 job／load generation、丟掉 pending、終止自己的 client 並清 cache。
+
+Worker client factory 提供 mount-local ownership；request id 與 worker epoch 排除舊事件。Admission 在複製 buffer 前，最多一份 in-flight；成功、失敗、postMessage throw、messageerror 與 terminate 均只 settle 一次並移除 pending。transfer 使用 pixels 複本，不能 detach cache／畫面資料。工具的 classic-script adapter 保留。
+
+本機圖、demo、project route 共用 loadGeneration；載入前取消舊 local job，decode／restore／prepare 在候選資料完成，僅當前 generation 可提交。Decoder 自己關閉 bitmap／撤銷 object URL，不讀取 controller global state。已送到裝置的 action 仍由 device-epaper 管理，本地取消不撤回、不重送。
+
+## Core color identity 與 feature persistence
+
+`core/color/palette-utils.js` 擁有五種 colorDistanceIds、預設 euclidean-rgb 與 normalization，不反查 pages。Aliases 維持 bt709／euclidean → euclidean-bt709、rgb → euclidean-rgb、manhattan → manhattan-rgb。UI config 保留 label／顯示順序並校驗與 core 一致；主執行緒、Worker 與工具共用同一份核心公式與 ID。
+
+有 defaultSettings 的 feature 必須註冊完整 `persistence: {version, serializeSettings(settings, context), restoreSettings(raw, version, context)}`；沒有 settings 的 action 可不提供。serialize 產生獨立 plain data，restore 驗證 type／enum／finite number／array／範圍後回傳新物件，不能讀 DOM、發 request、修改 live state 或計算圖片。
+
+Workspace 管理 feature set／版本、pipeline stage／member／enabled 與候選 state，沒有 feature ID schema switch。委派前保留 depth 12、字串 4096、array/object 64 項與禁止 __proto__／prototype／constructor 等一般防護。新增 feature 只需提供契約；既有 schema、renderer、feature version 與 diMF／diOR／diWK chunks 不變。
+
+## Correctness 與產物驗證入口
+
+- `make test`：build/helper Python tests、雙語 Help、PNG container／來源 startup、core／persistence／lifecycle regression、file demo／本地 PNG。
+- `make test-production`：在 ignored tmp/verification 下建立新 production gzip 與 demo，臨時 loopback HTTP 驗證 startup、真實 Worker／CPU pixels、PNG、relative API、tooltip／Help styles 與 mock boundary；不部署，也不操作硬體。
+- `tools/shared/browser.py` 共用 browser discovery、WSL path conversion、獨立 profile、DOM completion、bounded execution 與 cleanup。Native 使用標準庫 DevTools transport；WSL 的 Windows Chrome 使用內建 PowerShell／.NET bridge。一般 suite 預設 90 秒，可用 `--timeout` 調整；benchmark/render 預設 180 秒。錯誤／逾時未完成必須非零退出，不自動 retry。
+- Browser 可用 `--chrome`、共用 `DITHER_BROWSER` 或既有 DITHER_RENDER_BROWSER／DITHER_BENCHMARK_BROWSER 指定。來源／純模組工具不用 server；只有 production integration 自動啟停 loopback server。
+- CSS minifier 保留必要空白、字串、escape 與註解 token 邊界；minify／gzip 預設維持啟用。Tests／profiles／log 不進入 release copier。
+- Benchmark 與手機／實板驗收獨立於一般 correctness；執行紀錄與未驗項目放 ignored tmp/verification，不放 SPEC。
 
 ## 核心模組邊界
 
@@ -1734,7 +1644,7 @@ const PREVIEW_TIMING_LABEL_HIDE_DELAY_MS = configuredDelayMs;
 - `Adjust` 的 live feedback 僅允許 brightness、contrast、saturation，且只在 `Adjust` 是唯一啟用的 draggable effect 時使用。若 `Palette`、`Dither` 或其他 effect 會參與結果，拖曳中不套假的後處理濾鏡，放開後再更新正式 preview。
 - live feedback 應使用 feature 提供的 `createLivePreviewBase()` 與 `livePreviewFilter()`，由 page 只更新 canvas filter，不重跑整頁 render。
 - WebGL/GPU 可用於 operation 內部加速，但若需要同步 `readPixels()` 回到 `ImageData`，不可作為拖曳中即時 preview 的主要路徑。Dither GPU 化應優先從 Ordered / Pattern / Palette Mapping 這類逐 pixel 獨立演算法開始；Error Diffusion 類演算法因相鄰像素依賴，不應作為第一批 GPU 化目標。
-- 若 1600px 以內工作圖的正式 preview 經常超過 `PREVIEW_SLOW_THRESHOLD_MS`，第二階段優先導入 Web Worker 或真正的 WebGL preview canvas。
+- 效能改善以實際支援尺寸與最慢演算法量測為依據；現有 Worker／GPU 不保證同步 CPU loop 可被中途搶占。
 - UI 不硬性承諾每次 300ms 內完成，但必須避免使用者連續調整時主畫面長時間卡住。
 
 ### Image Input Format Gate
@@ -1773,8 +1683,7 @@ const MAX_INPUT_LONG_EDGE = 800;
 - 如果圖片長邊超過 `MAX_INPUT_LONG_EDGE`，依比例縮小到長邊 800px。
 - 編輯器後續使用縮小後的圖片作為工作圖。
 - UI 需提示使用者圖片已被縮小，顯示原始尺寸與工作尺寸。
-- MVP 不要求 Web Worker；大型圖片先靠輸入縮小策略控制效能。
-- Web Worker 可留到第二階段，當 error diffusion、palette color mapping 或正式 preview 更新開始造成 UI 卡頓時再加入。
+- 輸入縮小、cache retained-byte budget 與有界 job admission 共同控制資源。Diffusion 在 HTTP 可用時使用 controller-owned Worker。
 - GPU/WebGL 可用於 brightness、contrast、saturation 這類可平行化 operation；error diffusion 類演算法因相鄰像素依賴，不列為第一優先 GPU 化目標。
 
 這個限制能讓純 JS、無 build step、可雙擊執行的版本維持可接受速度，也避免使用者丟入手機高解析照片後讓瀏覽器長時間無回應。
@@ -1881,22 +1790,22 @@ const DEFAULT_TRANSPARENT_BACKGROUND = {
 
 ## 儲存策略
 
-MVP 只持久化 app shell preference。Dither Editor 工作圖片、pipeline 與 feature settings 不做跨重新整理或關閉瀏覽器後的持久化。
+Browser storage 保存 app shell preferences 與裝置 token；Dither Editor 圖片／settings 不自動跨重新整理保存，可由使用者明確匯出／匯入 PNG 專案。
 
 這一節處理 browser storage 邊界；Menu 切頁後回到 Dither Editor 的短期保留，應由 Dither Editor page module 的 in-memory state cache 處理，不依賴 localStorage 或 IndexedDB。
 
 儲存方式：
 
-- `localStorage`：保存 Web Setting / app shell preference，目前包含 theme 與 language。
-- `cookie`：現階段不使用。未來若加入後端登入、session 或伺服器需要讀取的狀態，再另行導入。
-- `IndexedDB`：MVP 不使用。未來若重新加入 workspace restore，必須先補完整 source image persistence 與 load flow，再更新本 spec。
+- `localStorage`：保存 Web Setting／app shell theme、language，以及由 storage-keys 管理的裝置 token。
+- `cookie`：現階段不使用；裝置登入使用 Bearer token。
+- `IndexedDB`：不使用；目前可攜式 workspace restore 透過 `.dither.png`。
 
 現階段決策：
 - Web Setting 與 app shell preference 只使用 `localStorage`，不使用 cookie。
 - Dither Editor 的圖片、workspace、canvas、pipeline settings 與 feature settings 不寫入 localStorage、IndexedDB 或 cookie。
 - 同一次 SPA session 的 Dither Editor 狀態保留只靠 `pages/dither-editor/page.js` 的 module-level in-memory `cachedState`。
 - cookie 不作為設定 fallback，避免同一份設定有兩個來源造成維護混亂。
-- 未來加入後端登入時，cookie 只處理登入/session/server-readable state，不接管目前的 local app settings。
+- 裝置 session 與 app shell preferences 分開管理，不把圖片資料存入 token／preference storage。
 
 ### localStorage schema
 

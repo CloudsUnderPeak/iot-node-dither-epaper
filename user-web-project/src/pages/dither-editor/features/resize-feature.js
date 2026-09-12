@@ -1,4 +1,11 @@
 (function (app) {
+    // Version 1 persisted values retain the original strict workspace contract.
+    function validPersistedSettings(value) {
+            return Number.isInteger(value.width) && Number.isInteger(value.height)
+                && value.width >= 1 && value.height >= 1 && value.width <= app.pages.ditherEditor.constants.MAX_RESIZE_OUTPUT_SIZE && value.height <= app.pages.ditherEditor.constants.MAX_RESIZE_OUTPUT_SIZE
+                && Number.isFinite(value.aspectRatio) && value.aspectRatio > 0;
+    }
+
     // Resize feature 是固定前置處理，會在 effects pipeline 前調整工作尺寸。
     // Resize 永遠鎖定等比；調整 width/height 任一邊時另一邊會依比例同步。
     var ui = app.pages.ditherEditor.panelUtils;
@@ -109,6 +116,18 @@
 
     app.pages.ditherEditor.featureRegistry.register({
         id: 'resize',
+        persistence: {
+            version: 1,
+            serializeSettings: function (settings) { return JSON.parse(JSON.stringify(settings)); },
+            restoreSettings: function (value, version) {
+                if (version !== 1 || !value || typeof value !== 'object' || Array.isArray(value) || !validPersistedSettings(value)) {
+                    var error = new Error('Invalid resize project settings.');
+                    error.code = 'settings-invalid';
+                    throw error;
+                }
+                return JSON.parse(JSON.stringify(value));
+            }
+        },
         icon: '<>',
         iconPath: 'assets/icons/editor/resize.svg',
         labelKey: 'panelResize',

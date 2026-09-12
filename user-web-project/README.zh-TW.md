@@ -47,3 +47,16 @@ python3 tools/help-validate/run.py
 ## 支援匯入格式
 
 目前支援上傳 PNG、JPEG/JPG、WebP 與本程式的 `.dither.png` 圖片專案。所有上傳入口會依內容自動分流，瀏覽器重新命名成 `.dither(1).png` 仍可載入，並在還原前驗證內嵌資料。
+
+## 開發檢查與發佈
+
+來源 `index.html` 可用 `file://` 直接開啟，不需要 npm 或建置。選用 `make build` 產生 minify、gzip-only 的 HTTP 資產並移除裝置 mock；`make demo` 保留 preview mock，使用一般未 gzip 檔案。
+
+```bash
+make test
+make test-production
+```
+
+這些主機檢查涵蓋專案相容性、取消與過期回應、來源編輯及新建 HTTP 資產，不操作實體裝置。瀏覽器無法自動找到時，可設定 `DITHER_BROWSER` 或傳入 `TEST_FLAGS="--chrome <browser-path>"`。Runner 使用獨立 profile 與有時限的 DOM 完成檢查；WSL 搭配 Windows Chrome 使用內建 PowerShell bridge。Benchmark／render 仍是獨立工具。
+
+現行契約：[行為規格](docs/SPEC_BEHAVIOR.md)、[技術規格](docs/SPEC_TECHNICAL.md)、[規格入口](docs/SPEC_INDEX.md)。

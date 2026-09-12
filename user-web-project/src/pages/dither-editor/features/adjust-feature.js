@@ -1,4 +1,11 @@
 (function (app) {
+    // Version 1 persisted values retain the original strict workspace contract.
+    function validPersistedSettings(value) {
+            return ['brightness', 'contrast', 'saturation'].every(function (key) {
+                return Number.isFinite(value[key]) && value[key] >= -100 && value[key] <= 100;
+            });
+    }
+
     // Adjust feature 負責亮度、對比、飽和度。
     // 拖曳滑桿時優先用 CSS filter 做即時視覺回饋，正式 ImageData 在互動結束後再計算。
     var ui = app.pages.ditherEditor.panelUtils;
@@ -129,6 +136,18 @@
 
     app.pages.ditherEditor.featureRegistry.register({
         id: 'adjust',
+        persistence: {
+            version: 1,
+            serializeSettings: function (settings) { return JSON.parse(JSON.stringify(settings)); },
+            restoreSettings: function (value, version) {
+                if (version !== 1 || !value || typeof value !== 'object' || Array.isArray(value) || !validPersistedSettings(value)) {
+                    var error = new Error('Invalid adjust project settings.');
+                    error.code = 'settings-invalid';
+                    throw error;
+                }
+                return JSON.parse(JSON.stringify(value));
+            }
+        },
         icon: '~~',
         iconPath: 'assets/icons/editor/adjust.svg',
         labelKey: 'panelAdjust',

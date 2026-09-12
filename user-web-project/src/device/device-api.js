@@ -5,6 +5,7 @@
     var DEFAULT_TIMEOUT_MS = 10000;
     var unauthorizedListeners = [];
     var token = readToken();
+    var sessionEpoch = 0;
 
     function readToken() {
         try {
@@ -16,6 +17,7 @@
 
     // token 由裝置 runtime 保存，重開機或他人登入即失效；本地只是快取。
     function setToken(nextToken) {
+        sessionEpoch += 1;
         token = nextToken || '';
         try {
             if (token) {
@@ -36,9 +38,9 @@
         return error;
     }
 
-    function notifyUnauthorized() {
+    function notifyUnauthorized(epoch) {
         unauthorizedListeners.slice().forEach(function (listener) {
-            listener();
+            listener(epoch);
         });
     }
 
@@ -46,9 +48,11 @@
     function request(method, path, options) {
         options = options || {};
         var headers = { Accept: 'application/json' };
-        var usedToken = options.auth !== false && !!token;
+        var requestEpoch = sessionEpoch;
+        var requestToken = token;
+        var usedToken = options.auth !== false && !!requestToken;
         if (usedToken) {
-            headers.Authorization = 'Bearer ' + token;
+            headers.Authorization = 'Bearer ' + requestToken;
         }
         var init = { method: method, headers: headers };
         if (options.json !== undefined) {
@@ -85,8 +89,8 @@
                         if (!response.ok || !payload || payload.success !== true) {
                             // 只有帶著 token 的 request 收到 401 才代表 session 失效；
                             // login 本身的 401 是帳密錯誤，不觸發全域登出。
-                            if (response.status === 401 && usedToken) {
-                                notifyUnauthorized();
+                            if (response.status === 401 && usedToken && requestEpoch === sessionEpoch && requestToken === token) {
+                                notifyUnauthorized(requestEpoch);
                             }
                             throw apiError(
                                 payload && payload.message ? payload.message : 'HTTP ' + response.status,
@@ -144,6 +148,7 @@
             return !!token;
         },
         setToken: setToken,
+        sessionEpoch: function () { return sessionEpoch; },
         // session 失效（401）的全域通知；device-auth 訂閱後負責清 token 與 UI 鎖定。
         onUnauthorized: function onUnauthorized(listener) {
             unauthorizedListeners.push(listener);

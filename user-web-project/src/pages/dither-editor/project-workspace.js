@@ -49,64 +49,12 @@
             });
     }
 
-    function validColor(color) {
-        return Boolean(color) && ['r', 'g', 'b'].every(function (key) {
-            return Number.isInteger(color[key]) && color[key] >= 0 && color[key] <= 255;
-        });
-    }
-
-    function validPalette(value, allowNull) {
-        if (allowNull && value === null) {
-            return true;
+    function persistenceFor(id) {
+        var feature = app.pages.ditherEditor.featureRegistry.get(id);
+        if (!feature || !feature.persistence) {
+            throw workspaceError('feature-unsupported', 'Project feature is unavailable: ' + id);
         }
-        return Array.isArray(value) && value.length >= 2 && value.length <= 32 && value.every(validColor);
-    }
-
-    function validateFeatureSettings(id, value) {
-        if (!validateFeatureValue(value, 0) || !value || typeof value !== 'object' || Array.isArray(value)) {
-            return false;
-        }
-        if (id === 'crop') {
-            return ['x', 'y', 'width', 'height', 'panX', 'panY', 'zoom', 'rotation'].every(function (key) {
-                return Number.isFinite(value[key]);
-            }) && value.width >= 1 && value.height >= 1 && value.zoom >= 0.1 && value.zoom <= 20
-                && value.rotation >= -180 && value.rotation <= 180
-                && typeof value.aspectRatioId === 'string'
-                && typeof value.flipX === 'boolean' && typeof value.flipY === 'boolean'
-                && typeof value.backgroundPreset === 'string'
-                && /^#[0-9a-f]{6}$/i.test(value.backgroundColor)
-                && /^#[0-9a-f]{6}$/i.test(value.autoBackgroundColor);
-        }
-        if (id === 'resize') {
-            return Number.isInteger(value.width) && Number.isInteger(value.height)
-                && value.width >= 1 && value.height >= 1 && value.width <= 4096 && value.height <= 4096
-                && Number.isFinite(value.aspectRatio) && value.aspectRatio > 0;
-        }
-        if (id === 'adjust') {
-            return ['brightness', 'contrast', 'saturation'].every(function (key) {
-                return Number.isFinite(value[key]) && value[key] >= -100 && value[key] <= 100;
-            });
-        }
-        if (id === 'palette') {
-            return typeof value.presetId === 'string'
-                && validPalette(value.palette, true) && validPalette(value.originalPalette, true)
-                && Number.isInteger(value.originalPaletteSize)
-                && value.originalPaletteSize >= 2 && value.originalPaletteSize <= 32;
-        }
-        if (id === 'dither') {
-            var algorithms = ['none'].concat(app.pages.ditherEditor.ditherAlgorithmRegistry.list().map(function (item) {
-                return item.id;
-            }));
-            return algorithms.indexOf(value.algorithm) !== -1
-                && ['nearest-color', 'pair-mix', 'tri-mix'].indexOf(value.paletteMapping) !== -1
-                && ['euclidean-bt709', 'euclidean-rgb', 'manhattan-bt709', 'manhattan-rgb', 'ciede2000'].indexOf(value.colorDistance) !== -1
-                && typeof value.serpentine === 'boolean'
-                && Number.isFinite(value.errorStrength) && value.errorStrength >= 0 && value.errorStrength <= 150;
-        }
-        if (id === 'export') {
-            return value.format === 'png';
-        }
-        return false;
+        return feature.persistence;
     }
 
     function allowedPipelineIds(defaultState, stage) {
@@ -148,7 +96,10 @@
         validateSize(resultImageData, 'Result image');
         var features = {};
         Object.keys(state.settings || {}).forEach(function (id) {
-            features[id] = { version: 1, settings: copy(state.settings[id]) };
+            var persistence = persistenceFor(id);
+            var settings = persistence.serializeSettings(state.settings[id]);
+            if (!validateFeatureValue(settings, 0)) { throw workspaceError('settings-invalid', 'Invalid serialized settings.'); }
+            features[id] = { version: persistence.version, settings: settings };
         });
         return {
             format: app.core.projectFile.format,
@@ -219,10 +170,11 @@
         }
         featureIds.forEach(function (id) {
             var record = data.editor.features[id];
-            if (!record || record.version !== 1 || !validateFeatureSettings(id, record.settings)) {
+            var persistence = persistenceFor(id);
+            if (!record || record.version !== persistence.version || !validateFeatureValue(record.settings, 0)) {
                 throw workspaceError('settings-invalid', 'Project feature settings are invalid.');
             }
-            base.settings[id] = copy(record.settings);
+            base.settings[id] = persistence.restoreSettings(record.settings, record.version);
         });
         base.fileName = data.source.fileName;
         base.sourceFile = {

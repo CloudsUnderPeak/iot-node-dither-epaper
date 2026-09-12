@@ -24,4 +24,9 @@
             labelKey: 'colorDistanceCiede2000'
         }
     ];
+    var ids = app.core.paletteUtils.colorDistanceIds;
+    var metrics = app.pages.ditherEditor.config.colorDistanceMetrics;
+    if (metrics.length !== ids.length || ids.some(function (id) {
+        return !metrics.some(function (metric) { return metric.id === id; });
+    })) { throw new Error('Color distance UI metadata does not match core identities.'); }
 })(window.DitherApp);

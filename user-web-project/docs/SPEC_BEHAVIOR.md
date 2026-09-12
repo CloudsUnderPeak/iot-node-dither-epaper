@@ -9,110 +9,13 @@ Split From: SPEC_INDEX.md
 
 本文件用 PM / 產品驗收角度描述使用者可見行為、範圍、畫面互動與成功標準。實作架構、檔案結構、命名、state、pipeline、儲存與演算法細節請看 [SPEC_TECHNICAL.md](SPEC_TECHNICAL.md)。文件入口與閱讀導引請先看 [SPEC_INDEX.md](SPEC_INDEX.md)。
 
-## History
+## 設計沿革與現行範圍
 
-- 2026-09-12: 圖片專案匯入改為以 PNG 內的 project chunks 辨識，不再要求匯入檔名精確以 `.dither.png` 結尾；瀏覽器重新下載形成的 `.dither(1).png` 或其他重新命名 PNG 仍可還原。`.dither.png` 若不含專案內容仍明確拒絕。
-- 2026-09-12: 新增可攜式 `.dither.png` 圖片設定檔。檔案本身是可由 PC 圖片檢視器預覽最終 dither 結果的 PNG，同時內嵌原始圖、工作圖與有版本的編輯設定；所有上傳入口自動區分一般圖片與設定檔。設定檔匯出只在 E-paper Device Mode 顯示，且不依賴裝置在線、可繪製或 cooldown 狀態。
-- 2026-09-12: E-paper Device Mode 載入新圖片或 demo 時，依解碼後、縮小前的原始尺寸自動選擇 Crop 比例：直式用 3:5，橫式與正方形用 5:3；自動選擇只作為新圖初始值，使用者後續手動選擇不被輪詢、校色或重新繪製覆蓋。若圖片先於 e-paper capability 載入，首次切換裝置模式時套用同一規則。
-- 2026-08-10: 面板測試新增公開的六色色準編輯器：色票與 RGB 輸入即時改變預覽，只有儲存才寫入裝置 NVS；可重載裝置值或恢復韌體預設。儲存成功後同一份 canonical 色盤立即套用到固定色票、抖色與 Result，編輯中的舊頁面會重算，未儲存草稿不影響編輯器。
-- 2026-08-10: E-paper 固定六色色票與面板六色測試圖統一依 EPD code `0,1,2,3,5,6` 排列，顯示順序為黑、白、黃、紅、藍、綠；`DISPLAY_COLORS` 與 `OUTPUT_COLORS` 維持相同 code slot，避免紅／黃因語意順序不同而錯配。
-- 2026-08-10: 「電子紙測試」更名為「面板測試」並對齊其他裝置頁版型：移除頁內重複大標題，狀態卡只顯示面板、狀態與冷卻資訊，診斷卡顯示說明與三個操作；卡片、欄位層級、間距、離線反灰與行動列均沿用裝置管理共用樣式。
-- 2026-08-09: 電子紙肉眼校色改為實體參考色模型：網頁色票與抖動皆使用面板在真實世界呈現的 `DISPLAY_COLORS`（A′）做色距、選色與誤差擴散；送出前再依固定 palette index 轉成裝置協定 `OUTPUT_COLORS`（A），使網頁 Result 與實體面板視覺對齊而不改變 EPDIMG contract。
-- 2026-08-09: E-paper 繪製／測試操作 overlay 改為沿用 App 啟動 loading 的主題遮罩、64px spinner、accent 色、文字與進度條視覺；電子紙既有的 phase 文案、獨立百分比與時間加權進度行為不變。
-- 2026-08-09: 修正 E-paper 實機操作回饋：固定色票不再顯示新增／刪除或可編輯狀態；同一個硬體 phase 的重複 status 不重設進度計時，超過預估時間仍漸近前進；cooldown 顯示實際秒數，歸零後主動密集確認 server `can_draw`。另將網頁 DISPLAY 六色與 EPDIMG OUTPUT 純六色分離，讓肉眼校色只影響畫面預覽。
-- 2026-08-09: 新增 E-paper Device Mode：`/api/alive` 與 `/api/epaper` 確認裝置能力後，Dither Editor 只允許 5:3/800×480 或 3:5/480×800、固定 E6 六色；portrait 正式輸出依實際尺寸順時針旋轉成韌體 800×480 EPDIMG，Export PNG 改為繪製到電子紙。繪製與面板測試 action 共用 blocking overlay、時間加權 phase progress、single-operation admission 與 180 秒 cooldown；Menu 新增面板測試頁，提供空白、六色測試圖與重新繪製目前圖片。
-- 2026-07-29: 網路頁連線狀態卡的每欄開頭加上 feature icon（STA=Wi-Fi、AP=訊號、mDNS=地球，accent 底色方塊，比照 builtin-web Interface status），桌面與手機皆顯示。
-- 2026-07-29: 「系統設定」更名為「裝置設定」（英文 Device Setting），Menu 與頁名同步；假資料標示簡化為「PREVIEW」；手機模式下「裝置資訊」的裝置欄位逐項分排，每列為左標籤＋右側值（比照表單的左標籤欄）；「網路」的連線狀態逐項分排為 icon＋文字塊，不再併欄也不留空白區塊。
-- 2026-07-29: Web Setting 比照裝置頁改版為編輯器面板樣式：移除頁內大標題（頁名由 header 顯示），主題與語言改為兩張緊湊卡片（標題列＋內容區），與裝置頁同寬置中。
-- 2026-07-29: 下拉選單的自訂向下箭頭改為全站共用元件：編輯器（裁切比例／填色、抖色演算法／映射／色距、調色盤 preset）與 Wi-Fi 表單的所有 select 一致隱藏原生箭頭、疊主題化 chevron，讓各表單元件結尾的 svg 圖示對齊。
-- 2026-07-29: 裝置頁（裝置資訊／網路／系統設定）改版為與 Dither Editor 對齊的視覺語言：移除頁內大標題（頁名由 header 顯示），卡片改為編輯器面板樣式（緊湊標題列＋內容區），表單改為左標籤欄的編輯器密度；輸入框、按鈕、badge、dialog 與字級同步縮到編輯器的尺寸階。容量圖例比照 builtin-web 改為分欄 stat（長標籤換行不擠壓數值），下拉選單改用自訂向下箭頭並與其他表單元件的結尾 svg 對齊；「連線失敗退回 AP」開關移入 STA 的「進階設定」面板（原「進階：IP 設定」更名）。容量長條圖沿用編輯器語彙的 teal 主色與狀態藍兩個色相，以明度鋸齒排列拉開相鄰分段，並通過色盲模擬驗證（protan/deutan ΔE ≥ 8、一般視覺 ΔE ≥ 15）；分段之間加 1px 底色分隔線，邊界在任何主題下都清楚。
-- 2026-07-29: 開關類欄位改為標籤與開關相鄰並靠左，且只有開關本身可切換（點標籤文字不再誤觸）；靜態 IP 欄位加上範例 placeholder；安全性選項與掃描結果的加密資訊統一用英文；掃描視窗的篩選欄與「再次掃描」同一列並各自加上圖示，倒數文字改為「等待 n 秒」且按鈕寬度固定。
-- 2026-07-29: 修正 Wi-Fi 進階區塊內欄位完全沒有間距的問題；儲存列在手機維持單列（狀態文字省略或隱藏，兩顆按鈕平分整列）；toggle 改為標籤在左、開關靠右對齊欄位右緣；登入 dialog 移除「請輸入管理員密碼以解鎖這些設定。」說明；裝置資訊的韌體空間與檔案儲存空間在卡片標題旁顯示總空間。
-- 2026-07-28: 重設裝置改為正式功能：系統設定頁的 danger zone 使用警告徽章與紅色配色，按下後必須先通過紅色確認 dialog 才會呼叫完整重設，成功後裝置重啟、本地登入立即失效並常駐重新連線指示。管理員密碼卡移除「儲存成功後需以新密碼重新登入」提示（成功訊息已說明）；Wi-Fi 進階區塊內距與欄距再放寬；假資料的記憶體使用率固定不再隨輪詢跳動，且完整重設後會回到出廠預設 AP 狀態。
-- 2026-07-28: 裝置頁排版放寬（卡片內距、欄位間距與字級各升一階，新增窄螢幕單欄斷點）；Menu 裝置群組移除連線小點，連線狀態一律由 header 狀態圓點呈現；裝置資訊頁移除手動重新整理、自動更新說明、資料過期標示與設定狀態欄位，改為進入即抓取＋背景更新；容量圖改用全站主色階梯配色；密碼欄的顯示／隱藏切換改為疊在輸入框內；hostname、管理員密碼與 Wi-Fi 密碼提示統一以「…限制：」開頭並改用同一種限制區塊樣式；Wi-Fi 設定的 STA／AP 分段與進階區塊改為可見邊框與淡底色，範圍一眼可辨；重設裝置卡只保留「重設全部」。
-- 2026-07-28: source 直開與 `make demo` 輸出的裝置頁使用假資料（PREVIEW 標示、完整互動、`?mock=0` 關閉）；`make build` 正式產物不含假資料程式。
-- 2026-07-28: Menu 新增「裝置管理」群組：裝置資訊（公開唯讀）、網路（狀態公開、設定需登入）、系統設定（hostname 與管理員密碼，需登入）。新增以 `GET /api/alive` 每 5 秒偵測的裝置連線監看：header 狀態圓點顯示裝置在線／離線，斷線時裝置頁反灰鎖定並自動重試，恢復後自動刷新；Dither Editor 不受影響。
-- 2026-07-11: Help 的演算法卡片與圖片尺寸限制改由 runtime capability 產生；新增演算法缺少教學文案時顯示基本 fallback，移除後自動隱藏，限制值透過可重複 i18n placeholder 顯示。
-- 2026-07-11: Help 擴充為雙語文件中心，提供 9 份可深連結文件、文件樹、Breadcrumb、頁內目錄、上一篇／下一篇、響應式導覽，以及由專案引擎產生的比較圖、矩陣/kernel 圖解與互動示例。
-- 2026-07-11: Startup loading 套用 i18n 時同步更新 header App 標題與 Menu placeholder，避免延遲載入期間同時出現兩種語言。
-- 2026-07-11: App 啟動 loading 放大 spinner、百分比文字與進度條，提升載入期間的視覺辨識度。
-- 2026-07-11: App 啟動 loading 新增階段式百分比與進度條，spinner 加大以提高辨識度；百分比依 script、mount、image settle 與 paint 階段單調前進。
-- 2026-07-11: App 啟動 loading 改為半透明內容區遮罩，保留 64px header 與 App 標題可見，讓新使用者在等待時仍能辨識網站用途。
-- 2026-07-10: App 啟動時顯示全畫面 loading spinner 並鎖定所有操作；頁面 scripts、初始 UI 與圖示載入完成後解除，失敗時顯示重新整理入口。
-- 2026-07-10: Dither 的 Serpentine label 恢復 info tip，說明逐列交替掃描方向及其減少單方向條紋的用途。
-- 2026-07-10: 手動輸入 Crop、Resize 或 Palette 的 unit number control 時，每次按鍵觸發預覽重繪後仍須保持焦點、輸入內容與游標位置；Resize 等比連動的另一欄仍須即時更新。
-- 2026-07-10: unit number input 聚焦時，焦點環必須完整顯示於複合欄位外框，不可在數字區右側留下被裁切的黑邊。
-- 2026-07-10: preview stage 移除右上角忙碌 spinner；loading、processing 與 exporting 期間不再於預覽區顯示旋轉指示器。
-- 2026-07-09: Web Setting 新增 Language 選項，提供 Auto、繁中、English；語言偏好會跨重新整理保存，Auto 依瀏覽器語言選擇目前支援語系。
-- 2026-07-07: preview stage 右上角在 loading/processing/exporting 期間顯示忙碌 spinner（不攔截互動），提供觸控裝置可見的處理中提示。Export 進行中，Export PNG 按鈕變為 Cancel；點擊取消後丟棄在途結果、不觸發下載，狀態還原為 ready/preview-ready。
-- 2026-07-07: 全站互動元件（button、link、select、input、可聚焦元素）鍵盤聚焦時必須顯示主題 accent 色焦點環；只在 `:focus-visible` 顯示，滑鼠點擊不出現。toggle switch 的焦點環維持轉嫁到可見 track 的既有行為。
-- 2026-05-16: 定調目前專案版本為 `0.1.0`。
-- 2026-05-16: 定義 Dither Editor 的 Empty / Crop / Edit 使用者模式；首次進入無圖時只開放 Image Input，載入圖片或 demo 後重設設定並進入 Crop，Crop 確認或收合後才進入 Edit。
-- 2026-05-16: 明確限制各模式右下角 preview toolbar：Empty 不顯示按鈕，Crop 只顯示 Zoom In、Zoom Out、OK，Edit 只顯示 Original、Result；所有 preview toolbar 按鈕尺寸必須一致。
-- 2026-05-21: Empty 模式的圖片上傳入口移至畫布中央，提供拖放上傳區與 Browse File 按鈕；Image Input panel 不顯示 Choose Image 與 Drop Zone，畫布的 No image loaded placeholder 不可視。
-- 2026-05-21: Image Input panel 的 New Image 改為開啟本機圖片選擇器，取代舊的 Choose Image row；目前 UI 不暴露空白 canvas 建立入口。
-- 2026-06-07: Crop 面板改為 2x2 象限控制，右下旋轉與 Flip 圖示按鈕等寬平分；Flip 圖示按下後不顯示持續高亮。
-- 2026-06-07: 左側工具面板新增模式化展開規則：初始只展開 Image Input，載圖後只展開 Crop，離開 Crop 後展開 Resize / Adjust / Palette / Dither；手動回到 Image Input 或 Crop 時其他面板收合。
-- 2026-06-09: 左側工具面板改為以 feature group 管理 `source` / `prepare` / `edit` 流程；未宣告 `panelGroup` 的 feature 屬於 `none`，不顯示在工具面板項目中。
-- 2026-06-09: Crop 預設比例改為 16:9，preview toolbar 的 crop zoom 使用 `+` / `-`；Resize 移除 Fit 選單並鎖定等比；Adjust 移除 Reset Default 並在 slider 左側顯示數值。
-- 2026-06-09: Crop preview toolbar 的 `+` / `-` 改為 compact square buttons；Resize width / height 限制在合法輸出尺寸內。
-- 2026-06-09: Resize width / height 改為同列顯示，並使用和 Crop zoom / rotation 一致的長按連續調整數字輸入樣式。
-- 2026-06-13: Resize width / height 中間新增等比連動提示圖示，讓固定比例關係更明確。
-- 2026-06-13: `prepare` 期間 edit tools 保持可選；從 `prepare` 點選單一 edit tool 時離開 Crop 並只展開該 edit panel。
-- 2026-06-13: Crop frame 與 edit preview 改用同一個有內距的預覽框尺寸，避免 prepare 與 edit 切換時圖片位置跳動。
-- 2026-06-13: 已載入圖片的 `source` 流程預留 preview toolbar 高度但不顯示任何按鈕，避免切換流程時圖片縮放。
-- 2026-06-13: 從 `prepare` 進入 `edit` 時避免先顯示 source fallback 再切到 result，減少明顯圖片重載感。
-- 2026-06-13: prepare crop frame 與 edit preview 使用同一個 preview stage content-box 對齊基準，避免 1px 級切換位移。
-- 2026-06-13: `edit` 的 Original preview 改為顯示 prepare 後的原圖，而不是未經 prepare 的 source image。
-- 2026-06-13: Palette 預設維持 Original；Dither 預設使用 Floyd-Steinberg error diffusion，並以目前 Palette 作為固定輸出色。
-- 2026-06-13: Original palette 萃取改為保留明暗錨點與高飽和代表色，避免小面積線材、燈色被大量背景色洗掉。
-- 2026-06-14: Dither 新增 Color Distance 選項，讓使用者調整 palette 最近色判斷方式；預設維持 RGB。
-- 2026-06-14: Original palette 萃取改為 RgbQuant-style 流程，使用 8x8 區塊統計、hue retention 與 BT.709 euclidean 合併產生代表色。
-- 2026-06-14: Color Distance 的 RgbQuant-style BT.709 距離改以 `Euclidean` 命名，並作為預設選項；`RGB` 保留為未加權 RGB 選項。
-- 2026-06-14: Color Distance 依是否套用 BT.709 權重拆分為 Euclidean BT.709 / Euclidean RGB 與 Manhattan BT.709 / Manhattan RGB，預設為 Euclidean BT.709。
-- 2026-08-11: Color Distance 預設改為 Euclidean RGB；既有已儲存的有效選項維持原值，不做遷移。
-- 2026-06-14: Dither 新增 Error Strength，讓 error diffusion algorithm 可調整誤差擴散強度，預設維持 100%。
-- 2026-06-14: Original palette 重新對齊 ditherit-v2 / RgbQuant `method: 2`，使用完整 2D histogram 而非額外候選上限。
-- 2026-06-14: 專案改為直接使用 vendored RgbQuant 萃取 Original palette，並優先以 RgbQuant 執行支援的 Error Diffusion。
-- 2026-06-14: Error Strength 對齊 dithering-studio-main 的控制語意，使用 0% 到 150%、每次 5% 的誤差擴散倍率。
-- 2026-06-14: Dither 預設改回 None，Error Strength slider step 改為 1%。
-- 2026-06-14: Error Strength slider step 改為 2%。
-- 2026-06-14: Palette color picker 調色時不立即重跑 preview，避免原生調色盤被關閉而無法微調。
-- 2026-06-14: Original Palette 新增 Colors 控制，可在 2 到 32 色間重新萃取，切到 Custom 或固定 preset 時隱藏。
-- 2026-06-14: Palette 色票排列改為每列最多 8 個。
-- 2026-06-14: Dither 預設改回 Floyd-Steinberg；Serpentine 改用 Toggle Switch，Crop 手機版維持 2x2 控制排列，slider 使用主題色。
-- 2026-06-14: Crop 新增 transform fill color，使用 Black / White / Custom select 搭配 color picker，填補旋轉或移動後原圖未覆蓋的區域。
-- 2026-06-14: Crop preview overlay 改以 canvas 內的 crop frame 對齊，避免手機或平板長條圖框選與正式 crop output 偏移。
-- 2026-06-14: Edit effects order 改為固定順序，關閉工具列拖曳排序。
-- 2026-06-14: Slider 與 Toggle Switch 改用較淡的 control accent 色。
-- 2026-06-14: Edit preview 的 Original / Result 切換改用 Theme choice 風格。
-- 2026-06-15: Crop Fill 新增 Auto preset，以低解析邊界取樣快速估算填色，並用小幅色差穩定化降低旋轉閃爍。
-- 2026-06-15: Crop Fill 預設改為 Auto。
-- 2026-06-15: 手機版 empty upload dropzone 保留左右餘裕，不貼齊 preview stage 邊界。
-- 2026-06-15: Preview stage 透明區域背景改為柔和灰白細網格，並每 5x5 小格顯示一組主網格。
-- 2026-06-15: Preview stage 網格色彩改為沿用既有灰階 theme tokens，不另外維護 preview 專用色系。
-- 2026-06-15: 左側工具面板的 feature 圖示改用本地 SVG icon，取代 ASCII placeholder。
-- 2026-06-16: Empty Upload、New Image、Load Demo、Crop 操作、Palette 加刪、Resize link 與 Export 改用本地 SVG icon；Browse File 與 Original / Result 維持純文字。
-- 2026-06-16: 右上角 Menu 按鈕新增本地 SVG menu icon，文字仍保留。
-- 2026-06-16: Resize link 改用 `link-01` SVG，工具面板展開/收合改用 chevron SVG，Light / Dark theme 選項新增 sun / moon SVG icon。
-- 2026-06-16: Light / Dark theme 色彩重新收斂為較少的共享語意層級，減少過度細分色票並維持 theme 切換後的 UI 對比。
-- 2026-06-16: Crop overlay 新增觸控螢幕雙指縮放，和滑鼠滾輪一樣調整圖片 zoom。
-- 2026-06-16: Palette 新增色票按鈕改為圓形外框包住加號；Original Colors 數字控制在無單位文字時仍保留步進按鈕緩衝區，降低窄螢幕誤點。
-- 2026-06-18: Edit Result preview 新增圖片右下角 preview 計時 label，顯示最近一次正式 preview 完成耗時，並可用全域開關停用顯示。
-- 2026-06-18: RgbQuant 限縮為 Original palette 代表色萃取用途；Dither 不再使用 RgbQuant 執行 Error Diffusion，以降低 preview latency。
-- 2026-06-18: Dither 選單精簡為 Floyd-Steinberg、Atkinson、Jarvis-Judice-Ninke、Sierra Lite、Stevenson-Arce、Adaptive FS 3x3、Bayer 4x4、Bayer 8x8、Blue Noise 64、Dot Diffusion 8x8 與 Dot Halftone。
-- 2026-06-19: Dither 設定新增 Palette Mapping，支援 Nearest Color 與 Pair Mix；Dither Algorithm 選單只保留分布演算法。
-- 2026-06-19: Edit Result preview 的計時 label 改為正式繪製開始時顯示 Rendering，繪製完成後顯示耗時，依設定延遲自動隱藏並等待下一次繪製再出現。
-- 2026-06-19: Edit Result preview 的計時 label 自動隱藏時，不應關閉或重置使用者正在操作的面板表單。
-- 2026-06-22: Edit Result preview 縮小顯示時改用正常 canvas 重採樣，不使用 pixelated 硬縮放，避免 dither 細點在預覽中產生與匯出 PNG 明顯不同的 alias 視覺。
-- 2026-06-27: MVP 儲存範圍收斂為 Web Setting theme 跨重新整理保存；Dither Editor 工作圖片與 pipeline/settings 不做跨重新整理或關閉瀏覽器後的持久化，只在同一次 SPA 頁面切換期間保留 session 狀態。
-- 2026-06-28: 內建 demo 圖改為由 `assets/demo/` 中唯一支援格式圖片決定，不要求檔名或 16:9 比例；替換 demo 後須重新產生 demo metadata/fallback。
-- 2026-06-28: 重新展開 Crop 並改變裁切比例後，Resize 的鎖定寬高必須同步反映新的 crop output ratio。
-- 2026-06-28: Original palette 改為以 Crop/prepare 後的裁切範圍取樣，但 Resize 與 Original palette 只在 prepare 結束進入 edit 時重新計算，不在 Crop zoom/pan 操作中即時計算。
-- 2026-06-28: Edit preview toolbar 新增 Expand 檢視，讓使用者以真實輸出像素檢查 Result；Expand 初始視角需對準 Result 的圖片中心點，大圖可用較寬捲軸或拖曳查看其他區域。
-- 2026-07-01: Dither 的強度 slider 在 Error Diffusion 演算法下顯示 Error Strength，在 Bayer 演算法下顯示 Dither Strength。
-- 2026-07-01: Blue Noise 64 使用 Dither Strength，Dot Halftone 使用 Dot Density，Dot Diffusion 8x8 使用 Error Strength；除 None 外的 Dither 演算法都支援強度百分比。
-- 2026-07-02: 切換 Dither algorithm 時，強度 slider 必須回到預設 100%，不沿用上一個 algorithm 的 Error Strength、Dither Strength 或 Dot Density。
+最初以 standalone 編輯器起步，目前已包含同源 ESP32 裝置管理、電子紙輸出與可攜式 PNG 專案。下列章節描述現行契約；早期逐日變更由 git history 保留。
+
+- Classic scripts 與本地資產保留 `file://` 直接使用；Python/Make 發佈建置是選用的 HTTP 資產處理流程。
+- 圖片與 workspace 不自動寫入 browser storage；切頁使用記憶體狀態，跨 session 由使用者明確匯出／匯入 `.dither.png`。
+- 顯示色盤與 EPDIMG 協定色盤分離，校色不改變既有六色 code 或檔案格式。
 
 ## 產品目標
 
@@ -128,7 +31,7 @@ Split From: SPEC_INDEX.md
 
 ## 使用者範圍
 
-MVP 必須支援：
+目前支援：
 
 - 匯入本機圖片。
 - 從專案內建 demo 開始操作。
@@ -143,9 +46,9 @@ MVP 必須支援：
 - 電子紙空白、六色測試圖與 stored image refresh。
 - 保留基本工作狀態與設定。
 
-MVP 不包含：
+目前不包含：
 
-- 後端登入或帳號系統。
+- 雲端帳號系統（裝置管理員登入已提供）。
 - 遠端圖片 URL 輸入。
 - 雲端儲存。
 - 圖層、annotation、文字工具。
@@ -547,7 +450,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 
 限制：
 
-- MVP 匯入格式只支援 `PNG`、`JPEG/JPG`、`WebP`。
+- 匯入支援 `PNG`、`JPEG/JPG`、`WebP` 與內容有效的 `.dither.png` 專案。
 - 不支援 `SVG`、`GIF`、`AVIF`、`HEIC/HEIF`、`RAW`、`PSD`、`TIFF`、`BMP` 等格式進入演算法流程。
 - 不支援格式必須在進入 canvas / pipeline 前被拒絕，並顯示明確錯誤。
 - demo 必須來自專案內 `assets/demo/*` 的單一支援格式圖片資源，不可依賴遠端 URL，也不可在 runtime 由程式臨時產生假 demo；demo 圖檔名稱與比例不應被固定為特定值。
@@ -733,6 +636,15 @@ Crop preview 要求：
 - canvas 尺寸變化不應抵消使用者看到的 zoom / pan 效果。
 - 桌面與手機版都不可因 `prepare` 中的 Crop 流程造成 preview stage 或整個 editor 高度被撐開。
 
+## 非同步操作的有效性
+
+- 載入本機圖片、demo 或圖片專案時，以最後一次選擇為準。較早開始但較晚完成的成功或失敗不得覆蓋目前工作區或新操作的提示。
+- 圖片／專案先建立完整候選工作區；驗證或還原失敗時保留既有 source、settings 與 pipeline。離開頁面後的舊結果不更新畫面。
+- 快速調整保留最新待計算 preview；過期工作不提交結果，也不因取消而重新在主執行緒計算。真正 Worker 故障仍可使用 CPU fallback。
+- 匯出使用開始時的 settings／pipeline／target snapshot；同時只接受一份本地 heavy job，重複匯出不排入隱藏佇列。既有本地匯出取消不顯示錯誤，圖片專案不新增取消按鈕。
+- 本地取消不表示已送出的裝置 upload／draw 已撤回，也不自動重送。
+- 舊 session 的 401、session check 或 logout 回應不能作廢新登入；關閉或被取代的登入 dialog 不再提交 token。當前 session 401 仍回到鎖定狀態，transport failure 保留 token。
+
 ## 預覽與狀態行為
 
 使用者調整 slider、select、color 或 effects order 時，App 應更新 preview，但可以短暫 debounce，避免每一次輸入都完整重算。
@@ -825,7 +737,9 @@ MVP 驗收重點：
 - localStorage schemaVersion 不符時會 fallback，不會造成 runtime crash。
 - export PNG 可以產生 Blob。
 
-## 里程碑
+## 歷史里程碑
+
+以下為初期 standalone 開發階段的拆分，不限制現行裝置管理與電子紙功能。
 
 ### Milestone 1: Static App Shell
 
@@ -901,24 +815,24 @@ MVP 驗收重點：
 驗收：
 
 - Dither editor 功能集中在自己的頁面模組。
-- core 不依賴 DOM。
+- core/color 純運算不依賴 DOM；core/canvas、image IO 是瀏覽器 adapter。
 - app shell 不直接持有 canvas 細節。
 - UI 文字集中管理。
 
 ## 建議不做的事
 
-MVP 應避免：
+現行仍應避免：
 
 - 加入遠端 runtime 依賴。
-- 加入後端。
-- 加入 build step。
+- 增加 standalone 使用時必須啟動的後端服務。
+- 要求來源必須先 build 才能使用；選用 release minify／gzip 仍保留。
 - 把所有邏輯塞進單一 `main.js`。
-- 實作 ESP32 API 或 Upload to Device。
+- 繞過既有 device API adapter、能力限制或裝置 action admission。
 - 把 canvas controller 和 UI 緊耦合。
 - 把 DOM control value 當成唯一狀態來源。
 - 在 MVP 就導入大型第三方圖片編輯器。
 
-## 起始任務清單
+## 歷史起始任務清單
 
 1. 建立 `index.html`、styles 與 app shell。
 2. 建立 namespace 與 classic script 載入順序。
@@ -934,20 +848,20 @@ MVP 應避免：
 
 ## 成功標準
 
-本專案在 MVP 階段成功時，應符合：
+現行產品應符合：
 
 - 使用者可離線打開頁面並完成主要圖片流程。
 - 使用者可切換 Web Setting 並保留設定。
 - 使用者可匯入圖片、調整效果、拖曳順序、預覽並匯出 PNG。
 - UI 能被未來替換，而不重寫核心圖片處理邏輯。
 - 新增 Dither algorithm、palette preset 或 effect feature 時，不需要大範圍改動現有流程。
-- ESP32 Device Mode 有保留方向，但不影響 Standalone MVP。
+- ESP32 Device Mode 由 capability 決定，standalone 本地編輯與 PNG 匯出保持可用。
 
 ## Reviewer Checklist
 
 Reviewer 應確認：
 
-- MVP 沒有遠端 runtime 依賴、build step 或後端需求。
+- 來源沒有遠端 runtime 依賴或必要 build／後端需求；正式 HTTP 資產保留 minify／gzip。
 - 使用者可直接打開 `index.html`。
 - 頁面切換、上一頁、下一頁行為符合預期。
 - Crop、Resize、Adjust、Palette、Dither、Export 行為符合本 spec。
@@ -956,4 +870,4 @@ Reviewer 應確認：
 - Pipeline 失敗時會停止並呈現錯誤。
 - Web Setting theme / language 與 Dither Editor 頁面切換 session 狀態保存符合預期。
 - UI 文字集中管理。
-- ESP32 Device Mode 沒有混入 MVP 主要流程。
+- 裝置 action 與本地匯出遵守各自的能力／連線限制。

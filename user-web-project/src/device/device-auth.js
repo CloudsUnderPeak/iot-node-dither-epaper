@@ -2,6 +2,7 @@
     // 裝置管理的認證流程：login dialog、session 驗證、登出與全域 401 處理。
     // token 只是本地快取；有效性永遠以裝置的 session API 為準。
     var listeners = [];
+    var loginGeneration = 0;
 
     function t(key, replacements) {
         return app.i18n.t(key, replacements);
@@ -14,8 +15,8 @@
     }
 
     // 任何帶 token 的 request 收到 401：token 已被裝置作廢（重啟或他人登入）。
-    app.device.api.onUnauthorized(function () {
-        if (app.device.api.hasToken()) {
+    app.device.api.onUnauthorized(function (epoch) {
+        if (epoch === app.device.api.sessionEpoch() && app.device.api.hasToken()) {
             app.device.api.setToken('');
             notify();
         }
@@ -25,9 +26,10 @@
         if (!app.device.api.hasToken()) {
             return Promise.resolve(false);
         }
+        var epoch = app.device.api.sessionEpoch();
         return app.device.api.resources.session().then(
             function () {
-                return true;
+                return epoch === app.device.api.sessionEpoch() && app.device.api.hasToken();
             },
             function () {
                 // 401 已由全域攔截清除 token；transport 失敗保留 token，
@@ -50,6 +52,9 @@
     // 開啟共用 login dialog；成功後原地呼叫 onSuccess，不跳頁。
     function openLoginDialog(options) {
         options = options || {};
+        var generation = ++loginGeneration;
+        var closed = false;
+        function current() { return !closed && generation === loginGeneration; }
         var usernameInput = app.utils.dom.el('input', {
             className: 'device-input',
             attrs: { type: 'text', value: 'admin', readonly: 'readonly', autocomplete: 'off' }
@@ -87,7 +92,7 @@
         // username 固定 admin，仍以公開 auth API 為準，不寫死在 client。
         app.device.api.resources.authInfo().then(
             function (data) {
-                if (data.username) {
+                if (current() && data.username) {
                     usernameInput.value = data.username;
                 }
             },
@@ -99,6 +104,7 @@
         });
         form.addEventListener('submit', function (event) {
             event.preventDefault();
+            if (!current() || submitButton.disabled) { return; }
             if (!password.input.value) {
                 notice.set(t('loginInvalid'), { error: true });
                 password.input.focus();
@@ -107,8 +113,10 @@
             submitButton.disabled = true;
             cancelButton.disabled = true;
             app.ui.modal.setDismissible(false);
+            var epoch = app.device.api.sessionEpoch();
             app.device.api.resources.login(usernameInput.value, password.input.value).then(
                 function (data) {
+                    if (!current() || epoch !== app.device.api.sessionEpoch()) { return; }
                     app.device.api.setToken(data.token || '');
                     app.ui.modal.close();
                     notify();
@@ -117,6 +125,7 @@
                     }
                 },
                 function (error) {
+                    if (!current() || epoch !== app.device.api.sessionEpoch()) { return; }
                     submitButton.disabled = false;
                     cancelButton.disabled = false;
                     app.ui.modal.setDismissible(true);
@@ -129,7 +138,7 @@
             );
         });
 
-        app.ui.modal.open(dialog, { initialFocus: password.input });
+        app.ui.modal.open(dialog, { initialFocus: password.input, onClose: function () { closed = true; } });
     }
 
     // 受保護區塊的鎖定卡：未登入時取代內容，點擊解鎖開啟 login dialog。
@@ -154,7 +163,9 @@
     }
 
     function logout() {
+        var epoch = app.device.api.sessionEpoch();
         var cleanup = function () {
+            if (epoch !== app.device.api.sessionEpoch()) { return; }
             app.device.api.setToken('');
             notify();
         };

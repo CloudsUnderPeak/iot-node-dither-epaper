@@ -206,11 +206,10 @@ def minify_html(text: str) -> str:
 
 
 def minify_css(text: str) -> str:
-    text = strip_comments(text)
-    text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"\s*([{}:;,>+~])\s*", r"\1", text)
-    text = re.sub(r";}", "}", text)
-    return text.strip() + "\n"
+    # Preserve lexical islands and token boundaries, including CSS math whitespace.
+    # Comments stay intact: deleting them can join tokens or change selectors.
+    tokens = re.findall(r"/\*.*?\*/|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\\[\s\S]|\s+|[^\s]", text, re.DOTALL)
+    return "".join(" " if token.isspace() else token for token in tokens).strip() + "\n"
 
 
 def minify_js(text: str) -> str:

@@ -145,6 +145,13 @@
         if (feature.operation && typeof feature.operation.run !== 'function') {
             throw new Error('Feature operation requires run(): ' + feature.id);
         }
+        if (feature.defaultSettings || feature.persistence) {
+            var persistence = feature.persistence;
+            if (!persistence || !Number.isInteger(persistence.version) || persistence.version < 1
+                || typeof persistence.serializeSettings !== 'function' || typeof persistence.restoreSettings !== 'function') {
+                throw new Error('Feature settings require a complete persistence contract: ' + feature.id);
+            }
+        }
         if (feature.api && typeof feature.api !== 'object') {
             throw new Error('Feature api must be an object: ' + feature.id);
         }

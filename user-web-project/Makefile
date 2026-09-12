@@ -18,3 +18,11 @@ gzip:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+TEST_FLAGS ?=
+.PHONY: test test-production
+test:
+	$(PYTHON) tools/test/run.py $(TEST_FLAGS)
+
+test-production:
+	$(PYTHON) tools/test/run.py --production $(TEST_FLAGS)

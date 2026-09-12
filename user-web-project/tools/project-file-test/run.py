@@ -1,74 +1,32 @@
 #!/usr/bin/env python3
 import argparse
 import html
-import importlib.util
 import json
 import re
-import subprocess
 from pathlib import Path
 
 
 TOOL_DIR = Path(__file__).resolve().parent
-HELPER_PATH = TOOL_DIR.parent / "dither-render" / "run.py"
-
-
-def helper_module():
-    spec = importlib.util.spec_from_file_location("dither_render_helper", HELPER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+import sys
+sys.path.insert(0, str(TOOL_DIR.parent / 'shared'))
+import browser as helper
 
 
 def main():
     parser = argparse.ArgumentParser(description="Validate .dither.png routing and round trip.")
     parser.add_argument("--chrome", help="Chrome or Edge executable path.")
+    parser.add_argument("--timeout", type=float, default=90)
     args = parser.parse_args()
-    helper = helper_module()
-    command = [
-        str(helper.browser_path(args.chrome)),
-        "--headless=new",
-        "--allow-file-access-from-files",
-        "--disable-background-networking",
-        "--run-all-compositor-stages-before-draw",
-        "--virtual-time-budget=15000",
-        "--dump-dom",
-        helper.file_url(TOOL_DIR / "index.html"),
-    ]
-    result = None
-    for _attempt in range(3):
-        completed = subprocess.run(command, check=False, capture_output=True, text=True, errors="replace")
-        if completed.returncode != 0:
-            raise SystemExit(helper.sanitize_text(completed.stderr))
-        match = re.search(r'<pre id="project-test-json">(.*?)</pre>', completed.stdout, re.DOTALL)
-        if not match:
-            raise SystemExit("Project test result was not found.")
-        result = json.loads(html.unescape(match.group(1)))
-        if result.get("passed") or result.get("error"):
-            break
+    browser = helper.browser_path(args.chrome)
+    dom = helper.run_ready_browser(browser, helper.file_url(TOOL_DIR / 'index.html', browser), args.timeout)
+    match = re.search(r'<pre id="project-test-json">(.*?)</pre>', dom, re.DOTALL)
+    if not match:
+        raise SystemExit('Project test result was not found.')
+    result = json.loads(html.unescape(match.group(1)))
     if result.get("error") or not result.get("passed"):
         raise SystemExit("Project file validation failed: " + result.get("error", "unknown error"))
-    app_command = [
-        str(helper.browser_path(args.chrome)),
-        "--headless=new",
-        "--allow-file-access-from-files",
-        "--disable-background-networking",
-        "--run-all-compositor-stages-before-draw",
-        "--virtual-time-budget=10000",
-        "--dump-dom",
-        helper.file_url(TOOL_DIR.parent.parent / "index.html"),
-    ]
-    app_dom = ""
-    loading_tag = None
-    for _attempt in range(3):
-        app_completed = subprocess.run(
-            app_command, check=False, capture_output=True, text=True, errors="replace"
-        )
-        if app_completed.returncode != 0:
-            raise SystemExit(helper.sanitize_text(app_completed.stderr))
-        app_dom = app_completed.stdout
-        loading_tag = re.search(r'<div\s+id="app-loading"[^>]*>', app_dom)
-        if loading_tag and 'data-state="ready"' in loading_tag.group(0):
-            break
+    app_dom = helper.run_ready_browser(browser, helper.file_url(TOOL_DIR.parent.parent / 'index.html', browser), args.timeout)
+    loading_tag = re.search(r'<div\s+id="app-loading"[^>]*>', app_dom)
     if not loading_tag or 'data-state="ready"' not in loading_tag.group(0):
         state = loading_tag.group(0) if loading_tag else "missing loading element"
         message = re.search(r'id="app-loading-message"[^>]*>(.*?)</div>', app_dom, re.DOTALL)

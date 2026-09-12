@@ -2,113 +2,21 @@
 import argparse
 import html
 import json
-import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 
 BENCHMARK_HTML = Path(__file__).resolve().with_name("index.html")
-BROWSER_ENV = "DITHER_BENCHMARK_BROWSER"
-BROWSER_COMMANDS = [
-    "google-chrome",
-    "chromium",
-    "chromium-browser",
-    "chrome",
-    "msedge",
-    "chrome.exe",
-    "msedge.exe",
-]
-
-
-def windows_file_url(path):
-    text = path.resolve().as_posix()
-    match = re.match(r"^/mnt/([a-zA-Z])/(.*)$", text)
-    if match:
-        drive = match.group(1).upper()
-        rest = quote(match.group(2), safe="/:")
-        return f"file:///{drive}:/{rest}"
-    return path.resolve().as_uri()
-
-
-def posix_path_from_windows_path(value):
-    match = re.match(r"^([a-zA-Z]):[\\/](.*)$", value.strip())
-    if not match:
-        return Path(value)
-    drive = match.group(1).lower()
-    rest = match.group(2).replace("\\", "/")
-    return Path(f"/mnt/{drive}/{rest}")
-
-
-def powershell_browser_path():
-    powershell = shutil.which("powershell.exe")
-    if not powershell:
-        return None
-    command = (
-        "$names=@('chrome.exe','msedge.exe');"
-        "foreach($name in $names){"
-        "$cmd=Get-Command $name -ErrorAction SilentlyContinue;"
-        "if($cmd){$cmd.Source; break}"
-        "}"
-    )
-    first_line = powershell_first_line(powershell, command)
-    if not first_line:
-        registry_command = (
-            "$names=@('chrome.exe','msedge.exe');"
-            "foreach($name in $names){"
-            "$paths=@("
-            '"HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\$name",'
-            '"HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\$name"'
-            ");"
-            "foreach($path in $paths){"
-            "$value=Get-ItemPropertyValue -Path $path -Name '(default)' -ErrorAction SilentlyContinue;"
-            "if($value){$value; break}"
-            "}"
-            "if($value){break}"
-            "}"
-        )
-        first_line = powershell_first_line(powershell, registry_command)
-    return posix_path_from_windows_path(first_line) if first_line else None
-
-
-def powershell_first_line(powershell, command):
-    completed = subprocess.run(
-        [powershell, "-NoProfile", "-Command", command],
-        check=False,
-        capture_output=True,
-        text=True,
-        errors="replace",
-    )
-    if completed.returncode != 0:
-        return ""
-    return next((line.strip() for line in completed.stdout.splitlines() if line.strip()), "")
-
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'shared'))
+import browser as browser_helper
+file_url = browser_helper.file_url
+windows_file_url = browser_helper.file_url
+sanitize_text = browser_helper.sanitize_text
 
 def chrome_path(explicit):
-    if explicit:
-        return Path(explicit)
-    env_browser = os.environ.get(BROWSER_ENV)
-    if env_browser:
-        return Path(env_browser)
-    for command in BROWSER_COMMANDS:
-        found = shutil.which(command)
-        if found:
-            return Path(found)
-    discovered = powershell_browser_path()
-    if discovered:
-        return discovered
-    raise SystemExit(f"Browser was not found. Pass --chrome or set {BROWSER_ENV}.")
-
-
-def sanitize_text(value):
-    text = str(value)
-    text = re.sub(r"file:///[^\s\"'<>]+", "<local-file>", text)
-    text = re.sub(r"[A-Za-z]:[\\/][^\s\"'<>]+", "<local-file>", text)
-    text = re.sub(r"/mnt/[A-Za-z]/[^\s\"'<>]+", "<local-file>", text)
-    return text
+    return browser_helper.browser_path(explicit, 'DITHER_BENCHMARK_BROWSER')
 
 
 def extract_json(dom):
@@ -167,7 +75,9 @@ def main():
     parser.add_argument("--algorithm", default="all")
     parser.add_argument("--backend", default="auto", choices=["auto", "cpu", "gpu"])
     parser.add_argument("--json", action="store_true", help="Print raw JSON instead of a table.")
+    parser.add_argument("--timeout", type=float, default=180)
     args = parser.parse_args()
+    browser = chrome_path(args.chrome)
 
     query = urlencode({
         "autorun": "1",
@@ -181,22 +91,10 @@ def main():
         "algorithm": args.algorithm,
         "backend": args.backend,
     })
-    url = f"{windows_file_url(BENCHMARK_HTML)}?{query}"
-    browser = chrome_path(args.chrome)
-    command = [
-        str(browser),
-        "--headless=new",
-        "--allow-file-access-from-files",
-        "--disable-background-networking",
-        "--dump-dom",
-        url,
-    ]
-    completed = subprocess.run(command, check=False, capture_output=True, text=True, errors="replace")
-    if completed.returncode != 0:
-        sys.stderr.write(sanitize_text(completed.stderr))
-        raise SystemExit(completed.returncode)
+    url = f"{windows_file_url(BENCHMARK_HTML, browser)}?{query}"
+    dom = browser_helper.run_ready_browser(browser, url, timeout=args.timeout)
 
-    result = extract_json(completed.stdout)
+    result = extract_json(dom)
     if args.json:
         print(json.dumps(result, indent=2))
     else:

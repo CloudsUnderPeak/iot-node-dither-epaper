@@ -1,4 +1,25 @@
 (function (app) {
+    function validColor(color) {
+        return Boolean(color) && ['r', 'g', 'b'].every(function (key) {
+            return Number.isInteger(color[key]) && color[key] >= 0 && color[key] <= 255;
+        });
+    }
+
+    function validPalette(value, allowNull) {
+        if (allowNull && value === null) {
+            return true;
+        }
+        return Array.isArray(value) && value.length >= constants.MIN_ORIGINAL_PALETTE_SIZE && value.length <= constants.MAX_ORIGINAL_PALETTE_SIZE && value.every(validColor);
+    }
+
+    // Version 1 persisted values retain the original strict workspace contract.
+    function validPersistedSettings(value) {
+            return typeof value.presetId === 'string'
+                && validPalette(value.palette, true) && validPalette(value.originalPalette, true)
+                && Number.isInteger(value.originalPaletteSize)
+                && value.originalPaletteSize >= constants.MIN_ORIGINAL_PALETTE_SIZE && value.originalPaletteSize <= constants.MAX_ORIGINAL_PALETTE_SIZE;
+    }
+
     // Palette feature 管理色票 UI、原圖代表色萃取，以及 Dither 關閉時的 palette quantization。
     // Dither 啟用時，preset/custom 色票只作為 Dither 的固定目標色集合。
     var ui = app.pages.ditherEditor.panelUtils;
@@ -254,6 +275,18 @@
 
     app.pages.ditherEditor.featureRegistry.register({
         id: 'palette',
+        persistence: {
+            version: 1,
+            serializeSettings: function (settings) { return JSON.parse(JSON.stringify(settings)); },
+            restoreSettings: function (value, version) {
+                if (version !== 1 || !value || typeof value !== 'object' || Array.isArray(value) || !validPersistedSettings(value)) {
+                    var error = new Error('Invalid palette project settings.');
+                    error.code = 'settings-invalid';
+                    throw error;
+                }
+                return JSON.parse(JSON.stringify(value));
+            }
+        },
         icon: '#',
         iconPath: 'assets/icons/editor/palette.svg',
         labelKey: 'panelPalette',

@@ -5,7 +5,7 @@ Version: 0.1.0
 Status: Draft
 ```
 
-本文件只作為 spec 文件入口與閱讀導引。詳細規格內容請看對應的 Behavior 或 Technical spec。
+本文件只作為現行 spec 文件入口與閱讀導引；早期里程碑不限制已實作的裝置與圖片專案功能。詳細規格內容請看對應的 Behavior 或 Technical spec。
 
 命名分工：
 
@@ -30,3 +30,5 @@ Status: Draft
 - 行為 spec 說明「使用者看見什麼、能做什麼、什麼算完成」。
 - 技術 spec 說明「系統如何組織、程式如何實作、哪些限制不能破壞」。
 - 本入口文件只保留導覽，不承載完整需求內容。
+
+測試入口與 cache／job／source／session／persistence ownership 見 [Technical spec](SPEC_TECHNICAL.md)；使用者可見的過期操作規則見 [Behavior spec](SPEC_BEHAVIOR.md)。

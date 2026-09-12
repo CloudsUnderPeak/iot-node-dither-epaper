@@ -100,16 +100,16 @@
     }
 
     // Pipeline 以 A′ 運算；只有送入 EPDIMG 前才把每個 palette index 正規化為協定色 A。
-    function outputImageData(imageData) {
+    function outputImageData(imageData, snapshotColors) {
         if (!imageData || !imageData.data) {
             return imageData;
         }
         var revision = calibrationRevision();
-        var cached = outputImageCache.get(imageData);
+        var cached = !snapshotColors && outputImageCache.get(imageData);
         if (cached && cached.revision === revision) {
             return cached.imageData;
         }
-        var colors = displayColors();
+        var colors = snapshotColors || displayColors();
         var data = new Uint8ClampedArray(imageData.data);
         for (var offset = 0; offset < data.length; offset += 4) {
             var index = colorIndex(colors, data[offset], data[offset + 1], data[offset + 2]);
@@ -124,7 +124,7 @@
             data[offset + 2] = OUTPUT_COLORS[index].b;
         }
         var output = new ImageData(data, imageData.width, imageData.height);
-        outputImageCache.set(imageData, { revision: revision, imageData: output });
+        if (!snapshotColors) { outputImageCache.set(imageData, { revision: revision, imageData: output }); }
         return output;
     }
 

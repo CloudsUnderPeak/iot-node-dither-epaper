@@ -47,3 +47,16 @@ python3 tools/help-validate/run.py
 ## Supported Input Formats
 
 You can upload PNG, JPEG/JPG, WebP, and this app's `.dither.png` image projects. Every upload entry identifies projects from their contents, so browser-renamed files such as `.dither(1).png` still work, and validates the embedded data before restoring it.
+
+## Development Checks and Releases
+
+Source `index.html` works with `file://` without npm or a build. Optional `make build` produces minified, gzip-only HTTP assets without the device mock; `make demo` keeps the preview mock and uses normal files.
+
+```bash
+make test
+make test-production
+```
+
+These host checks cover project compatibility, cancellation and stale responses, source editing, and freshly built HTTP assets. They do not operate a physical device. Set `DITHER_BROWSER` or pass `TEST_FLAGS="--chrome <browser-path>"` when browser discovery needs help. Runners use isolated profiles and bounded DOM readiness checks; WSL with Windows Chrome uses the built-in PowerShell bridge. Benchmark/render remain separate tools.
+
+Current contracts: [Behavior](docs/SPEC_BEHAVIOR.md), [Technical](docs/SPEC_TECHNICAL.md), [Spec index](docs/SPEC_INDEX.md).

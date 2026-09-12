@@ -2,6 +2,7 @@
     // Pipeline runner 是純執行器：依 state.pipeline 決定順序，逐步把 ImageData 丟給 operation。
     // 它不讀 DOM，也不決定哪些 tool 顯示；那些責任在 feature/page 層。
     var MAX_STAGE_CACHE_ENTRIES = 32;
+    var MAX_STAGE_CACHE_BYTES = 32 * 1024 * 1024;
     var imageDataIds = typeof WeakMap === 'function' ? new WeakMap() : null;
     var nextImageDataId = 1;
 
@@ -16,26 +17,41 @@
             });
     }
 
-    function createStageCache() {
+    function createStageCache(options) {
+        options = options || {};
         return {
-            entries: new Map()
+            entries: new Map(),
+            buffers: new Map(),
+            maxBytes: options.maxBytes === undefined ? MAX_STAGE_CACHE_BYTES : Math.max(0, options.maxBytes),
+            maxEntries: options.maxEntries === undefined ? MAX_STAGE_CACHE_ENTRIES : Math.max(0, options.maxEntries),
+            retainedBytes: 0,
+            generation: 0
         };
     }
 
     function clearStageCache(stageCache) {
-        if (stageCache && stageCache.entries && stageCache.entries.clear) {
+        if (stageCache) {
             stageCache.entries.clear();
+            stageCache.buffers.clear();
+            stageCache.retainedBytes = 0;
+            stageCache.generation += 1;
         }
     }
 
     function normalizeStageCache(stageCache) {
-        if (!stageCache) {
-            return null;
+        return stageCache || null;
+    }
+
+    function removeStageCacheEntry(cache, key) {
+        var buffer = cache.entries.get(key).imageData.data.buffer;
+        var count = cache.buffers.get(buffer);
+        cache.entries.delete(key);
+        if (count === 1) {
+            cache.buffers.delete(buffer);
+            cache.retainedBytes -= buffer.byteLength;
+        } else {
+            cache.buffers.set(buffer, count - 1);
         }
-        if (!stageCache.entries || !stageCache.entries.get) {
-            stageCache.entries = new Map();
-        }
-        return stageCache;
     }
 
     function imageDataKey(imageData) {
@@ -127,22 +143,37 @@
         return entry;
     }
 
-    function setStageCacheEntry(stageCache, key, entry) {
-        if (!stageCache) {
+    function setStageCacheEntry(stageCache, key, entry, generation) {
+        if (!stageCache || generation !== stageCache.generation) {
             return;
         }
+        if (stageCache.entries.has(key)) {
+            removeStageCacheEntry(stageCache, key);
+        }
+        var buffer = entry.imageData.data.buffer;
+        if (!stageCache.maxBytes || !stageCache.maxEntries || buffer.byteLength > stageCache.maxBytes) {
+            return;
+        }
+        var count = stageCache.buffers.get(buffer) || 0;
+        stageCache.buffers.set(buffer, count + 1);
+        if (!count) {
+            stageCache.retainedBytes += buffer.byteLength;
+        }
         stageCache.entries.set(key, entry);
-        while (stageCache.entries.size > MAX_STAGE_CACHE_ENTRIES) {
-            stageCache.entries.delete(stageCache.entries.keys().next().value);
+        while (stageCache.entries.size > stageCache.maxEntries || stageCache.retainedBytes > stageCache.maxBytes) {
+            removeStageCacheEntry(stageCache, stageCache.entries.keys().next().value);
         }
     }
 
     function runOperationIds(inputImageData, state, order, options) {
         var current = inputImageData;
         var stageCache = normalizeStageCache(options && options.stageCache);
+        var generation = stageCache && stageCache.generation;
+        var job = options && options.job;
         var inputKey = stageCache ? imageDataKey(current) : '';
 
         for (var i = 0; i < order.length; i += 1) {
+            if (job) { job.check(); }
             var operation = app.pages.ditherEditor.operationRegistry.get(order[i]);
             if (!operation) {
                 throw new Error('Missing operation: ' + order[i]);
@@ -163,8 +194,11 @@
             current = operation.run(current, state.settings[order[i]] || {}, {
                 id: order[i],
                 state: state,
-                stageCache: stageCache
+                stageCache: stageCache,
+                job: job,
+                workerClient: options && options.workerClient
             });
+            if (job) { job.check(); }
             if (stageCache && operation.cacheable !== false) {
                 var outputKey = current === previous
                     ? inputKey
@@ -172,7 +206,7 @@
                 setStageCacheEntry(stageCache, cacheKey, {
                     imageData: current,
                     outputKey: outputKey
-                });
+                }, generation);
                 inputKey = outputKey;
             } else if (stageCache) {
                 inputKey = imageDataKey(current);
@@ -185,11 +219,14 @@
     // cache 邏輯與同步版一致；同步版保留給 prepare group 等保證同步的路徑。
     function runOperationIdsAsync(inputImageData, state, order, options) {
         var stageCache = normalizeStageCache(options && options.stageCache);
+        var generation = stageCache && stageCache.generation;
+        var job = options && options.job;
         var current = inputImageData;
         var inputKey = stageCache ? imageDataKey(current) : '';
         var index = 0;
 
         function step() {
+            if (job) { job.check(); }
             if (index >= order.length) {
                 return Promise.resolve(current);
             }
@@ -213,8 +250,11 @@
             return Promise.resolve(operation.run(previous, state.settings[id] || {}, {
                 id: id,
                 state: state,
-                stageCache: stageCache
+                stageCache: stageCache,
+                job: job,
+                workerClient: options && options.workerClient
             })).then(function (result) {
+                if (job) { job.check(); }
                 current = result;
                 if (stageCache && operation.cacheable !== false) {
                     var outputKey = current === previous
@@ -223,7 +263,7 @@
                     setStageCacheEntry(stageCache, cacheKey, {
                         imageData: current,
                         outputKey: outputKey
-                    });
+                    }, generation);
                     inputKey = outputKey;
                 } else if (stageCache) {
                     inputKey = imageDataKey(current);

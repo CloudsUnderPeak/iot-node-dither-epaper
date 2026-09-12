@@ -14,7 +14,76 @@
         this.livePreviewFrame = null;
         this.previewHoldDepth = 0;
         this.previewPending = false;
+        this.disposed = false;
+        this.loadGeneration = 0;
+        var client = app.pages.ditherEditor.ditherWorkerClient;
+        this.workerClient = client && client.create();
+        this.jobs = createJobOwner(this.workerClient);
         this.stageCache = options.stageCache || app.pages.ditherEditor.pipelineRunner.createStageCache();
+    }
+
+    // One active computation and one replaceable preview, local to this mount.
+    function createJobOwner(workerClient) {
+        var generation = 0;
+        var disposed = false;
+        var active = null;
+        var pending = null;
+        function cancelled(reason) {
+            var error = new Error(reason);
+            error.code = 'job_cancelled';
+            error.reason = reason;
+            return error;
+        }
+        function invalidate(reason, terminate) {
+            generation += 1;
+            pending = null;
+            if (terminate && workerClient) { workerClient.terminate(reason); }
+            if (terminate) { active = null; }
+        }
+        function start(kind, task) {
+            var version = generation;
+            var job = {
+                kind: kind,
+                check: function () {
+                    if (disposed || version !== generation) { throw cancelled(disposed ? 'disposed' : 'superseded'); }
+                }
+            };
+            active = job;
+            var work;
+            try { job.check(); work = task(job); }
+            catch (error) { work = Promise.reject(error); }
+            job.promise = Promise.resolve(work)
+                .catch(function (error) { if (error.code !== 'job_cancelled') { throw error; } })
+                .finally(function () {
+                    if (active !== job) { return; }
+                    active = null;
+                    var next = pending;
+                    pending = null;
+                    if (next && !disposed) { return start('preview', next); }
+                });
+            return job.promise;
+        }
+        return {
+            preview: function (task) {
+                if (disposed) { return Promise.resolve(); }
+                if (active && active.kind !== 'preview') { pending = task; return active.promise; }
+                generation += 1;
+                if (active) { pending = task; return active.promise; }
+                return start('preview', task);
+            },
+            heavy: function (task) {
+                if (disposed || (active && active.kind !== 'preview')) { return Promise.resolve(); }
+                invalidate('superseded', true);
+                return start('heavy', task);
+            },
+            supersedePreview: function () {
+                if (!active || active.kind === 'preview') { generation += 1; }
+            },
+            cancel: function (reason) { invalidate(reason || 'explicit', true); },
+            dispose: function () { disposed = true; invalidate('disposed', true); },
+            isHeavy: function () { return Boolean(active && active.kind !== 'preview'); },
+            counts: function () { return { active: active ? 1 : 0, pending: pending ? 1 : 0 }; }
+        };
     }
 
     function nowMs() {
@@ -57,17 +126,21 @@
     DitherEditorController.prototype.loadResult = function loadResult(result, fileName) {
         // 所有圖片來源（upload/demo/new image）最後都收斂到 loadResult，
         // 先重建預設 state，確保重新載圖時不沿用上一張圖的演算法設定。
-        this.resetStateForImage();
-        this.state.fileName = fileName || 'Untitled';
-        this.state.sourceFile = result.sourceFile || null;
-        this.state.sourceImageData = result.imageData;
-        this.state.livePreview = null;
-        this.state.originalSize = result.originalSize;
-        this.state.workingSize = result.workingSize;
-        this.runFeatureHook('onImageLoaded', { result: result });
-        app.pages.ditherEditor.targetPolicy.sync(this.state);
-        this.state.status = 'ready';
-        app.pages.ditherEditor.editorModeStateMachine.enterPrepare(this.state);
+        if (this.disposed) { return; }
+        var candidate = app.pages.ditherEditor.state.create();
+        candidate.fileName = fileName || 'Untitled';
+        candidate.sourceFile = result.sourceFile || null;
+        candidate.sourceImageData = result.imageData;
+        candidate.livePreview = null;
+        candidate.originalSize = result.originalSize;
+        candidate.workingSize = result.workingSize;
+        app.pages.ditherEditor.featureRegistry.dispatch('onImageLoaded', { state: candidate, result: result }, {});
+        app.pages.ditherEditor.targetPolicy.sync(candidate);
+        candidate.status = 'ready';
+        app.pages.ditherEditor.editorModeStateMachine.enterPrepare(candidate);
+        candidate.uiRevision = (this.state.uiRevision || 0) + 1;
+        app.pages.ditherEditor.pipelineRunner.clearStageCache(this.stageCache);
+        this.state = candidate;
         // 新圖載入後若有 prepare 入口就直接跳到 prepare；否則進入 edit 並排正式 preview。
         if (this.state.mode === app.pages.ditherEditor.editorModeStateMachine.groups.EDIT) {
             this.commitPrepareChanges();
@@ -77,119 +150,101 @@
         this.render(this.state);
     };
 
-    DitherEditorController.prototype.resetStateForImage = function resetStateForImage() {
-        var nextState = app.pages.ditherEditor.state.create();
-        var state = this.state;
-        var revision = (state.uiRevision || 0) + 1;
-        Object.keys(state).forEach(function (key) {
-            delete state[key];
-        });
-        Object.keys(nextState).forEach(function (key) {
-            state[key] = nextState[key];
-        });
-        state.uiRevision = revision;
-        this.previewPending = false;
-        this.previewHoldDepth = 0;
-        this.previewRunId = (this.previewRunId || 0) + 1;
-        this.hidePreviewTimingLabel();
-        app.pages.ditherEditor.pipelineRunner.clearStageCache(this.stageCache);
-        clearTimeout(this.previewTimer);
-        this.previewTimer = null;
-        if (this.livePreviewFrame) {
-            cancelAnimationFrame(this.livePreviewFrame);
-            this.livePreviewFrame = null;
-        }
-    };
-
     // 建立預設尺寸白底圖；目前 UI 不暴露此入口，保留給後續 blank-canvas flow。
     DitherEditorController.prototype.newImage = function newImage() {
+        this.beginSourceLoad();
         var size = app.pages.ditherEditor.constants.DEFAULT_NEW_IMAGE_SIZE;
         this.loadResult(app.core.imageLoader.createBlankImage(size.width, size.height), 'Untitled');
     };
 
-    // 載入專案內建 demo 圖，成功後走和一般檔案相同的 loadResult 流程。
-    DitherEditorController.prototype.loadDemo = function loadDemo() {
+    DitherEditorController.prototype.beginSourceLoad = function () {
+        this.loadGeneration += 1;
+        this.jobs.cancel('superseded');
+        this.previewRunId = (this.previewRunId || 0) + 1;
+        clearTimeout(this.previewTimer);
+        this.previewTimer = null;
+        this.previewPending = false;
+        this.hidePreviewTimingLabel();
+        return this.loadGeneration;
+    };
+
+    DitherEditorController.prototype.isCurrentLoad = function (generation) {
+        return !this.disposed && generation === this.loadGeneration;
+    };
+
+    DitherEditorController.prototype.loadSource = function (decode) {
         var self = this;
-        var max = app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE;
+        if (this.disposed) { return Promise.resolve(); }
+        var generation = this.beginSourceLoad();
         this.state.status = 'loading-image';
         this.state.previewRenderDurationMs = null;
-        this.hidePreviewTimingLabel();
         this.render(this.state);
-        return app.core.imageLoader
-            .loadDemoImage(max)
-            .then(function (result) {
-                self.loadResult(result, result.fileName || 'Demo image');
-            })
+        return Promise.resolve().then(function () { return decode(generation); })
             .catch(function (error) {
+                if (!self.isCurrentLoad(generation) || error.code === 'job_cancelled') { return; }
                 self.state.status = 'error';
                 self.state.error = errorText(error);
                 self.render(self.state);
             });
     };
 
-    // 載入使用者選取或拖放的檔案，格式檢查由 imageLoader 負責。
+    DitherEditorController.prototype.loadDemo = function loadDemo() {
+        var self = this;
+        return this.loadSource(function (generation) {
+            return app.core.imageLoader.loadDemoImage(app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
+                .then(function (result) {
+                    if (self.isCurrentLoad(generation)) { self.loadResult(result, result.fileName || 'Demo image'); }
+                });
+        });
+    };
+
     DitherEditorController.prototype.loadFile = function loadFile(file) {
         var self = this;
-        this.state.status = 'loading-image';
-        this.state.previewRenderDurationMs = null;
-        this.hidePreviewTimingLabel();
-        this.render(this.state);
-        return app.core.projectFile.classify(file)
-            .then(function (route) {
-                if (route.kind === 'project') {
-                    return self.loadProjectRoute(route);
-                }
-                return app.core.imageLoader
-                    .loadImageFromFile(file, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
+        return this.loadSource(function (generation) {
+            return app.core.projectFile.classify(file).then(function (route) {
+                if (!self.isCurrentLoad(generation)) { return; }
+                if (route.kind === 'project') { return self.restoreProjectRoute(route, generation); }
+                return app.core.imageLoader.loadImageFromFile(file, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
                     .then(function (result) {
-                        self.loadResult(result, file.name);
+                        if (self.isCurrentLoad(generation)) { self.loadResult(result, file.name); }
                     });
-            })
-            .catch(function (error) {
-                self.state.status = 'error';
-                self.state.error = errorText(error);
-                self.render(self.state);
             });
+        });
     };
 
     DitherEditorController.prototype.loadProjectRoute = function loadProjectRoute(route) {
         var self = this;
-        var project;
-        try {
-            project = app.core.projectFile.read(route);
-        } catch (error) {
-            return Promise.reject(error);
-        }
-        return app.core.imageLoader
-            .loadWorkingImage(project.workingBlob, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
+        return this.loadSource(function (generation) { return self.restoreProjectRoute(route, generation); });
+    };
+
+    DitherEditorController.prototype.restoreProjectRoute = function (route, generation) {
+        var self = this;
+        var project = app.core.projectFile.read(route);
+        return app.core.imageLoader.loadWorkingImage(project.workingBlob, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
             .then(function (workingResult) {
-                var candidate = app.pages.ditherEditor.projectWorkspace.restore(project, workingResult);
-                var candidateCache = app.pages.ditherEditor.pipelineRunner.createStageCache();
-                app.pages.ditherEditor.targetPolicy.sync(candidate);
-                candidate.preparedImageData = app.pages.ditherEditor.pipelineRunner.runPanelGroup(
-                    candidate.sourceImageData,
-                    candidate,
-                    app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE,
-                    { stageCache: candidateCache }
-                );
-                return app.pages.ditherEditor.pipelineRunner.runAsync(
-                    candidate.sourceImageData,
-                    candidate,
-                    { stageCache: candidateCache }
-                )
-                    .then(function (resultImageData) {
-                        candidate.previewImageData = resultImageData;
-                        candidate.outputImageData = resultImageData;
-                        candidate.status = candidate.mode === app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE
-                            ? 'ready' : 'preview-ready';
-                        candidate.uiRevision = (self.state.uiRevision || 0) + 1;
-                        self.previewRunId = (self.previewRunId || 0) + 1;
-                        self.exportRunId = (self.exportRunId || 0) + 1;
-                        app.pages.ditherEditor.pipelineRunner.clearStageCache(self.stageCache);
-                        self.state = candidate;
-                        app.pages.ditherEditor.editorModeStateMachine.normalize(self.state);
-                        self.render(self.state);
-                    });
+                if (!self.isCurrentLoad(generation)) { return; }
+                return self.jobs.heavy(function (job) {
+                    var candidate = app.pages.ditherEditor.projectWorkspace.restore(project, workingResult);
+                    var candidateCache = app.pages.ditherEditor.pipelineRunner.createStageCache();
+                    var options = { stageCache: candidateCache, job: job, workerClient: self.workerClient };
+                    app.pages.ditherEditor.targetPolicy.sync(candidate);
+                    candidate.preparedImageData = app.pages.ditherEditor.pipelineRunner.runPanelGroup(
+                        candidate.sourceImageData, candidate, app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE, options);
+                    return app.pages.ditherEditor.pipelineRunner.runAsync(candidate.sourceImageData, candidate, options)
+                        .then(function (resultImageData) {
+                            job.check();
+                            if (!self.isCurrentLoad(generation)) { return; }
+                            candidate.previewImageData = resultImageData;
+                            candidate.outputImageData = resultImageData;
+                            candidate.status = candidate.mode === app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE
+                                ? 'ready' : 'preview-ready';
+                            candidate.uiRevision = (self.state.uiRevision || 0) + 1;
+                            app.pages.ditherEditor.editorModeStateMachine.normalize(candidate);
+                            app.pages.ditherEditor.pipelineRunner.clearStageCache(self.stageCache);
+                            self.state = candidate;
+                            self.render(self.state);
+                        }).finally(function () { app.pages.ditherEditor.pipelineRunner.clearStageCache(candidateCache); });
+                });
             });
     };
 
@@ -237,6 +292,7 @@
     // 使用者拖曳滑桿時進入 preview hold，先建立 live preview 基底。
     DitherEditorController.prototype.beginPreviewHold = function beginPreviewHold(id) {
         this.previewHoldDepth += 1;
+        if (this.jobs.isHeavy() || this.disposed) { return; }
         if (!this.state.livePreview) {
             var feature = app.pages.ditherEditor.featureRegistry.get(id);
             // livePreview 是拖曳期間的輕量回饋，不代表正式 pipeline 結果。
@@ -351,6 +407,7 @@
     };
 
     DitherEditorController.prototype.updatePreparedPreview = function updatePreparedPreview() {
+        if (this.disposed || this.jobs.isHeavy()) { return this.state.preparedImageData; }
         if (!this.state.sourceImageData) {
             this.state.preparedImageData = null;
             return null;
@@ -383,6 +440,7 @@
     };
 
     DitherEditorController.prototype.openPrepareMode = function openPrepareMode() {
+        this.jobs.supersedePreview();
         if (!this.state.sourceImageData) {
             return;
         }
@@ -435,6 +493,12 @@
     // 將正式 preview 計算 debounce，避免連續設定變更時每次都重跑 pipeline。
     DitherEditorController.prototype.schedulePreview = function schedulePreview() {
         var self = this;
+        if (this.disposed) { return; }
+        this.jobs.supersedePreview();
+        if (this.jobs.isHeavy()) {
+            this.jobs.preview(function (job) { return self.computePreview(job); });
+            return;
+        }
         if (this.state.mode === app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE) {
             this.state.status = 'ready';
             this.render(this.state);
@@ -473,6 +537,11 @@
     // pipeline 可能包含 worker stage，因此回傳 Promise；previewRunId 會丟棄較舊結果。
     DitherEditorController.prototype.runPreview = function runPreview() {
         var self = this;
+        return this.jobs.preview(function (job) { return self.computePreview(job); });
+    };
+
+    DitherEditorController.prototype.computePreview = function computePreview(job) {
+        var self = this;
         if (!this.state.sourceImageData) {
             this.state.status = 'empty';
             this.hidePreviewTimingLabel();
@@ -482,20 +551,20 @@
         this.previewRunId = (this.previewRunId || 0) + 1;
         var runId = this.previewRunId;
         var startMs = nowMs();
+        var snapshot = app.pages.ditherEditor.projectWorkspace.snapshot(this.state);
         return Promise.resolve()
             .then(function () {
                 self.runFeatureHook('onBeforePreview', {});
                 // Preview 永遠從 sourceImageData 跑完整 pipeline，避免連續套用造成畫質累積劣化。
                 return app.pages.ditherEditor.pipelineRunner.runAsync(
-                    self.state.sourceImageData,
-                    self.state,
-                    { stageCache: self.stageCache }
+                    snapshot.sourceImageData,
+                    snapshot,
+                    { stageCache: self.stageCache, job: job, workerClient: self.workerClient }
                 );
             })
             .then(function (imageData) {
-                if (runId !== self.previewRunId) {
-                    return;
-                }
+                if (runId !== self.previewRunId || self.disposed) { return; }
+                job.check();
                 self.state.previewImageData = imageData;
                 self.state.previewRenderDurationMs = nowMs() - startMs;
                 self.setPreviewTimingPhase('done', self.state.previewRenderDurationMs);
@@ -507,9 +576,9 @@
                 self.render(self.state);
             })
             .catch(function (error) {
-                if (runId !== self.previewRunId) {
-                    return;
-                }
+                if (error.code === 'job_cancelled') { return; }
+                if (runId !== self.previewRunId || self.disposed) { return; }
+                job.check();
                 self.state.status = 'error';
                 self.state.error = errorText(error);
                 self.state.previewRenderDurationMs = null;
@@ -522,6 +591,11 @@
     // 匯出目前結果；pipeline 可能走 worker，exportRunId 支援取消後丟棄在途結果。
     DitherEditorController.prototype.exportPng = function exportPng() {
         var self = this;
+        return this.jobs.heavy(function (job) { return self.computeExportPng(job); });
+    };
+
+    DitherEditorController.prototype.computeExportPng = function computeExportPng(job) {
+        var self = this;
         if (!this.state.sourceImageData || this.state.mode !== app.pages.ditherEditor.editorModeStateMachine.groups.EDIT) {
             return Promise.resolve();
         }
@@ -530,15 +604,18 @@
         }
         this.exportRunId = (this.exportRunId || 0) + 1;
         var runId = this.exportRunId;
+        this.runFeatureHook('onBeforeExport', {});
+        var snapshot = app.pages.ditherEditor.projectWorkspace.snapshot(this.state);
         this.state.status = 'exporting';
         this.render(this.state);
         return Promise.resolve()
             .then(function () {
-                self.runFeatureHook('onBeforeExport', {});
+                job.check();
                 // Export 不使用暫存 preview；重新跑正式 pipeline，確保輸出和最新 settings 一致。
-                return app.pages.ditherEditor.pipelineRunner.runAsync(self.state.sourceImageData, self.state);
+                return app.pages.ditherEditor.pipelineRunner.runAsync(snapshot.sourceImageData, snapshot, { job: job, workerClient: self.workerClient });
             })
             .then(function (imageData) {
+                job.check();
                 if (runId !== self.exportRunId) {
                     return null;
                 }
@@ -546,6 +623,7 @@
                 return app.core.imageExporter.exportPng(imageData, 'dither-output.png');
             })
             .then(function () {
+                job.check();
                 if (runId !== self.exportRunId) {
                     return;
                 }
@@ -554,6 +632,7 @@
                 self.render(self.state);
             })
             .catch(function (error) {
+                job.check();
                 if (runId !== self.exportRunId) {
                     return;
                 }
@@ -564,6 +643,11 @@
     };
 
     DitherEditorController.prototype.exportProject = function exportProject() {
+        var self = this;
+        return this.jobs.heavy(function (job) { return self.computeExportProject(job); });
+    };
+
+    DitherEditorController.prototype.computeExportProject = function computeExportProject(job) {
         var self = this;
         if (!this.state.sourceImageData
             || !app.pages.ditherEditor.targetPolicy.isEpaper(this.state)
@@ -581,9 +665,10 @@
         this.render(this.state);
         return Promise.resolve()
             .then(function () {
-                return app.pages.ditherEditor.pipelineRunner.runAsync(snapshot.sourceImageData, snapshot);
+                return app.pages.ditherEditor.pipelineRunner.runAsync(snapshot.sourceImageData, snapshot, { job: job, workerClient: self.workerClient });
             })
             .then(function (resultImageData) {
+                job.check();
                 if (runId !== self.projectExportRunId) {
                     return null;
                 }
@@ -592,6 +677,7 @@
                     app.core.canvasUtils.imageDataToBlob(resultImageData),
                     app.core.canvasUtils.imageDataToBlob(snapshot.sourceImageData)
                 ]).then(function (blobs) {
+                    job.check();
                     return app.core.projectFile.create(
                         blobs[0],
                         snapshot.sourceFile.blob,
@@ -601,6 +687,7 @@
                 });
             })
             .then(function (blob) {
+                job.check();
                 if (!blob || runId !== self.projectExportRunId) {
                     return;
                 }
@@ -612,6 +699,7 @@
                 self.render(self.state);
             })
             .catch(function (error) {
+                job.check();
                 if (runId !== self.projectExportRunId) {
                     return;
                 }
@@ -623,37 +711,54 @@
 
     DitherEditorController.prototype.drawEpaper = function drawEpaper() {
         var self = this;
+        return this.jobs.heavy(function (job) { return self.computeDrawEpaper(job); });
+    };
+
+    DitherEditorController.prototype.computeDrawEpaper = function computeDrawEpaper(job) {
+        var self = this;
         if (!this.state.sourceImageData || this.state.mode !== app.pages.ditherEditor.editorModeStateMachine.groups.EDIT) {
             return Promise.resolve();
         }
+        app.pages.ditherEditor.targetPolicy.normalizeBeforePipeline(this.state);
+        this.runFeatureHook('onBeforeExport', {});
+        var snapshot = app.pages.ditherEditor.projectWorkspace.snapshot(this.state);
+        var outputPalette = app.pages.ditherEditor.targetPolicy.displayColors();
         return app.device.epaper.beginOperation('upload', 'preflight')
             .then(function (operationId) {
-                app.pages.ditherEditor.targetPolicy.normalizeBeforePipeline(self.state);
+                try { job.check(); } catch (error) {
+                    app.device.epaper.failOperation(operationId, error);
+                    throw error;
+                }
+                var submitted = false;
                 app.device.epaper.setClientStage(operationId, 'processing');
                 self.state.status = 'exporting';
                 self.render(self.state);
-                self.runFeatureHook('onBeforeExport', {});
-                return app.pages.ditherEditor.pipelineRunner.runAsync(self.state.sourceImageData, self.state)
+                return app.pages.ditherEditor.pipelineRunner.runAsync(snapshot.sourceImageData, snapshot, { job: job, workerClient: self.workerClient })
                     .then(function (imageData) {
+                        job.check();
                         app.device.epaper.setClientStage(operationId, 'encoding');
-                        var outputImageData = app.pages.ditherEditor.targetPolicy.outputImageData(imageData);
+                        var outputImageData = app.pages.ditherEditor.targetPolicy.outputImageData(imageData, outputPalette);
                         self.state.outputImageData = outputImageData;
                         return app.core.epdimgEncoder.encode(outputImageData);
                     })
                     .then(function (encoded) {
+                        job.check();
+                        submitted = true;
                         return app.device.epaper.submitUpload(operationId, encoded.payload);
                     })
                     .then(function () {
+                        job.check();
                         self.state.status = 'exported';
                         self.runFeatureHook('onAfterExport', {});
                         self.render(self.state);
                     })
                     .catch(function (error) {
-                        app.device.epaper.failOperation(operationId, error);
+                        if (!submitted || error.code !== 'job_cancelled') { app.device.epaper.failOperation(operationId, error); }
                         throw error;
                     });
             })
             .catch(function (error) {
+                if (error.code === 'job_cancelled' || self.disposed) { return; }
                 self.state.status = 'error';
                 self.state.error = errorText(error);
                 self.render(self.state);
@@ -703,6 +808,7 @@
         if (this.state.status !== 'exporting') {
             return;
         }
+        this.jobs.cancel('explicit');
         this.exportRunId = (this.exportRunId || 0) + 1;
         this.state.status = this.state.previewImageData ? 'preview-ready' : 'ready';
         this.render(this.state);
@@ -710,12 +816,12 @@
 
     // 頁面卸載時清掉 timer/frame 與 worker，避免背景頁面繼續更新。
     DitherEditorController.prototype.destroy = function destroy() {
+        this.disposed = true;
+        this.loadGeneration += 1;
+        this.jobs.dispose();
         this.previewRunId = (this.previewRunId || 0) + 1;
         this.exportRunId = (this.exportRunId || 0) + 1;
         this.projectExportRunId = (this.projectExportRunId || 0) + 1;
-        if (app.pages.ditherEditor.ditherWorkerClient) {
-            app.pages.ditherEditor.ditherWorkerClient.terminate();
-        }
         clearTimeout(this.previewTimer);
         clearTimeout(this.previewTimingHideTimer);
         this.previewTimingHideTimer = null;
@@ -728,5 +834,6 @@
         this.hidePreviewTimingLabel();
     };
 
+    app.pages.ditherEditor.createJobOwner = createJobOwner;
     app.pages.ditherEditor.Controller = DitherEditorController;
 })(window.DitherApp);

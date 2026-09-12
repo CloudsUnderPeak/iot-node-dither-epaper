@@ -1,4 +1,17 @@
 (function (app) {
+    // Version 1 persisted values retain the original strict workspace contract.
+    function validPersistedSettings(value) {
+            return ['x', 'y', 'width', 'height', 'panX', 'panY', 'zoom', 'rotation'].every(function (key) {
+                return Number.isFinite(value[key]);
+            }) && value.width >= 1 && value.height >= 1 && value.zoom >= 0.1 && value.zoom <= 20
+                && value.rotation >= -180 && value.rotation <= 180
+                && typeof value.aspectRatioId === 'string'
+                && typeof value.flipX === 'boolean' && typeof value.flipY === 'boolean'
+                && typeof value.backgroundPreset === 'string'
+                && /^#[0-9a-f]{6}$/i.test(value.backgroundColor)
+                && /^#[0-9a-f]{6}$/i.test(value.autoBackgroundColor);
+    }
+
     // Crop feature 採用「固定比例裁切框 + 移動/縮放/旋轉原圖」的互動模型。
     // 面板只暴露比例、zoom、rotation、flip；實際 x/y/width/height 由比例和來源尺寸推導。
     // 幾何計算在 crop-geometry.js、背景取色在 crop-auto-background.js；
@@ -137,6 +150,18 @@
 
     app.pages.ditherEditor.featureRegistry.register({
         id: 'crop',
+        persistence: {
+            version: 1,
+            serializeSettings: function (settings) { return JSON.parse(JSON.stringify(settings)); },
+            restoreSettings: function (value, version) {
+                if (version !== 1 || !value || typeof value !== 'object' || Array.isArray(value) || !validPersistedSettings(value)) {
+                    var error = new Error('Invalid crop project settings.');
+                    error.code = 'settings-invalid';
+                    throw error;
+                }
+                return JSON.parse(JSON.stringify(value));
+            }
+        },
         icon: '[]',
         iconPath: 'assets/icons/editor/crop.svg',
         labelKey: 'panelCrop',

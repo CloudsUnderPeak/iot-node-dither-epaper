@@ -1,4 +1,9 @@
 (function (app) {
+    // Version 1 persisted values retain the original strict workspace contract.
+    function validPersistedSettings(value) {
+            return value.format === 'png';
+    }
+
     // Export feature 是 action，不是可拖曳的 pipeline tool。
     // 它使用目前 preview/result ImageData 直接輸出 PNG，不在面板中折疊。
     var ui = app.pages.ditherEditor.panelUtils;
@@ -6,6 +11,18 @@
 
     app.pages.ditherEditor.featureRegistry.register({
         id: 'export',
+        persistence: {
+            version: 1,
+            serializeSettings: function (settings) { return JSON.parse(JSON.stringify(settings)); },
+            restoreSettings: function (value, version) {
+                if (version !== 1 || !value || typeof value !== 'object' || Array.isArray(value) || !validPersistedSettings(value)) {
+                    var error = new Error('Invalid export project settings.');
+                    error.code = 'settings-invalid';
+                    throw error;
+                }
+                return JSON.parse(JSON.stringify(value));
+            }
+        },
         labelKey: 'actionExport',
         pipelineStage: 'fixedAfter',
         pipelineOrder: 10,

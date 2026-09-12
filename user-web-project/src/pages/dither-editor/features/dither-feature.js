@@ -1,4 +1,16 @@
 (function (app) {
+    // Version 1 persisted values retain the original strict workspace contract.
+    function validPersistedSettings(value) {
+            var algorithms = ['none'].concat(app.pages.ditherEditor.ditherAlgorithmRegistry.list().map(function (item) {
+                return item.id;
+            }));
+            return algorithms.indexOf(value.algorithm) !== -1
+                && app.pages.ditherEditor.config.paletteMappingModes.map(function (mode) { return mode.id; }).indexOf(value.paletteMapping) !== -1
+                && app.core.paletteUtils.colorDistanceIds.indexOf(value.colorDistance) !== -1
+                && typeof value.serpentine === 'boolean'
+                && Number.isFinite(value.errorStrength) && value.errorStrength >= app.pages.ditherEditor.constants.MIN_DITHER_ERROR_STRENGTH && value.errorStrength <= app.pages.ditherEditor.constants.MAX_DITHER_ERROR_STRENGTH;
+    }
+
     // Dither feature 只負責選擇演算法並把目前 palette 傳給對應處理器。
     // palette 的建立與同步在 palette-feature.js；這裡不重複管理色票狀態。
     var ui = app.pages.ditherEditor.panelUtils;
@@ -54,6 +66,18 @@
 
     app.pages.ditherEditor.featureRegistry.register({
         id: 'dither',
+        persistence: {
+            version: 1,
+            serializeSettings: function (settings) { return JSON.parse(JSON.stringify(settings)); },
+            restoreSettings: function (value, version) {
+                if (version !== 1 || !value || typeof value !== 'object' || Array.isArray(value) || !validPersistedSettings(value)) {
+                    var error = new Error('Invalid dither project settings.');
+                    error.code = 'settings-invalid';
+                    throw error;
+                }
+                return JSON.parse(JSON.stringify(value));
+            }
+        },
         icon: '..',
         iconPath: 'assets/icons/editor/dither.svg',
         labelKey: 'panelDither',
@@ -230,11 +254,15 @@
                 var isDiffusion = algorithm.processorId === 'error-diffusion'
                     || algorithm.processorId === 'adaptive-error-diffusion'
                     || algorithm.processorId === 'dot-diffusion';
-                var workerClient = app.pages.ditherEditor.ditherWorkerClient;
+                var job = context && context.job;
+                if (job) { job.check(); }
+                var workerClient = (context && context.workerClient) || app.pages.ditherEditor.ditherWorkerClient;
                 if (isDiffusion && workerClient) {
-                    var workerRun = workerClient.run(imageData, algorithm, options);
+                    var workerRun = workerClient.run(imageData, algorithm, options, job);
                     if (workerRun) {
-                        return workerRun.catch(function () {
+                        return workerRun.catch(function (error) {
+                            if (error.code === 'job_cancelled') { throw error; }
+                            if (job) { job.check(); }
                             return registry.run(imageData, algorithm, options);
                         });
                     }
