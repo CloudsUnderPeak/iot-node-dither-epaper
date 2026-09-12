@@ -10,6 +10,10 @@
 
 目前搭配 **DFRobot FireBeetle 2 ESP32-C6** 與 **Waveshare 7.3inch e-Paper HAT (E)，800 × 480 六色電子紙**。
 
+## 線上體驗
+
+**[開啟 Demo](https://cloudsunderpeak.github.io/iot-node-dither-epaper/)**
+
 ## 從一張圖片，到一幅電子紙畫面
 
 1. **連上裝置。** 加入裝置的 Wi-Fi，開啟網頁介面。
@@ -39,10 +43,6 @@
 - **連網基礎已經備妥。** AP、STA、AP + STA、設定保存與可選的備援 AP，讓電子紙具備可延伸的 Wi-Fi 管理能力。
 - **裝置狀態隨手可查。** 查看網路、儲存空間與硬體資訊，目標板也提供實測電池電壓與估算電量百分比。
 - **融入你的操作方式。** 瀏覽器、REST API、序列主控台與隨附的 Python 圖片工具都能使用，介面支援繁體中文與 English。
-
-## 線上體驗
-
-**[開啟 Demo](https://cloudsunderpeak.github.io/iot-node-dither-epaper/)**
 
 ## 沒有硬體也能在本機體驗
 

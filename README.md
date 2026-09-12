@@ -10,6 +10,10 @@ Getting a picture onto e-paper brings together image processing, device connecti
 
 The current hardware pairing is the **DFRobot FireBeetle 2 ESP32-C6** and **Waveshare 7.3inch e-Paper HAT (E), 800 × 480, six colors**.
 
+## Try it online
+
+**[Open the demo](https://cloudsunderpeak.github.io/iot-node-dither-epaper/)**
+
 ## From picture to paper
 
 1. **Connect.** Join the device’s Wi-Fi and open its web interface.
@@ -39,10 +43,6 @@ This e-paper edition builds on two projects, bringing device management and imag
 - **Wi-Fi setup is already included.** AP, STA, AP + STA, saved settings, and optional fallback AP give the display a reusable connectivity foundation.
 - **Device information within reach.** Check network, storage, and hardware status, including measured battery voltage and estimated battery percentage on the target board.
 - **Ready for your workflow.** Use the browser, REST API, serial console, or included Python image tool. The interface supports English and Traditional Chinese.
-
-## Try it online
-
-**[Open the demo](https://cloudsunderpeak.github.io/iot-node-dither-epaper/)**
 
 ## Try it locally without hardware
 
