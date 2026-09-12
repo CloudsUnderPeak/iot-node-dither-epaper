@@ -40,9 +40,11 @@ This e-paper edition builds on two projects, bringing device management and imag
 - **Device information within reach.** Check network, storage, and hardware status, including measured battery voltage and estimated battery percentage on the target board.
 - **Ready for your workflow.** Use the browser, REST API, serial console, or included Python image tool. The interface supports English and Traditional Chinese.
 
-## Try it without hardware
+## Try it online
 
-To explore the Embedded Web Dithering image workflow, open the product frontend included in this repository. You do not need an ESP32 or an e-paper panel to get started.
+**[Open the demo](https://cloudsunderpeak.github.io/iot-node-dither-epaper/)**
+
+## Try it locally without hardware
 
 After downloading the project, open [`user-web-project/index.html`](user-web-project/index.html) in your browser: double-click the file, or choose **Open File** to try it through `file://`. A demo image is included, and no server is needed.
 
@@ -52,7 +54,7 @@ You can also start a local web server from the repository root:
 python3 -m http.server 8000 --directory user-web-project
 ```
 
-Alternatively, open [localhost:8000](http://localhost:8000/) after starting the command above. Both preview modes let you try image editing and the simulated device pages. Preview mode uses mock device data; it does not operate a physical panel. The preview administrator credentials are `admin` / `password`.
+Open [localhost:8000](http://localhost:8000/) to try image editing and the simulated device pages. Both local preview methods use mock device data and do not operate a physical panel. The preview administrator credentials are `admin` / `password`.
 
 The separate built-in management console also has a mock demo:
 
@@ -60,6 +62,8 @@ The separate built-in management console also has a mock demo:
 make demo WEB_PROCESS=none
 python3 -m http.server 8000 --directory build/latest/web
 ```
+
+Open the same local address to explore the built-in management console.
 
 ## Get started
 

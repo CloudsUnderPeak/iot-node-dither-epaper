@@ -40,9 +40,11 @@
 - **裝置狀態隨手可查。** 查看網路、儲存空間與硬體資訊，目標板也提供實測電池電壓與估算電量百分比。
 - **融入你的操作方式。** 瀏覽器、REST API、序列主控台與隨附的 Python 圖片工具都能使用，介面支援繁體中文與 English。
 
-## 沒有硬體也能先體驗
+## 線上體驗
 
-想先試試 Embedded Web Dithering 的圖片處理流程，可以直接開啟本專案隨附的產品前端，不需要先準備 ESP32 或電子紙。
+**[開啟 Demo](https://cloudsunderpeak.github.io/iot-node-dither-epaper/)**
+
+## 沒有硬體也能在本機體驗
 
 下載專案後，用瀏覽器開啟 [`user-web-project/index.html`](user-web-project/index.html)：雙擊檔案，或在瀏覽器選擇「開啟檔案」，即可透過 `file://` 體驗。專案已包含 Demo 圖片，不必啟動伺服器。
 
@@ -52,7 +54,7 @@
 python3 -m http.server 8000 --directory user-web-project
 ```
 
-或者執行上方指令後開啟 [localhost:8000](http://localhost:8000/)。兩種預覽方式都能體驗圖片編輯與模擬裝置頁面。預覽模式使用假裝置資料，不會操作實體面板；預覽管理帳密為 `admin` / `password`。
+開啟 [localhost:8000](http://localhost:8000/)，即可體驗圖片編輯與模擬裝置頁面。兩種本機預覽方式都使用假裝置資料，不會操作實體面板；預覽管理帳密為 `admin` / `password`。
 
 獨立的內建管理介面也提供模擬 Demo：
 
@@ -60,6 +62,8 @@ python3 -m http.server 8000 --directory user-web-project
 make demo WEB_PROCESS=none
 python3 -m http.server 8000 --directory build/latest/web
 ```
+
+開啟相同的本機網址，即可體驗內建管理介面。
 
 ## 快速開始
 

@@ -1,6 +1,7 @@
 name: Deploy demo to GitHub Pages
 
 on:
+  pull_request:
   push:
     branches:
       - master
@@ -10,27 +11,35 @@ permissions:
   contents: read
 
 concurrency:
-  group: github-pages
+  group: github-pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
       - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v5
       - name: Build static demo
-        run: make demo WEB_PROCESS=none
+        run: |
+          make -C user-web-project demo
+          test -s user-web-project/build/latest/index.html
+          test -s user-web-project/build/latest/src/device/device-mock.js
+          grep -q 'src/device/device-mock.js' user-web-project/build/latest/index.html
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: build/latest/web
+          path: user-web-project/build/latest
 
   deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write
