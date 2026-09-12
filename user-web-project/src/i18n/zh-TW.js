@@ -153,6 +153,7 @@
         deviceFieldHeap: '記憶體使用',
         deviceFieldMac: 'MAC 位址',
         deviceFieldHostname: '主機名稱',
+        deviceFieldWifiTxPower: 'Wi-Fi 發射功率',
         deviceSegSystem: '系統使用空間',
         deviceSegFirmware: '韌體程式',
         deviceSegFrontend: '內含前端',

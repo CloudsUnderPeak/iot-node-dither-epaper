@@ -164,6 +164,10 @@
                 ));
                 deviceGrid.appendChild(field('deviceFieldMac', textValue(device.mac_address)));
                 deviceGrid.appendChild(field('deviceFieldHostname', textValue(device.hostname)));
+                deviceGrid.appendChild(field(
+                    'deviceFieldWifiTxPower',
+                    typeof device.wifi_tx_dbm === 'number' ? device.wifi_tx_dbm + ' dBm' : '—'
+                ));
             }
 
             // 依 builtin-web Hardware 頁的推導拆出各分段。

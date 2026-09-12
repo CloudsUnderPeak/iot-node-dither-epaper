@@ -155,6 +155,7 @@
         deviceFieldHeap: 'Memory usage',
         deviceFieldMac: 'MAC address',
         deviceFieldHostname: 'Hostname',
+        deviceFieldWifiTxPower: 'Wi-Fi transmit power',
         deviceSegSystem: 'System space',
         deviceSegFirmware: 'Firmware program',
         deviceSegFrontend: 'Frontend size',

@@ -404,6 +404,7 @@
                 heap_used_percent: state.heapUsedPercent,
                 mac_address: 'AA:BB:CC:DD:EE:FF',
                 hostname: state.hostname,
+                wifi_tx_dbm: 15,
                 config_state: 'persisted',
                 config_recovery_reason: 'none'
             });
