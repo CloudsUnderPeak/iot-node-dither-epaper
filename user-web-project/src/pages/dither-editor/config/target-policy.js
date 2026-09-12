@@ -132,6 +132,11 @@
         return Boolean(state && state.target && state.target.mode === 'epaper');
     }
 
+    // 正方形沒有自然方向，固定沿用面板的 landscape 預設。
+    function aspectRatioForSize(size) {
+        return size && Number(size.height) > Number(size.width) ? '3-5' : '5-3';
+    }
+
     function force(state) {
         if (!state || !state.settings || !app.device.epaper.isSupported()) {
             return false;
@@ -141,8 +146,11 @@
         var crop = state.settings.crop;
         var portrait = crop && crop.aspectRatioId === '3-5';
         if (crop && crop.aspectRatioId !== '5-3' && crop.aspectRatioId !== '3-5') {
-            crop.aspectRatioId = '5-3';
-            portrait = false;
+            crop.aspectRatioId = aspectRatioForSize(state.originalSize);
+            portrait = crop.aspectRatioId === '3-5';
+            if (app.pages.ditherEditor.crop) {
+                app.pages.ditherEditor.crop.normalize(state);
+            }
         }
         var revision = calibrationRevision();
         var colors = displayColors();
@@ -191,6 +199,7 @@
         sync: sync,
         normalizeBeforePipeline: force,
         settingAllowed: settingAllowed,
+        aspectRatioForSize: aspectRatioForSize,
         paletteId: PALETTE_ID,
         colors: displayColors,
         outputColors: OUTPUT_COLORS,

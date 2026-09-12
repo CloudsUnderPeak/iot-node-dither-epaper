@@ -169,6 +169,10 @@
         // 新圖片載入時重設 crop transform，避免上一張圖的 pan/zoom 影響新圖。
         onImageLoaded: function onImageLoaded(context) {
             context.state.settings.crop = defaultCropSettings(context.result.workingSize);
+            if (app.device.epaper.isSupported()) {
+                context.state.settings.crop.aspectRatioId = app.pages.ditherEditor.targetPolicy
+                    .aspectRatioForSize(context.result.originalSize);
+            }
             applyNormalizedCrop(context.state);
         },
         // 任一 crop 設定變更後都重新正規化，確保 pan/zoom 不超界。

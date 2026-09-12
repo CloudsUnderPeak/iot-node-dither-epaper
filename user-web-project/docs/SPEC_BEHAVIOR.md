@@ -11,6 +11,7 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-09-12: E-paper Device Mode 載入新圖片或 demo 時，依解碼後、縮小前的原始尺寸自動選擇 Crop 比例：直式用 3:5，橫式與正方形用 5:3；自動選擇只作為新圖初始值，使用者後續手動選擇不被輪詢、校色或重新繪製覆蓋。若圖片先於 e-paper capability 載入，首次切換裝置模式時套用同一規則。
 - 2026-08-10: 面板測試新增公開的六色色準編輯器：色票與 RGB 輸入即時改變預覽，只有儲存才寫入裝置 NVS；可重載裝置值或恢復韌體預設。儲存成功後同一份 canonical 色盤立即套用到固定色票、抖色與 Result，編輯中的舊頁面會重算，未儲存草稿不影響編輯器。
 - 2026-08-10: E-paper 固定六色色票與面板六色測試圖統一依 EPD code `0,1,2,3,5,6` 排列，顯示順序為黑、白、黃、紅、藍、綠；`DISPLAY_COLORS` 與 `OUTPUT_COLORS` 維持相同 code slot，避免紅／黃因語意順序不同而錯配。
 - 2026-08-10: 「電子紙測試」更名為「面板測試」並對齊其他裝置頁版型：移除頁內重複大標題，狀態卡只顯示面板、狀態與冷卻資訊，診斷卡顯示說明與三個操作；卡片、欄位層級、間距、離線反灰與行動列均沿用裝置管理共用樣式。
@@ -368,6 +369,7 @@ Acceptance:
 
 - `GET /api/alive` and a valid `GET /api/epaper` capability response switch the editor to E-paper Device Mode; an absent or unsupported endpoint leaves PNG export unchanged.
 - Crop only offers landscape 5:3 and portrait 3:5. Resize is read-only 800×480 or 480×800, and Palette is the fixed E6 six-color set.
+- A newly loaded image or demo initially selects 3:5 when its decoded original height exceeds its width; landscape and square images select 5:3. The user can still switch either ratio afterward, and background target/calibration synchronization does not override that valid choice.
 - The fixed palette has separate display RGB A′ and protocol RGB A values. Both arrays and the six-color test image follow EPD code order `0,1,2,3,5,6` (black, white, yellow, red, blue, green). Swatches, the Result canvas, palette mapping, and dither error use A′; the encoder boundary maps the exact palette index back to A before producing EPDIMG.
 - The formal pipeline decides orientation from the actual output dimensions. 800×480 stays unchanged; 480×800 rotates clockwise to 800×480 before EPDIMG encoding; any other size is rejected before upload.
 - The e-paper action sends one raw `POST /api/epaper/image`. The accepted upload already updates the stored image and queues draw, so the editor does not append a refresh request.
@@ -469,6 +471,7 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
 
 - 裝置 alive 後才查 `/api/epaper`；只有固定 panel/image/refresh/capabilities schema 可被前端支援時，E-paper target 才在本次 session 生效。曾確認的 target 遇到暫時斷線仍保持尺寸與色票鎖定，恢復後重新同步 status。
 - Dither Editor 的 Crop ratio 只允許 Landscape 5:3（800×480）與 Portrait 3:5（480×800）。使用者仍可 pan、zoom、rotate、flip 與選 fill；Resize 不可手動輸入，Palette 不可選 preset 或編輯 swatch。
+- E-paper Device Mode 載入新圖片或 demo 時，以瀏覽器解碼後、工作圖縮小前的原始尺寸判斷初始 Crop ratio：高大於寬用 3:5，寬大於或等於高用 5:3。圖片先載入而 capability 後確認時，首次切換裝置模式套用相同規則。這只設定該圖片的初始值；使用者可手動切換，後續輪詢、校色更新、斷線重連、旋轉、翻轉或重新繪製不可覆蓋合法的 3:5／5:3 選擇。
 - 固定六色以實體面板肉眼呈現的校色值 A′ 供網頁 Result、最近色判斷與 dither 誤差擴散使用；正式繪製時依六色固定 index 轉回裝置認得的協定色 A。調整校色值應改變網頁預覽與抖動選色，但不得改變硬體 color code。
 - 原 `Export PNG` 按鈕在此模式顯示「繪製到電子紙」。繪製完成進入 cooldown 後，全頁操作鎖解除，但 action 顯示實際剩餘秒數並維持 disabled；本地倒數歸零即密集向 server 確認，`can_draw` 恢復後立即啟用。
 - 全域操作 overlay 使用 spinner、目前 phase、percentage 與 progress bar。Percentage 是前端依預估時間插值的進度提示，不是 panel telemetry；`refreshing` 是最大區間，同一 phase 的重複 polling 不可重設計時，phase 超時後仍漸近移動，server 進入 cooldown success 才顯示 100%。
@@ -576,7 +579,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 
 - MVP 不提供 Free 自由比例。
 - 預設固定比例為 16:9。
-- E-paper Device Mode 覆蓋 standalone 預設，只顯示 5:3 與 3:5；切換時同步切換 800×480／480×800 target。
+- E-paper Device Mode 覆蓋 standalone 預設，只顯示 5:3 與 3:5；新圖初始方向依原始尺寸選擇，切換比例時同步切換 800×480／480×800 target。Standalone 仍使用 16:9 預設。
 - Crop 面板不顯示 X、Y、Width、Height 或 Lock ratio。
 - 使用者拖曳的是原圖位置，不是裁切框。
 - Crop overlay 固定代表最後輸出的裁切範圍。

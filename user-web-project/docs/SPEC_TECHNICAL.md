@@ -11,6 +11,7 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-09-12: E-paper target policy 新增以 `originalSize` 決定新圖初始 5:3／3:5 的共用規則；Crop `onImageLoaded` 在幾何正規化前套用，首次 capability 切換也用同一規則處理非法比例，後續合法手動方向保持不變。
 - 2026-08-10: 新增 `device-epaper-calibration.js` 作為六色色準 canonical service，處理公開 GET／PUT／reset、deep-copy snapshot、revision 與 stale GET suppression。面板測試保留本地 draft；`target-policy` 改為 revision-aware 動態 palette，editor 收到變更時清 stage/image cache 並重跑 preview。
 - 2026-08-10: `target-policy.js` 的 `OUTPUT_COLORS`／`DISPLAY_COLORS` 改為共用 EPD code order `0,1,2,3,5,6`（黑、白、黃、紅、藍、綠）；韌體的 palette validation、capability `color_codes` 與六色測試 frame source 改讀同一份具名 code-order 常數。
 - 2026-08-09: E-paper effective palette 改為 `DISPLAY_COLORS`（A′），讓所有 palette mapper／dither processor 使用校色後的實體參考色；`target-policy.outputImageData()` 在 encoder boundary 以 exact RGB lookup 保留 palette index 並轉回 `OUTPUT_COLORS`（A），拒絕任何非六色色素。
@@ -1077,6 +1078,7 @@ src/device/
 
 - `device-live` 仍只擁有 connection truth；`device-epaper` 在 online 後 probe `GET /api/epaper`，驗證固定 800×480、EPDIMG、192,040 bytes、六個 color codes 與必要 capabilities。
 - Target state 與 connection state 分離。Capability 一旦在 session 內確認，offline 不清除 target，只禁止 operation；reconnect 後重抓 capability/status。
+- E-paper target policy 擁有尺寸到方向的單一規則：使用 image loader 回傳的 `originalSize`，`height > width` 對應 `3-5`，其餘（含正方形或無有效圖片尺寸）對應 `5-3`。Crop `onImageLoaded` 僅在 capability 已確認時於幾何正規化前套用；若 capability 晚到，target policy 只在目前比例不是合法 `5-3`／`3-5` 時套用並呼叫既有 Crop normalize。合法比例視為使用者選擇，不得在後續 sync 覆寫。Resize 再由相同 orientation 固定成 800×480 或 480×800。
 - `device-epaper` 擁有 cached status、operation run id、polling、blocking state、phase progress與 cooldown deadline。Editor 與 test page 只能訂閱 snapshot及呼叫公開 operation method。
 - `device-epaper-calibration` 擁有六色 canonical snapshot。所有對外 colors 都 deep copy；只有 response 通過固定 id/code、channel integer/range 與 duplicate RGB 驗證後才發布。`revision` 只在 RGB 真正改變時遞增；較舊 GET 不得覆蓋較新的 save/reset，斷線或 request failure 保留最後 canonical。
 - 面板測試 draft 與 canonical 分離，高頻 e-paper status render 不得重建輸入 DOM 或覆蓋草稿。save/reset/reload 期間以 request generation 防 stale response；dirty 遇到外部 revision 只標記 conflict，不自動 rebase。
