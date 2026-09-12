@@ -42,7 +42,7 @@ jobs:
         run: |
           mkdir -p tmp/verification/ci
           make test-native test-tools 2>&1 | tee tmp/verification/ci/host.log
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: host-failure
@@ -62,9 +62,16 @@ jobs:
           python -m playwright install --with-deps chromium
           python - <<'PY'
           import os
+          from pathlib import Path
           from playwright.sync_api import sync_playwright
           with sync_playwright() as p, open(os.environ['GITHUB_ENV'], 'a') as env:
-              env.write('DEVICE_CONSOLE_BROWSER=' + p.chromium.executable_path + '\n')
+              browser_root = Path(p.chromium.executable_path).parents[2]
+              shells = sorted(browser_root.glob(
+                  'chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell'
+              ))
+              if len(shells) != 1:
+                  raise RuntimeError(f'Expected one Chromium headless shell, found {shells}')
+              env.write('DEVICE_CONSOLE_BROWSER=' + str(shells[0]) + '\n')
           PY
       - name: Builtin source and processed production CSS
         run: |
@@ -74,7 +81,7 @@ jobs:
         run: |
           make -C user-web-project test TEST_FLAGS="--chrome $DEVICE_CONSOLE_BROWSER" 2>&1 | tee tmp/verification/ci/user-source.log
           make -C user-web-project test-production TEST_FLAGS="--chrome $DEVICE_CONSOLE_BROWSER" 2>&1 | tee tmp/verification/ci/user-production.log
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: browser-failure
@@ -108,7 +115,7 @@ jobs:
           mkdir -p tmp/verification/ci
           make build WEB=${{ matrix.web }} 2>&1 | tee tmp/verification/ci/build.log
           make verify 2>&1 | tee tmp/verification/ci/verify.log
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: firmware-${{ matrix.web }}-failure
