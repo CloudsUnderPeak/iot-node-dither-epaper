@@ -1,188 +1,114 @@
-# IOT-Node-Bedrock
+# IOT-Node Dither E-Paper
 
 [繁體中文](README.zh-TW.md)
 
-**[Open the live demo](https://cloudsunderpeak.github.io/iot-node-bedrock/)**
+**Turn your pictures into six-color e-paper art, right from your browser.**
 
-A reusable Wi-Fi and device-monitoring foundation for ESP32 IoT products.
+An ESP32-powered e-paper application that brings image editing, dithering, wireless display updates, and device management into one local web interface. Connect from your phone or computer, prepare a picture, and send it to the panel—no companion app or cloud account required.
 
-IOT-Node-Bedrock is a foundation for products that use ESP32 as an IoT node. It provides the baseline every connected device needs—AP and STA mode configuration, first-use onboarding, fallback connectivity, persistent settings, and local device monitoring—so each product can extend it with its own sensors, controls, automation, and interface.
+Getting a picture onto e-paper brings together image processing, device connectivity, and panel updates. IOT-Node Dither E-Paper connects those steps in an application you can use and build on: your browser handles composition and dithering, while the ESP32 stores the image, drives the panel, and reports device status, leaving you to focus on what you want to display.
 
-The current development and release target is the **DFRobot FireBeetle 2 ESP32-C6**.
+The current hardware pairing is the **DFRobot FireBeetle 2 ESP32-C6** and **Waveshare 7.3inch e-Paper HAT (E), 800 × 480, six colors**.
 
-## Why This Project
+## From picture to paper
 
-Before an ESP32 can deliver its product-specific features, it needs a reliable way to get online, stay reachable, preserve network settings, and expose basic device status. Rebuilding those layers for every sensor, controller, gateway, or appliance wastes effort and produces inconsistent behavior.
+1. **Connect.** Join the device’s Wi-Fi and open its web interface.
+2. **Create.** Import a PNG, JPEG, or WebP image, crop it, and adjust brightness, contrast, and saturation.
+3. **Preview.** Apply dithering to turn your picture into the panel’s six-color palette.
+4. **Display.** Choose **Draw to e-paper** to upload the result and refresh the screen.
+5. **Keep editing.** Save a `.dither.png` image project to restore the original picture and editor settings later.
 
-IOT-Node-Bedrock packages those shared needs into a reusable base platform. Start with its Wi-Fi modes, local management interface, REST API, serial console, and device monitoring, then build the hardware and software features that make your IoT product unique.
+Use it as a personal photo display, an illustration frame, or a starting point for your own connected e-paper project.
 
-## How It Feels to Use
+## Device connectivity meets browser creativity
 
-1. The ESP32 starts its own Wi-Fi network on first boot.
-2. The user connects from a phone or computer and opens the built-in interface.
-3. They scan for a nearby Wi-Fi network and enter the connection details.
-4. The new settings are applied immediately; if the connection fails, a fallback AP can keep the device reachable.
+This e-paper edition builds on two projects, bringing device management and image creation into one continuous experience.
 
-For everyday use, network, hardware, and storage status remain visible without signing in. Authentication is requested only when someone enters the protected settings area.
+**[IOT-Node-Bedrock](https://github.com/CloudsUnderPeak/iot-node-bedrock) provides the device foundation.** This project extends it, retaining Wi-Fi setup, AP/STA modes, fallback connectivity, persistent settings, device status, and the REST API and serial console architecture. Users have a ready-made entry point for first-time connection and ongoing management; developers can add e-paper features on top of the existing connectivity capabilities.
 
-## Highlights
+**[Embedded Web Dithering](https://github.com/CloudsUnderPeak/embedded-web-dithering) provides the image creation interface.** This project uses its [six-color-epaper branch](https://github.com/CloudsUnderPeak/embedded-web-dithering/tree/six-color-epaper), bringing browser-based cropping, image adjustments, palette mapping, and dithering into the device web interface. In e-paper device mode, the editor matches the panel dimensions and six-color palette so the previewed image can be sent directly to the display.
 
-- **Fully local**: Complete setup without a CDN, cloud account, or internet connection.
-- **No app required**: Use any modern browser on desktop or mobile.
-- **Friendly first-time setup**: A default AP, captive portal, and guided Wi-Fi flow lower the barrier for new users.
-- **Designed to stay reachable**: A fallback AP can preserve access when the STA connection fails or disconnects.
-- **More than Wi-Fi settings**: View device status, update the hostname, manage the administrator password, and perform a factory reset.
-- **Battery-ready device API**: The FireBeetle target reports onboard ADC voltage and an estimated battery percentage through `/api/device`, without guessing battery presence or charging state.
-- **Persistent e-paper calibration**: Tune the six display RGB values live, save them in device NVS, and use the same calibrated palette in the dither editor.
-- **Bilingual interface**: Switch instantly between English and Traditional Chinese.
-- **Built for integration**: The web UI, REST API, and serial console share the same behavior for easier customization and automation.
-- **Replaceable frontend**: The interface is bundled into the firmware image and can be replaced with your own branding, layout, and product features.
+**This project connects both to the physical panel.** The frontend ships with the firmware and uses the device API to send images, check drawing status, and run panel tests. The six-color calibration stored on the device feeds back into the editor for color selection and previews. From joining Wi-Fi and adjusting a picture to updating the panel, the workflow stays in one web interface.
 
-## Who It Is For
+## Why this project
 
-- Makers and product teams building ESP32 IoT devices that need reusable Wi-Fi configuration and basic monitoring.
-- Projects that do not want to build a separate mobile app for device setup.
-- Devices used at exhibitions, in classrooms, laboratories, or isolated networks.
-- Firmware developers who want to add their own sensors, controls, or product logic on top of a reusable connectivity foundation.
-- Applications managed through a REST API, AI agent, or automation tool.
+- **The editor lives on the device.** The web interface ships inside the firmware. Image preparation runs in your browser, and device operation works over a local connection without internet access.
+- **Made for six-color e-paper.** Device mode matches the panel’s dimensions and palette, with landscape and portrait cropping, dithering previews, and direct drawing.
+- **A palette you can tune.** Adjust and save the six display RGB values on the panel test page. The editor uses that calibration for both color selection and preview.
+- **Projects you can revisit.** A `.dither.png` project opens as an image in ordinary viewers and restores your editing session when imported back into the editor. Project downloads remain available while the device is offline or cooling down.
+- **Wi-Fi setup is already included.** AP, STA, AP + STA, saved settings, and optional fallback AP give the display a reusable connectivity foundation.
+- **Device information within reach.** Check network, storage, and hardware status, including measured battery voltage and estimated battery percentage on the target board.
+- **Ready for your workflow.** Use the browser, REST API, serial console, or included Python image tool. The interface supports English and Traditional Chinese.
 
-## Try the Demo
+## Try it without hardware
 
-The static demo uses simulated device data, so you can explore public status pages, authentication, Wi-Fi scanning, and every settings flow without an ESP32.
+To explore the Embedded Web Dithering image workflow, open the product frontend included in this repository. You do not need an ESP32 or an e-paper panel to get started.
+
+After downloading the project, open [`user-web-project/index.html`](user-web-project/index.html) in your browser: double-click the file, or choose **Open File** to try it through `file://`. A demo image is included, and no server is needed.
+
+You can also start a local web server from the repository root:
+
+```bash
+python3 -m http.server 8000 --directory user-web-project
+```
+
+Alternatively, open [localhost:8000](http://localhost:8000/) after starting the command above. Both preview modes let you try image editing and the simulated device pages. Preview mode uses mock device data; it does not operate a physical panel. The preview administrator credentials are `admin` / `password`.
+
+The separate built-in management console also has a mock demo:
 
 ```bash
 make demo WEB_PROCESS=none
 python3 -m http.server 8000 --directory build/latest/web
 ```
 
-Open [http://localhost:8000/](http://localhost:8000/) and use the following credentials to enter Settings:
+## Get started
 
-```text
-Username: admin
-Password: password
-```
+You need the target board and panel, a suitable power supply and USB data connection, plus **GNU Make, Python 3, and the PlatformIO CLI** on your computer. Confirm wiring and power requirements against the official hardware documentation before powering the panel; other boards and panel variants require a reviewed port.
 
-The repository also includes a GitHub Pages workflow. Select **GitHub Actions** under **Settings → Pages → Build and deployment → Source** to publish a shareable online demo.
-
-## Quick Start
-
-GNU Make, Python 3, and the PlatformIO CLI are required. Build the web interface, firmware, and flashable images with:
+Build the firmware with the e-paper product frontend:
 
 ```bash
 make build
 ```
 
-Confirm the current port, then clean, rebuild, verify, and flash with one command:
+Find your board’s serial port, then build, verify, and flash:
 
 ```bash
 pio device list
 make deploy PORT=/dev/ttyACM0
 ```
 
-After flashing, connect to a Wi-Fi network named like `esp32-device-XXXX`, then open the captive portal or device AP address to begin setup.
+Replace `/dev/ttyACM0` with your actual port. `make deploy` cleans and rebuilds before flashing.
 
-> Ports, pins, flash settings, and USB settings are board-specific. Check the official documentation for the target board before porting.
+On a fresh device:
 
-## Make It Your Own
+1. Join `esp32-device-XXXX` from your phone or computer.
+2. Open the captive portal, or visit `http://192.168.4.1/` directly.
+3. Start preparing a picture, or sign in with `admin` / `password` to configure Wi-Fi and device settings.
+4. Draw your picture when the panel reports it is ready.
 
-This repository is both a complete application you can fork and a reusable ESP32 Wi-Fi foundation:
+The default build rebuilds `user-web-project/` and bundles it into the firmware; no separate web filesystem upload is needed.
 
-- Edit `builtin-web/` when changing this project's built-in console.
-- Develop the product frontend in `user-web-project/`. The default `make build`
-  (and explicit `make build WEB=user`) rebuilds that project, atomically imports
-  its minified gzip-only release into ignored `user-web/`, and bundles it.
-- `user-web-project/` is a Git subtree of
-  [`CloudsUnderPeak/embedded-web-dithering`](https://github.com/CloudsUnderPeak/embedded-web-dithering),
-  following its `six-color-epaper` branch. Configure this repository-local remote
-  once per clone, then use the Make targets below to sync it without using a submodule:
+## Build on it
 
-  ```bash
-  git remote add embedded-web-dithering https://github.com/CloudsUnderPeak/embedded-web-dithering.git
-  git remote set-url --push embedded-web-dithering git@github.com:CloudsUnderPeak/embedded-web-dithering.git
-  ```
+Build your own e-paper photo frame or display from here: keep IOT-Node-Bedrock's connectivity and management capabilities, customize the Embedded Web Dithering editing interface, and connect your own image sources or automation tools through the e-paper API.
 
-  Pull before editing; commit only the intended `user-web-project/` change before
-  pushing. `make user-web pull` requires a clean worktree and creates the subtree
-  merge commit. `make user-web push` rejects uncommitted changes under that prefix,
-  pushes only its committed subtree history, and requires GitHub SSH write access.
-- Use `make build WEB=builtin` when the built-in console is required. `WEB=auto`
-  remains available to consume an existing user import or fall back to builtin.
-- For API-only firmware, explicitly run `make build WEB=none`. This keeps all
-  REST and serial APIs but does not serve a setup page.
-- Build product features on top of the existing authentication, configuration, and REST API foundation.
-- Connect directly to the REST API for automated management without a browser.
+For projects centered on other sensors or controllers, start with the general-purpose [IOT-Node-Bedrock](https://github.com/CloudsUnderPeak/iot-node-bedrock) foundation. For image processing and limited-color displays, explore [Embedded Web Dithering](https://github.com/CloudsUnderPeak/embedded-web-dithering). This repository provides an application starting point that integrates both with six-color e-paper.
 
-Common development commands:
+| What you want to do | Where to start |
+| --- | --- |
+| Customize the image editor and product interface | [`user-web-project/`](user-web-project/) |
+| Use the built-in management console | `make build WEB=builtin` and [`builtin-web/`](builtin-web/) |
+| Build firmware with REST and serial access only | `make build WEB=none` |
+| Convert and send images from Python | [E-paper tool](tools/epaper/README.md) |
+| Integrate device control and automation | [REST API reference](docs/SPEC_API_REFERENCE.md) |
+| Work over a serial connection | [Console reference](docs/SPEC_CONSOLE_REFERENCE.md) |
+| Understand builds, verification, and flashing | [Development tools](tools/README.md) and [release workflow](tools/release-build/README.md) |
 
-```bash
-make build                              # Rebuild user web and a full firmware snapshot
-make build WEB=builtin                  # Built-in frontend plus firmware
-make build WEB=user                     # Rebuild user frontend plus firmware
-make build WEB=none                     # Firmware without any frontend
-make prepare-user-web                   # Rebuild/import only user-web-project
-make user-web pull                      # Pull the six-color-epaper subtree branch
-make user-web push                      # Push committed subtree-only changes upstream
-make deploy WEB=none PORT=/dev/ttyACM0  # Build, verify, and flash API-only firmware
-make web [WEB=...] [WEB_PROCESS=...]    # Process frontend only
-make demo WEB_PROCESS=none              # Static mock demo under build/latest/web
-make esp                                # Firmware from current production web
-make verify [IMAGE=build/.../firmware.img]
-make flash PORT=/dev/ttyACM0 [IMAGE=...] # Flash an existing verified snapshot
-make clean                              # Remove latest and imported user web; keep snapshots
-make clean all                          # Remove latest and timestamp snapshots
-make test                               # Native, tools, browser tests; no firmware build
-make test-native                        # C++ service and endpoint regressions
-make test-tools                         # Python build/release tests
-make test-all                           # Build, verify, then run all tests
-make test-web                           # Run frontend browser contracts
-```
+Product frontend source lives in `user-web-project/`, maintained as a Git subtree for synchronization with the upstream [six-color-epaper branch](https://github.com/CloudsUnderPeak/embedded-web-dithering/tree/six-color-epaper). Make your customizations in that directory; `user-web/` and `build/` contain generated output. See the [Makefile](Makefile) for development and subtree commands, and the [specification index](docs/SPEC_INDEX.md) for architecture and behavior.
 
-Native tests require a C++17 compiler and the pinned ArduinoJson headers. Run
-`pio pkg install -e firebeetle2_esp32c6` to prepare dependencies without compiling
-firmware, or set `ARDUINOJSON_INCLUDE` to that pinned library’s `src` directory.
-Browser tests require Chrome/Chromium/Edge; set `DEVICE_CONSOLE_BROWSER` when it
-is not discovered automatically. Missing dependencies fail the test command.
-PR verification runs host/browser checks and separate builtin/user/none builds;
-user frontend checks use its own `test` and `test-production` targets.
+## Know before you connect
 
-
-`user-web/` is generated and must not be edited manually. Its nested build is
-already minified and gzipped, so `WEB_PROCESS=auto` preserves it (`none`), while
-the built-in frontend resolves to `minify-gzip`. Explicitly applying
-`minify-gzip` to the precompressed user import is rejected. `WEB=auto` never
-selects the no-frontend mode.
-
-Every complete firmware build creates an immutable Taipei-time snapshot and
-replaces `latest/` with an identical real copy:
-
-```text
-build/
-├── latest/
-│   ├── web-manifest.json
-│   ├── web/
-│   ├── binary/
-│   │   ├── manifest.json
-│   │   ├── bootloader.bin
-│   │   ├── partitions.bin
-│   │   ├── boot_app0.bin
-│   │   └── firmware.bin
-│   └── firmware.img
-└── 20260726_0428/
-    └── ...same structure as latest...
-```
-
-`firmware.img` is a deterministic tar.gz package with a custom extension. It
-contains the manifest and four binary images at the archive root; there is no
-separate frontend binary because selected web assets are compiled into
-`firmware.bin`. A `WEB=none` snapshot keeps an empty `web/` directory and
-records the no-frontend state in its manifests. Persistent project compression
-is deliberately limited to gzip: frontend `.gz` assets and this gzip-compressed
-TAR package.
-
-## Documentation
-
-Start with the [specification index](docs/SPEC_INDEX.md) for product behavior, frontend experience, REST API details, and engineering design. You do not need to understand the firmware internals just to try the project or customize its interface.
-
-## Before You Deploy
-
-This project is currently intended as a connectivity foundation for prototypes, controlled laboratories, and trusted local networks. It is not a hardened product ready for untrusted environments. Before a production launch, evaluate first-use authentication, HTTPS, login throttling, Secure Boot, Flash Encryption, and NVS Encryption for your threat model.
+- **Refreshes are deliberately paced.** Each completed physical draw is followed by a 180-second cooldown. The interface shows remaining time; local editing can continue during the cooldown.
+- **The panel target is specific.** Firmware accepts the fixed `EPDIMG` format, not raw PNG or JPEG uploads. The product editor and Python tool handle conversion for you.
+- **Use a trusted local network.** The initial AP is open and the default administrator password is `password`.

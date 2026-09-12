@@ -2,7 +2,7 @@
     // MVP 先集中英文 UI 字串。
     // 元件透過 key 取文字，避免 label 散落在各 feature 裡難以維護。
     app.i18n.en = {
-        appTitle: 'Dither Image Editor',
+        appTitle: 'IOT-Node Dither E-Paper',
         startupLoading: 'Loading...',
         startupLoadFailed: 'App could not be loaded.',
         startupReload: 'Reload',

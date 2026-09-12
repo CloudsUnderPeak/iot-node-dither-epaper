@@ -1,6 +1,6 @@
 (function (app) {
     app.i18n['zh-TW'] = {
-        appTitle: '抖色編輯器',
+        appTitle: 'IOT-Node Dither E-Paper',
         startupLoading: '載入中...',
         startupLoadFailed: '無法載入應用程式。',
         startupReload: '重新整理',

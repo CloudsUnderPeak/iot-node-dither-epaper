@@ -1,185 +1,114 @@
-# IOT-Node-Bedrock
+# IOT-Node Dither E-Paper
 
 [English](README.md)
 
-**[開啟線上 Demo](https://cloudsunderpeak.github.io/iot-node-bedrock/)**
+**打開瀏覽器，讓喜歡的圖片成為六色電子紙上的風景。**
 
-為 ESP32 IoT 產品準備的可重用 Wi-Fi 與裝置監控基石。
+這是一套以 ESP32 驅動的電子紙應用，把圖片編輯、抖色、無線更新畫面與裝置管理整合在同一個地端網頁。拿起手機或電腦，連上裝置、調整圖片，就能送到電子紙顯示，不需要安裝專用 App，也不需要雲端帳號。
 
-IOT-Node-Bedrock 是讓 ESP32 作為 IoT 節點時可直接延伸的基礎平台。它提供每個連網裝置都需要的基本能力，包括 AP／STA mode 設定、首次連線引導、fallback connectivity、設定保存與地端裝置監控，讓不同產品能在其上加入自己的感測器、控制邏輯、自動化與操作介面。
+從圖片到電子紙，需要把影像處理、裝置連線與面板更新串在一起。IOT-Node Dither E-Paper 將這段流程整合成一套可直接操作、也能繼續延伸的應用：瀏覽器負責構圖與抖色，ESP32 負責保存圖片、驅動面板與回報裝置狀態，讓你專注在想呈現的畫面。
 
-目前以 **DFRobot FireBeetle 2 ESP32-C6** 為開發與發行驗證目標。
+目前搭配 **DFRobot FireBeetle 2 ESP32-C6** 與 **Waveshare 7.3inch e-Paper HAT (E)，800 × 480 六色電子紙**。
 
-## 為什麼做這個專案
+## 從一張圖片，到一幅電子紙畫面
 
-任何 ESP32 IoT 裝置在執行自身產品功能前，都需要可靠地連上網路、維持可管理狀態、保存網路設定，並提供基本裝置狀態。若每個感測器、控制器、gateway 或設備都重新實作這些底層能力，不只浪費開發時間，也容易產生不一致的行為。
+1. **連上裝置。** 加入裝置的 Wi-Fi，開啟網頁介面。
+2. **準備圖片。** 匯入 PNG、JPEG 或 WebP，裁切構圖，調整亮度、對比與飽和度。
+3. **預覽抖色。** 將圖片轉換成面板的六色色盤，預覽有限色彩呈現的細節。
+4. **送上螢幕。** 按下「繪製到電子紙」，上傳結果並更新畫面。
+5. **留待下次創作。** 下載 `.dither.png` 圖片專案，之後重新匯入，就能還原原圖與編輯設定。
 
-IOT-Node-Bedrock 將這些共通需求整理成可重用的基石平台。你可以沿用它的 Wi-Fi modes、地端管理介面、REST API、serial console 與裝置監控，再向上建立真正屬於自己 IoT 產品的硬體與軟體功能。
+可以把它做成個人照片展示、插畫相框，或作為下一個連網電子紙作品的起點。
 
-## 使用體驗
+## 連網基礎 × 瀏覽器創作
 
-1. ESP32 第一次開機，自動建立專屬 Wi-Fi。
-2. 使用手機或電腦連上裝置，開啟內建管理頁。
-3. 搜尋並選擇附近的 Wi-Fi，輸入連線資訊。
-4. 儲存後立即套用；若連線失敗，可自動保留備援 AP，避免裝置失聯。
+這個電子紙版本建立在兩個專案的能力之上，將裝置管理與圖片創作接成同一段使用體驗。
 
-日常使用時，不必登入就能查看網路、硬體與儲存空間狀態；需要變更設定時，才進入受保護的管理區。
+**[IOT-Node-Bedrock](https://github.com/CloudsUnderPeak/iot-node-bedrock) 是裝置端的基礎。** 本專案從它延伸，沿用 Wi-Fi 設定、AP／STA 模式、備援連線、設定保存、裝置狀態查詢，以及 REST API 與序列主控台的架構。對使用者來說，第一次連線與後續管理都有現成入口；對開發者來說，可以在既有連網能力上繼續加入電子紙功能。
 
-## 特色
+**[Embedded Web Dithering](https://github.com/CloudsUnderPeak/embedded-web-dithering) 提供圖片創作介面。** 本專案採用它的 [six-color-epaper 分支](https://github.com/CloudsUnderPeak/embedded-web-dithering/tree/six-color-epaper)，將瀏覽器中的裁切、影像調整、色盤映射與抖色流程帶進裝置網頁。配合電子紙裝置模式，編輯器會對應面板尺寸與六色色盤，讓預覽後的圖片能直接送往螢幕。
 
-- **完全地端運作**：沒有 CDN、雲端帳號或外部網路，離線環境也能完成設定。
-- **免安裝 App**：使用瀏覽器即可操作，支援桌面與行動裝置版面。
-- **友善的第一次設定**：預設 AP、captive portal 與清楚的 Wi-Fi 設定流程，降低新手門檻。
-- **不容易失聯**：STA 連線失敗或中斷時，可啟用 fallback AP 保留管理入口。
-- **不只設定 Wi-Fi**：可查看裝置狀態、調整 hostname、管理登入密碼與執行 factory reset。
-- **可延伸的電池 API**：FireBeetle 目標板會透過 `/api/device` 回報板載 ADC 電壓與估算電量百分比，不猜測是否安裝電池或正在充電。
-- **可持久化的電子紙色準**：即時調整六色顯示 RGB、儲存到裝置 NVS，並讓抖色編輯器使用同一份校正色盤。
-- **中英文介面**：內建 English 與繁體中文，可即時切換。
-- **為整合而設計**：網頁、REST API 與 serial console 共用同一套行為，方便產品客製與自動化。
-- **前端可替換**：管理頁與韌體包在同一個 app image，仍可換成自己的品牌、版面與產品功能。
+**本專案把兩者連到實體電子紙。** 前端隨韌體一起燒錄，透過裝置 API 完成圖片傳送、繪製狀態查詢與面板測試；儲存在裝置上的六色色準也會回到編輯器，供選色與預覽使用。從連上 Wi-Fi、調整圖片到更新面板，都能在同一個網頁介面完成。
 
-## 適合誰
+## 為什麼選擇這個專案
 
-- 需要可重用 Wi-Fi 設定與基本監控能力的 ESP32 IoT 裝置 maker 與產品團隊。
-- 不希望為裝置設定流程另外開發手機 App 的專案。
-- 需要在展場、教室、實驗室或封閉網路中運作的設備。
-- 想在可重用連網基礎上加入感測器、控制功能或產品邏輯的 firmware 開發者。
-- 需要透過 REST API 或 AI／自動化工具管理裝置的應用。
+- **編輯器就住在裝置裡。** 網頁隨韌體一起提供，圖片在瀏覽器內處理；只要連上裝置，即使沒有外部網路也能操作。
+- **為六色電子紙準備。** 裝置模式自動對應面板尺寸與色盤，支援橫向、直向裁切、抖色預覽與直接繪製。
+- **讓色盤更貼近你的面板。** 在面板測試頁調整並儲存六色 RGB，編輯器會將校色結果用於選色與預覽。
+- **作品可以接著改。** `.dither.png` 在一般看圖軟體中是圖片，重新匯入編輯器則能還原編輯內容；裝置離線或冷卻期間，也能下載圖片專案。
+- **連網基礎已經備妥。** AP、STA、AP + STA、設定保存與可選的備援 AP，讓電子紙具備可延伸的 Wi-Fi 管理能力。
+- **裝置狀態隨手可查。** 查看網路、儲存空間與硬體資訊，目標板也提供實測電池電壓與估算電量百分比。
+- **融入你的操作方式。** 瀏覽器、REST API、序列主控台與隨附的 Python 圖片工具都能使用，介面支援繁體中文與 English。
 
-## 體驗 Demo
+## 沒有硬體也能先體驗
 
-靜態 Demo 使用假裝置資料，不需要 ESP32 即可體驗公開狀態頁、登入、Wi-Fi 掃描與各項設定流程。
+想先試試 Embedded Web Dithering 的圖片處理流程，可以直接開啟本專案隨附的產品前端，不需要先準備 ESP32 或電子紙。
+
+下載專案後，用瀏覽器開啟 [`user-web-project/index.html`](user-web-project/index.html)：雙擊檔案，或在瀏覽器選擇「開啟檔案」，即可透過 `file://` 體驗。專案已包含 Demo 圖片，不必啟動伺服器。
+
+也可以在專案根目錄啟動本機網頁伺服器：
+
+```bash
+python3 -m http.server 8000 --directory user-web-project
+```
+
+或者執行上方指令後開啟 [localhost:8000](http://localhost:8000/)。兩種預覽方式都能體驗圖片編輯與模擬裝置頁面。預覽模式使用假裝置資料，不會操作實體面板；預覽管理帳密為 `admin` / `password`。
+
+獨立的內建管理介面也提供模擬 Demo：
 
 ```bash
 make demo WEB_PROCESS=none
 python3 -m http.server 8000 --directory build/latest/web
 ```
 
-開啟 [http://localhost:8000/](http://localhost:8000/)，並使用以下測試帳號進入 Settings：
-
-```text
-Username: admin
-Password: password
-```
-
-專案也已準備 GitHub Pages workflow；在 repository 的 **Settings → Pages → Build and deployment → Source** 選擇 **GitHub Actions** 後，即可發布可分享的線上 Demo。
-
 ## 快速開始
 
-環境需要 GNU Make、Python 3 與 PlatformIO CLI。建立產品網頁、firmware 與可燒錄 image：
+準備目標開發板、面板、合適的電源與可傳輸資料的 USB 連線，並在電腦安裝 **GNU Make、Python 3 與 PlatformIO CLI**。面板通電前，請依官方硬體文件確認接線與供電需求；其他開發板或面板型號需要另行確認移植設定。
+
+建置包含電子紙產品前端的韌體：
 
 ```bash
 make build
 ```
 
-確認目前連接埠後，以單一命令完成清理、重建、驗證與燒錄：
+確認開發板的序列埠，再建置、驗證並燒錄：
 
 ```bash
 pio device list
 make deploy PORT=/dev/ttyACM0
 ```
 
-燒錄完成後，尋找名稱類似 `esp32-device-XXXX` 的 Wi-Fi，連線並開啟 captive portal 或裝置 AP 位址，即可開始設定。
+將 `/dev/ttyACM0` 換成實際連接埠。`make deploy` 會先清理並重新建置，再進行燒錄。
 
-> 開發板的連接埠、pins、flash 與 USB 設定不可直接套用其他型號；移植前請先依目標板官方資料確認。
+裝置首次啟動後：
 
-## 建立你自己的版本
+1. 用手機或電腦加入 `esp32-device-XXXX`。
+2. 開啟自動導向的設定頁，或直接造訪 `http://192.168.4.1/`。
+3. 開始準備圖片；若要設定 Wi-Fi 或裝置，使用 `admin` / `password` 登入。
+4. 面板顯示可用時，將圖片繪製到電子紙。
 
-這個 repository 同時是一個可直接 fork 的完整應用，以及可抽出的 ESP32 Wi-Fi foundation：
+預設建置會重新編譯 `user-web-project/` 並包入韌體，不需要另外上傳網頁檔案系統。
 
-- 修改本專案內建管理頁時，請編輯 `builtin-web/`。
-- 產品前端在 `user-web-project/` 開發。預設 `make build`（以及明確的
-  `make build WEB=user`）會先重建該專案，再把 minify、gzip-only 的正式
-  產物原子匯入被忽略的 `user-web/` 並包入 firmware。
-- `user-web-project/` 是
-  [`CloudsUnderPeak/embedded-web-dithering`](https://github.com/CloudsUnderPeak/embedded-web-dithering)
-  的 Git subtree，目前追蹤 `six-color-epaper` 分支。每個 clone 只須設定一次
-  repository-local remote，之後即可用下列 Make target 同步，不需要 submodule：
+## 延伸成你的作品
 
-  ```bash
-  git remote add embedded-web-dithering https://github.com/CloudsUnderPeak/embedded-web-dithering.git
-  git remote set-url --push embedded-web-dithering git@github.com:CloudsUnderPeak/embedded-web-dithering.git
-  ```
+你可以從這裡繼續打造自己的電子紙相框或展示裝置：沿用 IOT-Node-Bedrock 的連網與管理能力，在 Embedded Web Dithering 的編輯流程上調整介面，再透過電子紙 API 串接自己的圖片來源或自動化工具。
 
-  請先 pull 再修改；push 前只提交預計送出的 `user-web-project/` 變更。
-  `make user-web pull` 要求整個 worktree 為乾淨狀態，並建立 subtree merge commit；
-  `make user-web push` 會拒絕該 prefix 內未提交的變更、只推送已提交的 subtree
-  history，並需要 GitHub SSH 的寫入權限。
-- 需要內建管理頁時使用 `make build WEB=builtin`。`WEB=auto` 仍可消費
-  既有 user import，沒有有效 import 時則退回 builtin。
-- 若要建立只提供 API 的 firmware，明確執行 `make build WEB=none`；
-  REST 與 serial API 仍可使用，但不提供設定頁。
-- 想加入產品功能，可沿用既有登入、設定與 REST API 基礎。
-- 想自動化管理，可直接串接 REST API，不必操作瀏覽器。
+如果你的作品以其他感測器或控制器為主，可以從 [IOT-Node-Bedrock](https://github.com/CloudsUnderPeak/iot-node-bedrock) 的通用基礎開始；如果重點是圖片處理與有限色彩顯示，則可參考 [Embedded Web Dithering](https://github.com/CloudsUnderPeak/embedded-web-dithering)。這個 repository 提供的是兩者與六色電子紙整合後的應用起點。
 
-常用開發命令：
+| 想做什麼 | 從這裡開始 |
+| --- | --- |
+| 客製圖片編輯器與產品介面 | [`user-web-project/`](user-web-project/) |
+| 改用內建管理介面 | `make build WEB=builtin` 與 [`builtin-web/`](builtin-web/) |
+| 建置僅提供 REST 與序列存取的韌體 | `make build WEB=none` |
+| 用 Python 轉圖並傳送到裝置 | [電子紙工具](tools/epaper/README.md) |
+| 串接裝置控制與自動化 | [REST API 參考](docs/SPEC_API_REFERENCE.md) |
+| 透過序列埠操作 | [主控台參考](docs/SPEC_CONSOLE_REFERENCE.md) |
+| 了解建置、驗證與燒錄 | [開發工具](tools/README.md)與[發行流程](tools/release-build/README.md) |
 
-```bash
-make build                              # 重建 user web 與完整 firmware 快照
-make build WEB=builtin                  # 內建前端加 firmware
-make build WEB=user                     # 重建使用者前端加 firmware
-make build WEB=none                     # 不含任何前端的 firmware
-make prepare-user-web                   # 只重建並匯入 user-web-project
-make user-web pull                      # 拉取 six-color-epaper subtree 分支
-make user-web push                      # 推送已提交的 subtree 專屬變更到上游
-make deploy WEB=none PORT=/dev/ttyACM0  # 建置、驗證並燒錄 API-only firmware
-make web [WEB=...] [WEB_PROCESS=...]    # 只處理前端
-make demo WEB_PROCESS=none              # 建立 build/latest/web 靜態 Demo
-make esp                                # 由目前正式 web 建立 firmware
-make verify [IMAGE=build/.../firmware.img]
-make flash PORT=/dev/ttyACM0 [IMAGE=...] # 燒錄已驗證的既有快照
-make clean                              # 移除 latest 與匯入的 user web，保留快照
-make clean all                          # 移除 latest 與所有時間戳快照
-make test                               # Native、tools、browser 測試，不建置 firmware
-make test-native                        # C++ service 與 endpoint regression
-make test-tools                         # Python build/release 測試
-make test-all                           # 建置、驗證，再執行全部測試
-make test-web                           # 執行前端瀏覽器契約測試
-```
+產品前端原始碼放在 `user-web-project/`，透過 Git subtree 與上游的 [six-color-epaper 分支](https://github.com/CloudsUnderPeak/embedded-web-dithering/tree/six-color-epaper) 維持同步。客製時請修改這個目錄；`user-web/` 與 `build/` 為產生的輸出。開發與 subtree 命令請見 [Makefile](Makefile)，架構與行為說明請見[規格索引](docs/SPEC_INDEX.md)。
 
-Native 測試需要 C++17 編譯器與固定版本的 ArduinoJson headers。先執行
-`pio pkg install -e firebeetle2_esp32c6` 準備相依套件，無須編譯 firmware；
-也可用 `ARDUINOJSON_INCLUDE` 指定該固定版本套件的 `src` 目錄。
-Browser 測試需要 Chrome／Chromium／Edge；無法自動找到時設定
-`DEVICE_CONSOLE_BROWSER`。缺少相依套件會讓測試失敗。
-PR verification 執行 host／browser 檢查與獨立的 builtin／user／none 建置；
-使用者前端透過自己的 `test` 與 `test-production` 入口驗證。
+## 連接前先了解
 
-
-`user-web/` 是 generated output，不應手動編輯。子專案產物已完成 minify
-與 gzip，因此 `WEB_PROCESS=auto` 對它解析為 `none` 並保留原樣；內建前端
-則解析為 `minify-gzip`。對 precompressed user import 明確指定
-`minify-gzip` 會被拒絕。`WEB=auto` 永遠不會自動選擇無前端模式。
-
-每次完整 firmware build 都會建立不可變的台北時間快照，並以內容完全
-相同的實體副本替換 `latest/`：
-
-```text
-build/
-├── latest/
-│   ├── web-manifest.json
-│   ├── web/
-│   ├── binary/
-│   │   ├── manifest.json
-│   │   ├── bootloader.bin
-│   │   ├── partitions.bin
-│   │   ├── boot_app0.bin
-│   │   └── firmware.bin
-│   └── firmware.img
-└── 20260726_0428/
-    └── ...結構與 latest 相同...
-```
-
-`firmware.img` 是使用自訂副檔名的 deterministic tar.gz，archive 根目錄
-只有 manifest 與四個 binary。所選前端會編譯進 `firmware.bin`，因此
-不會另外出現 frontend binary；`WEB=none` snapshot 仍保留空的 `web/`
-目錄，並在 manifests 記錄無前端狀態。專案持久產物的壓縮技術刻意只
-保留 gzip：前端 `.gz` 與這個經 gzip 壓縮的 TAR package。
-
-## 文件
-
-產品行為、前端體驗、REST API 與工程設計都從[規格文件索引](docs/SPEC_INDEX.md)開始閱讀。若只是想試用或客製介面，不需要先理解 firmware 內部架構。
-
-## 使用前注意
-
-本專案目前定位為原型開發、受控實驗室與可信任本機網路中的連網基礎，並非可直接部署到不受信任環境的 hardened product。正式產品發布前，請依使用情境另外評估首次設定驗證、HTTPS、登入限制、Secure Boot、Flash Encryption 與 NVS Encryption。
+- **畫面更新有固定間隔。** 每次完成實體繪製後，會進入 180 秒冷卻。介面會顯示剩餘時間，期間仍可繼續在本機編輯圖片。
+- **目前支援特定面板。** 韌體只接受固定的 `EPDIMG` 格式，不直接接收 PNG 或 JPEG；產品編輯器與 Python 工具會代為轉換。
+- **請在可信任的地端網路使用。** 初始 AP 不設密碼，預設管理密碼為 `password`。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert images to EPDIMG and call the IOT-Node-Bedrock e-paper API."""
+"""Convert images to EPDIMG and call the IOT-Node Dither E-Paper e-paper API."""
 
 from __future__ import annotations
 
@@ -327,7 +327,7 @@ def _add_conversion_options(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Convert images and control the IOT-Node-Bedrock 7.3-inch e-paper API."
+        description="Convert images and control the IOT-Node Dither E-Paper 7.3-inch e-paper API."
     )
     parser.add_argument("--ip", help="device IP/hostname, optionally including http:// or https://")
     parser.add_argument("--port", type=int, default=80, help="HTTP port (default: 80)")
