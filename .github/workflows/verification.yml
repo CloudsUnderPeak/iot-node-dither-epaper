@@ -71,7 +71,13 @@ jobs:
               ))
               if len(shells) != 1:
                   raise RuntimeError(f'Expected one Chromium headless shell, found {shells}')
-              env.write('DEVICE_CONSOLE_BROWSER=' + str(shells[0]) + '\n')
+              wrapper = Path(os.environ['RUNNER_TEMP']) / 'chromium-ci'
+              wrapper.write_text(
+                  '#!/usr/bin/env bash\n'
+                  f'exec "{shells[0]}" --no-sandbox --disable-dev-shm-usage "$@"\n'
+              )
+              wrapper.chmod(0o755)
+              env.write('DEVICE_CONSOLE_BROWSER=' + str(wrapper) + '\n')
           PY
       - name: Builtin source and processed production CSS
         run: |
