@@ -406,7 +406,12 @@
                 hostname: state.hostname,
                 wifi_tx_dbm: 15,
                 config_state: 'persisted',
-                config_recovery_reason: 'none'
+                config_recovery_reason: 'none',
+                power: {
+                    voltage_mv: 3980,
+                    sample_age_ms: 42,
+                    estimated_percent: 83
+                }
             });
         }
         if (path === 'api/storage' && method === 'GET') {

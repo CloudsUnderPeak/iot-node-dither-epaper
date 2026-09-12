@@ -1068,7 +1068,7 @@ src/device/
 
 ### 裝置管理頁
 
-- `pages/device-info/`：公開唯讀。`GET /api/device` + `GET /api/storage`，掛載時抓一次並每 10 秒背景輪詢；裝置卡直接呈現 API 的 configured `wifi_tx_dbm` 並加上 dBm 單位，不把它解讀為實測功率。不提供手動 Refresh、不顯示 stale badge，也不呈現 `config_state`；容量分段長條圖推導與 bedrock builtin-web Hardware 頁一致，Available 直接使用 `user.limits.max_upload_bytes`。失敗沿用最後成功值，離線提示交給 `device-gate` banner。
+- `pages/device-info/`：公開唯讀。`GET /api/device` + `GET /api/storage`，掛載時抓一次並每 10 秒背景輪詢；裝置卡直接呈現 API 的 configured `wifi_tx_dbm` 並加上 dBm 單位，不把它解讀為實測功率。緊接裝置卡的電源卡直接呈現 `power.voltage_mv`、`power.estimated_percent` 與 `power.sample_age_ms`；null 或非 numeric 值顯示 unavailable，前端不推導 power source、battery presence 或 charging state。不提供手動 Refresh、不顯示 stale badge，也不呈現 `config_state`；容量分段長條圖推導與 bedrock builtin-web Hardware 頁一致，Available 直接使用 `user.limits.max_upload_bytes`。失敗沿用最後成功值，離線提示交給 `device-gate` banner。
 - `pages/device-network/`：狀態卡公開（`GET /api/wifi` 每 10 秒輪詢，`if-clean` 不覆蓋表單草稿）；Wi-Fi 設定需登入。`PUT /api/wifi` 是完整 replacement，不適用分類由已載入 baseline 帶入；202 safe transition 以 1s 間隔輪詢 `GET /api/wifi/connect`、25s deadline、generation 序號丟棄過期回覆，期間 `suppress` 離線判定並容忍 transport 失敗；terminal `connected` 才把送出值設為 baseline 並清 password input，`failed` 保留草稿並顯示 rollback。掃描 dialog 過濾 hidden／空 SSID／RSSI ≤ -75、依 RSSI 排序、10 秒 cooldown 倒數，429/409 依 `retry_after_seconds` 提示。
 - `pages/device-system/`：整頁需登入。hostname 走 `PUT /api/system`（前端套用相同 1–31 字元規則與 mDNS 預覽）；管理員密碼走 `PUT /api/auth/password`（allowlist 正則 + 兩次一致），成功後清 token 要求重新登入。完整重設走 `POST /api/system/reset`（API client 只保留這一支；settings/data 兩支未使用已移除），UI 必須先通過確認 dialog，送出期間 `setDismissible(false)` 並鎖住按鈕，成功後 `invalidateSession()` 並以 sticky notice 保留重新連線指示。
 - 表單皆採 `busy || !dirty || !valid` 三態儲存鈕與文字狀態列；一般成功 notice 約 2.2 秒自動消失，錯誤與需保留脈絡（重啟、斷線、rollback）的 notice 常駐。

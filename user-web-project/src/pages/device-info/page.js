@@ -130,6 +130,7 @@
             this.storageData = null;
 
             var deviceGrid = app.utils.dom.el('div', { className: 'device-grid' });
+            var powerGrid = app.utils.dom.el('div', { className: 'device-grid' });
             var imageCard = capacityCard('deviceCardImageSpace');
             var fileCard = capacityCard('deviceCardFileStorage');
             var section = app.utils.dom.el('section', {
@@ -142,6 +143,16 @@
                             app.utils.dom.el('div', {
                                 className: 'panel-body device-card-body',
                                 children: [deviceGrid]
+                            })
+                        ]
+                    }),
+                    app.utils.dom.el('section', {
+                        className: 'panel-section device-gate',
+                        children: [
+                            app.utils.dom.el('h2', { text: t('deviceCardPower') }),
+                            app.utils.dom.el('div', {
+                                className: 'panel-body device-card-body',
+                                children: [powerGrid]
                             })
                         ]
                     }),
@@ -167,6 +178,25 @@
                 deviceGrid.appendChild(field(
                     'deviceFieldWifiTxPower',
                     typeof device.wifi_tx_dbm === 'number' ? device.wifi_tx_dbm + ' dBm' : '—'
+                ));
+            }
+
+            function renderPower(power) {
+                var snapshot = power || {};
+                app.utils.dom.clear(powerGrid);
+                powerGrid.appendChild(field(
+                    'devicePowerVoltage',
+                    typeof snapshot.voltage_mv === 'number' ? snapshot.voltage_mv + ' mV' : '—'
+                ));
+                powerGrid.appendChild(field(
+                    'devicePowerEstimatedPercent',
+                    typeof snapshot.estimated_percent === 'number'
+                        ? snapshot.estimated_percent + '%'
+                        : '—'
+                ));
+                powerGrid.appendChild(field(
+                    'devicePowerSampleAge',
+                    typeof snapshot.sample_age_ms === 'number' ? snapshot.sample_age_ms + ' ms' : '—'
                 ));
             }
 
@@ -230,6 +260,7 @@
                         self.deviceData = results[0];
                         self.storageData = results[1];
                         renderDevice(self.deviceData);
+                        renderPower(self.deviceData.power);
                         renderStorage(self.storageData);
                     },
                     // 失敗時沿用最後成功值；離線提示由 gate banner 負責。
