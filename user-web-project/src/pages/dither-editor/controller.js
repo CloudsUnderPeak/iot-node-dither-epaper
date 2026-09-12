@@ -30,7 +30,16 @@
         'image-processing-blocked': 'errorImageProcessingBlocked',
         'demo-load-failed': 'errorDemoLoadFailed',
         'demo-manifest-missing': 'errorDemoManifestMissing',
-        'demo-data-missing': 'errorDemoDataMissing'
+        'demo-data-missing': 'errorDemoDataMissing',
+        'file-too-large': 'errorProjectFileTooLarge',
+        'not-project': 'errorNotProjectFile',
+        'png-corrupt': 'errorProjectCorrupt',
+        'project-data-missing': 'errorProjectDataMissing',
+        'project-data-invalid': 'errorProjectCorrupt',
+        'schema-unsupported': 'errorProjectVersion',
+        'source-invalid': 'errorProjectSource',
+        'feature-unsupported': 'errorProjectFeature',
+        'settings-invalid': 'errorProjectSettings'
     };
 
     function errorText(error) {
@@ -50,6 +59,7 @@
         // 先重建預設 state，確保重新載圖時不沿用上一張圖的演算法設定。
         this.resetStateForImage();
         this.state.fileName = fileName || 'Untitled';
+        this.state.sourceFile = result.sourceFile || null;
         this.state.sourceImageData = result.imageData;
         this.state.livePreview = null;
         this.state.originalSize = result.originalSize;
@@ -124,15 +134,62 @@
         this.state.previewRenderDurationMs = null;
         this.hidePreviewTimingLabel();
         this.render(this.state);
-        return app.core.imageLoader
-            .loadImageFromFile(file, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
-            .then(function (result) {
-                self.loadResult(result, file.name);
+        return app.core.projectFile.classify(file)
+            .then(function (route) {
+                if (route.kind === 'project') {
+                    return self.loadProjectRoute(route);
+                }
+                return app.core.imageLoader
+                    .loadImageFromFile(file, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
+                    .then(function (result) {
+                        self.loadResult(result, file.name);
+                    });
             })
             .catch(function (error) {
                 self.state.status = 'error';
                 self.state.error = errorText(error);
                 self.render(self.state);
+            });
+    };
+
+    DitherEditorController.prototype.loadProjectRoute = function loadProjectRoute(route) {
+        var self = this;
+        var project;
+        try {
+            project = app.core.projectFile.read(route);
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        return app.core.imageLoader
+            .loadWorkingImage(project.workingBlob, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
+            .then(function (workingResult) {
+                var candidate = app.pages.ditherEditor.projectWorkspace.restore(project, workingResult);
+                var candidateCache = app.pages.ditherEditor.pipelineRunner.createStageCache();
+                app.pages.ditherEditor.targetPolicy.sync(candidate);
+                candidate.preparedImageData = app.pages.ditherEditor.pipelineRunner.runPanelGroup(
+                    candidate.sourceImageData,
+                    candidate,
+                    app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE,
+                    { stageCache: candidateCache }
+                );
+                return app.pages.ditherEditor.pipelineRunner.runAsync(
+                    candidate.sourceImageData,
+                    candidate,
+                    { stageCache: candidateCache }
+                )
+                    .then(function (resultImageData) {
+                        candidate.previewImageData = resultImageData;
+                        candidate.outputImageData = resultImageData;
+                        candidate.status = candidate.mode === app.pages.ditherEditor.editorModeStateMachine.groups.PREPARE
+                            ? 'ready' : 'preview-ready';
+                        candidate.uiRevision = (self.state.uiRevision || 0) + 1;
+                        self.previewRunId = (self.previewRunId || 0) + 1;
+                        self.exportRunId = (self.exportRunId || 0) + 1;
+                        app.pages.ditherEditor.pipelineRunner.clearStageCache(self.stageCache);
+                        self.state = candidate;
+                        app.pages.ditherEditor.editorModeStateMachine.normalize(self.state);
+                        self.render(self.state);
+                    });
             });
     };
 
@@ -506,6 +563,64 @@
             });
     };
 
+    DitherEditorController.prototype.exportProject = function exportProject() {
+        var self = this;
+        if (!this.state.sourceImageData
+            || !app.pages.ditherEditor.targetPolicy.isEpaper(this.state)
+            || this.state.mode !== app.pages.ditherEditor.editorModeStateMachine.groups.EDIT) {
+            return Promise.resolve();
+        }
+        if (this.state.status === 'exporting-project') {
+            return Promise.resolve();
+        }
+        this.projectExportRunId = (this.projectExportRunId || 0) + 1;
+        var runId = this.projectExportRunId;
+        this.runFeatureHook('onBeforeExport', {});
+        var snapshot = app.pages.ditherEditor.projectWorkspace.snapshot(this.state);
+        this.state.status = 'exporting-project';
+        this.render(this.state);
+        return Promise.resolve()
+            .then(function () {
+                return app.pages.ditherEditor.pipelineRunner.runAsync(snapshot.sourceImageData, snapshot);
+            })
+            .then(function (resultImageData) {
+                if (runId !== self.projectExportRunId) {
+                    return null;
+                }
+                var manifest = app.pages.ditherEditor.projectWorkspace.createManifest(snapshot, resultImageData);
+                return Promise.all([
+                    app.core.canvasUtils.imageDataToBlob(resultImageData),
+                    app.core.canvasUtils.imageDataToBlob(snapshot.sourceImageData)
+                ]).then(function (blobs) {
+                    return app.core.projectFile.create(
+                        blobs[0],
+                        snapshot.sourceFile.blob,
+                        blobs[1],
+                        manifest
+                    );
+                });
+            })
+            .then(function (blob) {
+                if (!blob || runId !== self.projectExportRunId) {
+                    return;
+                }
+                app.core.imageExporter.downloadBlob(
+                    blob,
+                    app.pages.ditherEditor.projectWorkspace.exportFileName(snapshot.fileName)
+                );
+                self.state.status = 'project-exported';
+                self.render(self.state);
+            })
+            .catch(function (error) {
+                if (runId !== self.projectExportRunId) {
+                    return;
+                }
+                self.state.status = 'error';
+                self.state.error = errorText(error);
+                self.render(self.state);
+            });
+    };
+
     DitherEditorController.prototype.drawEpaper = function drawEpaper() {
         var self = this;
         if (!this.state.sourceImageData || this.state.mode !== app.pages.ditherEditor.editorModeStateMachine.groups.EDIT) {
@@ -597,6 +712,7 @@
     DitherEditorController.prototype.destroy = function destroy() {
         this.previewRunId = (this.previewRunId || 0) + 1;
         this.exportRunId = (this.exportRunId || 0) + 1;
+        this.projectExportRunId = (this.projectExportRunId || 0) + 1;
         if (app.pages.ditherEditor.ditherWorkerClient) {
             app.pages.ditherEditor.ditherWorkerClient.terminate();
         }

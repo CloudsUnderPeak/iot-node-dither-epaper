@@ -3,7 +3,7 @@
 ```text
 Version: 0.1.0
 Status: Draft
-Last Updated: 2026-07-11
+Last Updated: 2026-09-12
 Split From: SPEC_INDEX.md
 ```
 
@@ -11,6 +11,8 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-09-12: 圖片專案匯入改為以 PNG 內的 project chunks 辨識，不再要求匯入檔名精確以 `.dither.png` 結尾；瀏覽器重新下載形成的 `.dither(1).png` 或其他重新命名 PNG 仍可還原。`.dither.png` 若不含專案內容仍明確拒絕。
+- 2026-09-12: 新增可攜式 `.dither.png` 圖片設定檔。檔案本身是可由 PC 圖片檢視器預覽最終 dither 結果的 PNG，同時內嵌原始圖、工作圖與有版本的編輯設定；所有上傳入口自動區分一般圖片與設定檔。設定檔匯出只在 E-paper Device Mode 顯示，且不依賴裝置在線、可繪製或 cooldown 狀態。
 - 2026-09-12: E-paper Device Mode 載入新圖片或 demo 時，依解碼後、縮小前的原始尺寸自動選擇 Crop 比例：直式用 3:5，橫式與正方形用 5:3；自動選擇只作為新圖初始值，使用者後續手動選擇不被輪詢、校色或重新繪製覆蓋。若圖片先於 e-paper capability 載入，首次切換裝置模式時套用同一規則。
 - 2026-08-10: 面板測試新增公開的六色色準編輯器：色票與 RGB 輸入即時改變預覽，只有儲存才寫入裝置 NVS；可重載裝置值或恢復韌體預設。儲存成功後同一份 canonical 色盤立即套用到固定色票、抖色與 Result，編輯中的舊頁面會重算，未儲存草稿不影響編輯器。
 - 2026-08-10: E-paper 固定六色色票與面板六色測試圖統一依 EPD code `0,1,2,3,5,6` 排列，顯示順序為黑、白、黃、紅、藍、綠；`DISPLAY_COLORS` 與 `OUTPUT_COLORS` 維持相同 code slot，避免紅／黃因語意順序不同而錯配。
@@ -311,7 +313,7 @@ Acceptance:
 - Fixed non-effect steps remain outside the edit effects order.
 - Export is not part of the image effects order.
 
-### US-12 Export PNG
+### US-12 Export Result Or Image Project
 
 As a user, I want to export the processed result as PNG, so that I can use it outside the editor.
 
@@ -320,6 +322,12 @@ Acceptance:
 - Given a valid working image, when the user clicks Export, then the app produces a PNG.
 - Export runs the formal pipeline instead of relying on a stale preview bitmap.
 - If export fails, the app shows an understandable error state.
+- In Standalone Mode the action remains `Export PNG`, and the image-project export action is hidden.
+- In E-paper Device Mode `Draw to E-paper` uses the processed credit-card/edit icon. A separate primary `Download Image Project` action appears below it with the export/download icon.
+- The image project uses the `.dither.png` suffix. A normal PC image viewer shows its final dithered PNG, while importing it restores the embedded original image and supported editor settings.
+- Image-project export remains available while the device is offline or cooling down because it is a local browser operation.
+- Every editor upload path automatically routes ordinary PNG/JPEG/WebP images to normal image loading and valid `.dither.png` files to project restore.
+- Project routing is content-first: browser-renamed files such as `.dither(1).png` remain importable when valid project chunks are present. A `.dither.png` without project data, corrupt PNG/chunk data, an unsupported schema/feature version, or invalid embedded image/settings is rejected with an understandable error.
 
 ### US-13 Navigate Away And Return
 
@@ -376,6 +384,7 @@ Acceptance:
 - Processing, upload and physical draw show a blocking spinner, phase copy and simulated percentage. Percentage is weighted by expected time, with `refreshing` using the largest interval; repeated polling of the same phase must not reset its timer, and an over-time phase keeps moving asymptotically without reaching 100% before server success/cooldown.
 - While an operation is active, editing, Menu navigation and repeated action are blocked. Cooldown unlocks editing but keeps every e-paper action disabled and displays the interpolated `retry_after_seconds`. At local zero the client immediately rechecks status until the server restores `can_draw`.
 - A disconnect after HTTP 202 never causes automatic upload retry. The client waits for reconnect and confirms `/api/epaper/status` before allowing another action.
+- A separate local `Download Image Project` action remains enabled during disconnection and cooldown; it does not call the device API or change draw admission state.
 
 ## 頁面與導覽行為
 
@@ -473,7 +482,7 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
 - Dither Editor 的 Crop ratio 只允許 Landscape 5:3（800×480）與 Portrait 3:5（480×800）。使用者仍可 pan、zoom、rotate、flip 與選 fill；Resize 不可手動輸入，Palette 不可選 preset 或編輯 swatch。
 - E-paper Device Mode 載入新圖片或 demo 時，以瀏覽器解碼後、工作圖縮小前的原始尺寸判斷初始 Crop ratio：高大於寬用 3:5，寬大於或等於高用 5:3。圖片先載入而 capability 後確認時，首次切換裝置模式套用相同規則。這只設定該圖片的初始值；使用者可手動切換，後續輪詢、校色更新、斷線重連、旋轉、翻轉或重新繪製不可覆蓋合法的 3:5／5:3 選擇。
 - 固定六色以實體面板肉眼呈現的校色值 A′ 供網頁 Result、最近色判斷與 dither 誤差擴散使用；正式繪製時依六色固定 index 轉回裝置認得的協定色 A。調整校色值應改變網頁預覽與抖動選色，但不得改變硬體 color code。
-- 原 `Export PNG` 按鈕在此模式顯示「繪製到電子紙」。繪製完成進入 cooldown 後，全頁操作鎖解除，但 action 顯示實際剩餘秒數並維持 disabled；本地倒數歸零即密集向 server 確認，`can_draw` 恢復後立即啟用。
+- 原 `Export PNG` 按鈕在此模式顯示「繪製到電子紙」，並使用處理過的 credit-card/edit SVG。其下方另顯示使用 export/download SVG 的主按鈕「下載圖片專案」；兩顆按鈕底色一致。圖片專案是本機操作，裝置離線或 cooldown 期間仍可使用，且不得呼叫裝置 API；建立期間文字保持不變、按鈕暫時停用，不顯示取消文案。Standalone Mode 隱藏此按鈕。繪製完成進入 cooldown 後，全頁操作鎖解除，但繪製 action 顯示實際剩餘秒數並維持 disabled；本地倒數歸零即密集向 server 確認，`can_draw` 恢復後立即啟用。
 - 全域操作 overlay 使用 spinner、目前 phase、percentage 與 progress bar。Percentage 是前端依預估時間插值的進度提示，不是 panel telemetry；`refreshing` 是最大區間，同一 phase 的重複 polling 不可重設計時，phase 超時後仍漸近移動，server 進入 cooldown success 才顯示 100%。
 - 「面板測試」頁只在 session 已確認 capability 後出現在 Menu；公開且不要求登入。頁名只由 app header 顯示；內容以「電子紙狀態」卡呈現 panel/status/cooldown，並以「面板診斷」卡提供：
   - 顯示空白：`POST /api/epaper/image/white`，不寫 stored image。
@@ -690,6 +699,9 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 - 匯出失敗時要給出可理解的錯誤狀態。
 - Export 不應被當成效果順序的一部分拖曳。
 - E-paper Device Mode 以「繪製到電子紙」取代 Export PNG；它重新跑完整 pipeline、依實際尺寸正規化方向、編碼 EPDIMG，並只送一次 raw upload。
+- E-paper Device Mode 在繪製按鈕下另提供同為主按鈕樣式的「下載圖片專案」；Standalone Mode 不顯示這個 action。
+- 圖片專案使用 `<原檔名>.dither.png`，外層 PNG 是正式 pipeline 的最終 dither 結果，可直接由一般 PC 圖片檢視器預覽；內嵌原始檔、正規化工作圖與版本化設定供重新匯入還原，但圖片輸入面板不增加獨立原圖檢視操作。
+- Browse、dropzone 與其他檔案輸入都走同一個自動 routing 與驗證流程；不能只依 MIME 或副檔名信任內容。
 
 ## 圖片呈現區行為
 

@@ -43,6 +43,7 @@
             status: 'empty',
             mode: app.pages.ditherEditor.editorModeStateMachine.groups.SOURCE,
             fileName: 'Untitled',
+            sourceFile: null,
             sourceImageData: null,
             preparedImageData: null,
             previewImageData: null,

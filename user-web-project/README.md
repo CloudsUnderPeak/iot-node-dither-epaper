@@ -32,6 +32,7 @@ Many e-paper and embedded displays can only show a small set of colors. If you p
 - Choose or fine-tune the colors used by the image.
 - Apply dithering and preview how the image looks with limited colors.
 - Export the processed result as PNG.
+- On a detected e-paper device, export a versioned `.dither.png` image project even while the device is offline or cooling down. PC image viewers show its dithered result; re-importing it restores the original image and editor settings.
 
 ## Help Center
 
@@ -45,4 +46,4 @@ python3 tools/help-validate/run.py
 
 ## Supported Input Formats
 
-You can upload PNG, JPEG/JPG, and WebP images.
+You can upload PNG, JPEG/JPG, WebP, and this app's `.dither.png` image projects. Every upload entry identifies projects from their contents, so browser-renamed files such as `.dither(1).png` still work, and validates the embedded data before restoring it.

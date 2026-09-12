@@ -3,7 +3,7 @@
 ```text
 Version: 0.1.0
 Status: Draft
-Last Updated: 2026-07-11
+Last Updated: 2026-09-12
 Split From: SPEC_INDEX.md
 ```
 
@@ -11,6 +11,8 @@ Split From: SPEC_INDEX.md
 
 ## History
 
+- 2026-09-12: Project upload routing 改為 content-first；任何 PNG 檔名只要帶有效 project chunks 都進入 restore，不再以 `.dither.png` suffix 作匯入 gate，支援瀏覽器產生的 `.dither(1).png`。精確 `.dither.png` 但沒有 project chunks 仍拒絕，避免靜默載入成結果圖。
+- 2026-09-12: 新增 `project-file.js` 與 `project-workspace.js`，以標準 PNG 加私有 ancillary chunks 實作 `.dither.png` 可攜式設定檔；統一 upload routing、CRC／manifest／來源／尺寸驗證、schema/feature version gate 與原圖 Blob 還原。E-paper action 分離為裝置繪製和純本機設定檔匯出，後者不受 offline/cooldown admission 影響。
 - 2026-09-12: E-paper target policy 新增以 `originalSize` 決定新圖初始 5:3／3:5 的共用規則；Crop `onImageLoaded` 在幾何正規化前套用，首次 capability 切換也用同一規則處理非法比例，後續合法手動方向保持不變。
 - 2026-08-10: 新增 `device-epaper-calibration.js` 作為六色色準 canonical service，處理公開 GET／PUT／reset、deep-copy snapshot、revision 與 stale GET suppression。面板測試保留本地 draft；`target-policy` 改為 revision-aware 動態 palette，editor 收到變更時清 stage/image cache 並重跑 preview。
 - 2026-08-10: `target-policy.js` 的 `OUTPUT_COLORS`／`DISPLAY_COLORS` 改為共用 EPD code order `0,1,2,3,5,6`（黑、白、黃、紅、藍、綠）；韌體的 palette validation、capability `color_codes` 與六色測試 frame source 改讀同一份具名 code-order 常數。
@@ -678,6 +680,7 @@ const editorState = {
     schemaVersion: 1,
     status: 'empty',
     mode: 'source',
+    sourceFile: null,
     sourceImage: null,
     sourceImageData: null,
     preparedImageData: null,
@@ -715,7 +718,7 @@ const editorState = {
 - Dither Editor 頁面在 app menu 切到 `Web Setting`、`About`、`Help` 或其他頁面再切回來時，必須保留 editor state、圖片與目前 preview。此保留屬於頁面模組層級的 in-memory state cache，不是 IndexedDB 持久化。
 - `page.js` 在 `unmount()` 時應保存目前 `controller.state`；下次 `mount()` 時應把保存的 state 以 `initialState` 傳回 controller。第一次進入 Dither Editor 且沒有 cached state 時，必須停在 `source` group 且沒有來源圖片，不可自動建立 `New Image`。
 - 若切頁時狀態停在 `loading-image`、`processing-preview` 或 `exporting` 這類 transient status，回到 Dither Editor 時應正規化或重新排 preview，避免畫面卡在不可完成的中間狀態。
-- 若未來重新加入 workspace 持久化並需要載入舊文件，已不存在的 feature settings 不可讓頁面 crash；應由 migration 忽略、保留到 unknown 區，或交給對應 feature 處理。
+- 可攜式 workspace 只透過使用者明確匯出／匯入的 `.dither.png` 保存，不寫入 browser storage。已不存在或版本不支援的 feature settings 不可讓頁面 crash；目前 schema v1 採拒絕載入並顯示版本／功能不支援，日後加入 migration 後才可轉換。
 
 ### Editor Mode State Machine
 
@@ -1008,12 +1011,28 @@ pipeline 順序也必須由 enabled features 的 `pipelineStage` 與 `pipelineOr
 
 ### Feature Migration
 
-若未來重新加入 workspace 持久化，migration 可以分兩層：
+可攜式 workspace migration 分兩層：
 
 - 全域 migration 負責 `schemaVersion` 與 state shape。
 - feature migration 負責該 feature 自己的 settings。
 
-如果舊資料包含已停用或不存在的 feature settings，預設不應套用到 UI，也不應讓 preview/export crash。需要保留資料時，可以放進 unknown settings 區，等該 feature 重新啟用後再由 `migrateSettings()` 處理。
+每份文件同時帶全域 `schemaVersion`、`rendererVersion` 與各 feature 的 `version`。目前只接受 schema v1／feature v1，未知新版必須 fail closed；加入新版時須保留逐版 migration、不可猜測未知欄位語意。舊資料含已停用或不存在的 feature settings 時，預設不套用到 UI，也不得讓 preview/export crash。
+
+## 可攜式圖片設定檔
+
+`src/core/storage/project-file.js` 負責容器、PNG chunk、CRC 與基礎內容驗證；`src/pages/dither-editor/project-workspace.js` 負責 editor state manifest、feature version/settings 驗證與 restore candidate。匯入必須先完整驗證並算出結果，成功後才一次替換目前 state，避免半套用。
+
+匯出檔名固定為 `<safe-base>.dither.png`，但匯入不得要求檔名維持不變。容器是標準 PNG，IDAT 保存正式 pipeline 的最終結果，讓一般 PC 圖片檢視器直接看到 dither 後畫面；IEND 前加入三個私有 ancillary chunks：
+
+- `diMF`: UTF-8 JSON manifest，保存 format id、schema/renderer/feature versions、來源 metadata、尺寸、pipeline、feature settings 與 render context。
+- `diOR`: 使用者載入的原始 PNG/JPEG/WebP bytes，用於匯入後檢視未處理原圖。
+- `diWK`: lossless PNG 工作圖，用於確定性地重建目前 pipeline。
+
+所有 Browse、drop 與隱藏 file input 都必須進入 `controller.loadFile()`：一般 PNG/JPEG/WebP 走 image loader；任何帶有 project chunks 的 PNG 都走 project restore，包括 `.dither(1).png` 或其他重新命名檔案。不得只依 `File.type` 或檔名 suffix 判斷。
+
+讀取限制為整檔 64 MiB、原圖 50 MiB、manifest 256 KiB；必須驗證 PNG signature/chunk 邊界/IHDR/IEND/CRC、必要 project chunks 唯一性、JSON 深度與安全 key、format/schema、來源 magic/MIME/byte length、工作圖與外層結果尺寸，以及 pipeline/feature id、版本和 setting 範圍。`.dither.png` 缺資料、未知版本或驗證失敗都拒絕，不回退成一般圖片；有效 project chunks 不因匯入檔名改變而拒絕。
+
+匯出開始時須先建立 state snapshot，再由 snapshot 重跑 pipeline、建立 manifest 與工作圖，避免編碼期間的 UI 變更造成資料不一致。此流程只使用本機 Canvas/Blob/download，不查詢也不呼叫裝置，因此 E-paper target 已確認後，即使裝置暫時離線或在 cooldown 仍可使用。Standalone target 必須隱藏該 action，但仍能自動匯入有效 `.dither.png`。
 
 ## ESP32 裝置整合
 
@@ -1078,6 +1097,7 @@ src/device/
 
 - `device-live` 仍只擁有 connection truth；`device-epaper` 在 online 後 probe `GET /api/epaper`，驗證固定 800×480、EPDIMG、192,040 bytes、六個 color codes 與必要 capabilities。
 - Target state 與 connection state 分離。Capability 一旦在 session 內確認，offline 不清除 target，只禁止 operation；reconnect 後重抓 capability/status。
+- E-paper editor action 區第一顆按鈕為「繪製到電子紙」，使用正規化為 24×24/currentColor/aria-hidden 的 `credit-card-edit-svgrepo-com.svg`；第二顆為相同 primary 樣式的純本機「下載圖片專案」，沿用 `export-download.svg`。後者不綁 `can_draw`、cooldown 或 online，但仍須有合法 edit state；執行時維持固定文案並暫時 disabled，不轉為 Cancel。
 - E-paper target policy 擁有尺寸到方向的單一規則：使用 image loader 回傳的 `originalSize`，`height > width` 對應 `3-5`，其餘（含正方形或無有效圖片尺寸）對應 `5-3`。Crop `onImageLoaded` 僅在 capability 已確認時於幾何正規化前套用；若 capability 晚到，target policy 只在目前比例不是合法 `5-3`／`3-5` 時套用並呼叫既有 Crop normalize。合法比例視為使用者選擇，不得在後續 sync 覆寫。Resize 再由相同 orientation 固定成 800×480 或 480×800。
 - `device-epaper` 擁有 cached status、operation run id、polling、blocking state、phase progress與 cooldown deadline。Editor 與 test page 只能訂閱 snapshot及呼叫公開 operation method。
 - `device-epaper-calibration` 擁有六色 canonical snapshot。所有對外 colors 都 deep copy；只有 response 通過固定 id/code、channel integer/range 與 duplicate RGB 驗證後才發布。`revision` 只在 RGB 真正改變時遞增；較舊 GET 不得覆蓋較新的 save/reset，斷線或 request failure 保留最後 canonical。

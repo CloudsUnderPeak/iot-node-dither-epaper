@@ -404,11 +404,17 @@
 
     // 將 editor status 轉成 header 狀態文字。
     function statusText(state) {
+        if (state.status === 'exporting-project') {
+            return t('statusExportingProject');
+        }
         if (state.status === 'processing-preview') {
             return t('statusProcessing');
         }
         if (state.status === 'exported') {
             return t('statusExported');
+        }
+        if (state.status === 'project-exported') {
+            return t('statusProjectExported');
         }
         if (state.status === 'empty') {
             return t('statusEmpty');
@@ -436,7 +442,8 @@
     // 還原頁面時把 loading/exporting 這類暫態狀態轉成可顯示狀態。
     function normalizeCachedStatus(state) {
         // 切頁時若剛好在 transient 狀態，回來時不能卡在 loading/exporting。
-        if (state.status === 'loading-image' || state.status === 'exporting' || state.status === 'processing-preview') {
+        if (state.status === 'loading-image' || state.status === 'exporting'
+            || state.status === 'exporting-project' || state.status === 'processing-preview') {
             state.status = state.previewImageData ? 'preview-ready' : 'ready';
         }
     }

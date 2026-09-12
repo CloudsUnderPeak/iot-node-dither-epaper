@@ -32,6 +32,7 @@ Server/GitHub Pages 會直接讀取被選中的圖片。產生出的 `assets/dem
 - 選擇或微調圖片使用的顏色。
 - 套用 dithering，預覽圖片在有限顏色下的呈現效果。
 - 將處理後結果匯出為 PNG。
+- 偵測到電子紙裝置時，可在裝置離線或冷卻期間匯出有版本的 `.dither.png` 圖片設定檔；PC 圖片檢視器看到的是 dither 後結果，重新匯入則能還原原圖與編輯設定。
 
 ## 說明中心
 
@@ -45,4 +46,4 @@ python3 tools/help-validate/run.py
 
 ## 支援匯入格式
 
-目前支援上傳 PNG、JPEG/JPG 與 WebP 格式的圖片。
+目前支援上傳 PNG、JPEG/JPG、WebP 與本程式的 `.dither.png` 圖片專案。所有上傳入口會依內容自動分流，瀏覽器重新命名成 `.dither(1).png` 仍可載入，並在還原前驗證內嵌資料。

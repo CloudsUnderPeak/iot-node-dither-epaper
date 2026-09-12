@@ -1176,6 +1176,7 @@ body.is-sorting * {
 
 .export-action {
     display: grid;
+    gap: 8px;
     margin-top: 2px;
 }
 

@@ -3,7 +3,7 @@
     // 只允許 PNG / JPEG / WebP，是為了讓後續 canvas 演算法流程穩定可預期。
     var DEMO_IMAGE_MANIFEST_SCRIPT = 'assets/demo/demo-manifest.js';
     var DEMO_IMAGE_DATA_SCRIPT = 'assets/demo/demo-data.js';
-    var ACCEPTED_IMAGE_TYPES = 'image/png,image/jpeg,image/webp';
+    var ACCEPTED_IMAGE_TYPES = 'image/png,image/jpeg,image/webp,.dither.png';
     var SUPPORTED_IMAGE_TYPES = {
         'image/png': true,
         'image/jpeg': true,
@@ -120,7 +120,34 @@
         } catch (error) {
             return Promise.reject(error);
         }
-        return blobToImageData(file, maxLongEdge);
+        return blobToImageData(file, maxLongEdge).then(function (result) {
+            result.sourceFile = {
+                blob: file,
+                fileName: file.name || 'Untitled',
+                mimeType: normalizedImageMimeType(file.type, file.name)
+            };
+            return result;
+        });
+    }
+
+    function imageMimeTypeFromName(name) {
+        name = String(name || '').toLowerCase();
+        if (name.endsWith('.jpg') || name.endsWith('.jpeg')) {
+            return 'image/jpeg';
+        }
+        if (name.endsWith('.webp')) {
+            return 'image/webp';
+        }
+        return 'image/png';
+    }
+
+    function normalizedImageMimeType(type, name) {
+        type = String(type || '').toLowerCase();
+        return SUPPORTED_IMAGE_TYPES[type] ? type : imageMimeTypeFromName(name);
+    }
+
+    function loadWorkingImage(blob, maxLongEdge) {
+        return blobToImageData(blob, maxLongEdge);
     }
 
     function loadDemoManifest() {
@@ -148,7 +175,18 @@
                 if (!embeddedDemo || !embeddedDemo.dataUrl) {
                     throw loaderError('demo-data-missing', 'Demo image data asset is missing.');
                 }
-                return loadDataUrlImage(embeddedDemo.dataUrl, maxLongEdge);
+                return fetch(embeddedDemo.dataUrl)
+                    .then(function (response) { return response.blob(); })
+                    .then(function (blob) {
+                        return blobToImageData(blob, maxLongEdge).then(function (result) {
+                            result.sourceFile = {
+                                blob: blob,
+                                fileName: demoImage.fileName,
+                                mimeType: normalizedImageMimeType(blob.type, demoImage.fileName)
+                            };
+                            return result;
+                        });
+                    });
             });
     }
 
@@ -165,10 +203,14 @@
                 return response.blob();
             })
             .then(function (blob) {
-                return blobToImageData(blob, maxLongEdge);
-            })
-            .catch(function () {
-                return imageUrlToImageData(demoImage.url, maxLongEdge);
+                return blobToImageData(blob, maxLongEdge).then(function (result) {
+                    result.sourceFile = {
+                        blob: blob,
+                        fileName: demoImage.fileName,
+                        mimeType: normalizedImageMimeType(blob.type, demoImage.fileName)
+                    };
+                    return result;
+                });
             });
     }
 
@@ -205,6 +247,7 @@
         acceptedImageTypes: ACCEPTED_IMAGE_TYPES,
         isSupportedImageFile: isSupportedImageFile,
         loadImageFromFile: loadImageFromFile,
+        loadWorkingImage: loadWorkingImage,
         loadDemoImage: loadDemoImage,
         createBlankImage: createBlankImage
     };

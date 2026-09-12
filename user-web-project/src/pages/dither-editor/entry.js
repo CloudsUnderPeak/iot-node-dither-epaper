@@ -37,6 +37,7 @@
         'src/pages/dither-editor/operations/pipeline-runner.js',
         'src/pages/dither-editor/editor-mode-state-machine.js',
         'src/pages/dither-editor/state.js',
+        'src/pages/dither-editor/project-workspace.js',
         'src/pages/dither-editor/viewport/viewport-renderer.js',
         'src/pages/dither-editor/viewport/overlay-renderer.js',
         'src/pages/dither-editor/viewport/pointer-mapper.js',

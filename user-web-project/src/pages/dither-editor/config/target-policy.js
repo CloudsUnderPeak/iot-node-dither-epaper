@@ -178,8 +178,9 @@
         if (app.device.epaper.isSupported()) {
             return force(state);
         }
-        if (!state.target) {
+        if (!state.target || state.target.mode !== 'standalone') {
             state.target = { mode: 'standalone' };
+            return true;
         }
         return false;
     }

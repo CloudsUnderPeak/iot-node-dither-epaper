@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Project file validation</title></head>
+<body>
+<pre id="project-test-json">{"pending":true}</pre>
+<script>window.DitherApp = { core: {} };</script>
+<script src="../../src/core/storage/project-file.js"></script>
+<script>
+(function () {
+    var output = document.getElementById('project-test-json');
+    function fail(error) {
+        output.textContent = JSON.stringify({ error: error && (error.stack || error.message) || String(error) });
+    }
+    function pngBlob(color) {
+        var canvas = document.createElement('canvas');
+        canvas.width = 2;
+        canvas.height = 2;
+        var context = canvas.getContext('2d');
+        context.fillStyle = color;
+        context.fillRect(0, 0, 2, 2);
+        return new Promise(function (resolve) { canvas.toBlob(resolve, 'image/png'); });
+    }
+    Promise.all([pngBlob('#ff0000'), pngBlob('#000000')]).then(function (blobs) {
+        var manifest = {
+            format: DitherApp.core.projectFile.format,
+            schemaVersion: 1,
+            rendererVersion: 1,
+            source: {
+                fileName: 'source.png',
+                mimeType: 'image/png',
+                byteLength: blobs[0].size,
+                originalSize: { width: 2, height: 2 }
+            },
+            working: { width: 2, height: 2, normalizationVersion: 1 },
+            result: { width: 2, height: 2 },
+            editor: { features: {}, pipeline: {} }
+        };
+        return DitherApp.core.projectFile.create(blobs[1], blobs[0], blobs[0], manifest)
+            .then(function (projectBlob) {
+                var file = new File([projectBlob], 'sample.dither.png', { type: 'image/png' });
+                return DitherApp.core.projectFile.classify(file).then(function (route) {
+                    var project = DitherApp.core.projectFile.read(route);
+                    if (route.kind !== 'project' || project.manifest.format !== manifest.format
+                        || project.sourceBlob.size !== blobs[0].size) {
+                        throw new Error('Project round trip did not preserve its data.');
+                    }
+                    return createImageBitmap(projectBlob).then(function (bitmap) {
+                        var canvas = document.createElement('canvas');
+                        canvas.width = bitmap.width;
+                        canvas.height = bitmap.height;
+                        var context = canvas.getContext('2d');
+                        context.drawImage(bitmap, 0, 0);
+                        bitmap.close();
+                        var pixel = context.getImageData(0, 0, 1, 1).data;
+                        if (pixel[0] !== 0 || pixel[1] !== 0 || pixel[2] !== 0) {
+                            throw new Error('Project preview is not the outer result PNG.');
+                        }
+                        return DitherApp.core.projectFile.classify(
+                            new File([blobs[0]], 'plain.png', { type: 'image/png' })
+                        );
+                    })
+                        .then(function (plainRoute) {
+                            if (plainRoute.kind !== 'image') {
+                                throw new Error('Plain PNG was not routed as an image.');
+                            }
+                            return DitherApp.core.projectFile.classify(
+                                new File([projectBlob], 'sample.dither(1).png', { type: 'image/png' })
+                            ).then(function (renamedRoute) {
+                                if (renamedRoute.kind !== 'project') {
+                                    throw new Error('Renamed browser-download project was not routed as a project.');
+                                }
+                            });
+                        })
+                        .then(function () {
+                            return projectBlob.arrayBuffer().then(function (buffer) {
+                                var bytes = new Uint8Array(buffer);
+                                var marker = -1;
+                                for (var index = 0; index <= bytes.length - 4; index += 1) {
+                                    if (bytes[index] === 100 && bytes[index + 1] === 105
+                                        && bytes[index + 2] === 77 && bytes[index + 3] === 70) {
+                                        marker = index;
+                                        break;
+                                    }
+                                }
+                                if (marker < 0 || marker + 4 >= bytes.length) {
+                                    throw new Error('Manifest chunk was not found for corruption test.');
+                                }
+                                bytes[marker + 4] ^= 1;
+                                var corrupt = new File([bytes], 'corrupt.dither.png', { type: 'image/png' });
+                                return DitherApp.core.projectFile.classify(corrupt).then(function (route) {
+                                    try {
+                                        DitherApp.core.projectFile.read(route);
+                                    } catch (error) {
+                                        if (error.code === 'png-corrupt') {
+                                            return;
+                                        }
+                                        throw error;
+                                    }
+                                    throw new Error('Project with a corrupt chunk checksum was accepted.');
+                                });
+                            });
+                        })
+                        .then(function () {
+                            output.textContent = JSON.stringify({ passed: true, bytes: projectBlob.size });
+                        });
+                });
+            });
+    }).catch(fail);
+})();
+</script>
+</body>
+</html>
