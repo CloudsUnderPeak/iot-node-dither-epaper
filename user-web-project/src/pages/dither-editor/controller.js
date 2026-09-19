@@ -179,7 +179,14 @@
         this.state.status = 'loading-image';
         this.state.previewRenderDurationMs = null;
         this.render(this.state);
-        return Promise.resolve().then(function () { return decode(generation); })
+        return Promise.resolve().then(function () {
+            var epaper = app.device && app.device.epaper;
+            var discovery = epaper && epaper.snapshot().discovery;
+            return epaper && (discovery === 'unknown' || discovery === 'probing') ? epaper.probe() : null;
+        }).then(function () {
+            if (!self.isCurrentLoad(generation)) { return; }
+            return decode(generation);
+        })
             .catch(function (error) {
                 if (!self.isCurrentLoad(generation) || error.code === 'job_cancelled') { return; }
                 self.state.status = 'error';
@@ -191,7 +198,7 @@
     DitherEditorController.prototype.loadDemo = function loadDemo() {
         var self = this;
         return this.loadSource(function (generation) {
-            return app.core.imageLoader.loadDemoImage(app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
+            return app.core.imageLoader.loadDemoImage(app.pages.ditherEditor.constants.inputLongEdge())
                 .then(function (result) {
                     if (self.isCurrentLoad(generation)) { self.loadResult(result, result.fileName || 'Demo image'); }
                 });
@@ -204,7 +211,7 @@
             return app.core.projectFile.classify(file).then(function (route) {
                 if (!self.isCurrentLoad(generation)) { return; }
                 if (route.kind === 'project') { return self.restoreProjectRoute(route, generation); }
-                return app.core.imageLoader.loadImageFromFile(file, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
+                return app.core.imageLoader.loadImageFromFile(file, app.pages.ditherEditor.constants.inputLongEdge())
                     .then(function (result) {
                         if (self.isCurrentLoad(generation)) { self.loadResult(result, file.name); }
                     });
@@ -220,7 +227,7 @@
     DitherEditorController.prototype.restoreProjectRoute = function (route, generation) {
         var self = this;
         var project = app.core.projectFile.read(route);
-        return app.core.imageLoader.loadWorkingImage(project.workingBlob, app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE)
+        return app.core.imageLoader.loadWorkingImage(project.workingBlob, app.pages.ditherEditor.constants.inputLongEdge())
             .then(function (workingResult) {
                 if (!self.isCurrentLoad(generation)) { return; }
                 return self.jobs.heavy(function (job) {
@@ -723,6 +730,7 @@
         this.runFeatureHook('onBeforeExport', {});
         var snapshot = app.pages.ditherEditor.projectWorkspace.snapshot(this.state);
         var outputPalette = app.pages.ditherEditor.targetPolicy.displayColors();
+        var outputTarget = app.device.epaper.snapshot().target;
         return app.device.epaper.beginOperation('upload', 'preflight')
             .then(function (operationId) {
                 try { job.check(); } catch (error) {
@@ -739,12 +747,12 @@
                         app.device.epaper.setClientStage(operationId, 'encoding');
                         var outputImageData = app.pages.ditherEditor.targetPolicy.outputImageData(imageData, outputPalette);
                         self.state.outputImageData = outputImageData;
-                        return app.core.epdimgEncoder.encode(outputImageData);
+                        return app.core.epdimgEncoder.encode(outputImageData, outputTarget);
                     })
                     .then(function (encoded) {
                         job.check();
                         submitted = true;
-                        return app.device.epaper.submitUpload(operationId, encoded.payload);
+                        return app.device.epaper.submitUpload(operationId, encoded.payload, outputTarget, function () { job.check(); });
                     })
                     .then(function () {
                         job.check();

@@ -3,14 +3,24 @@
     var epTimers = [];
     var epRequests = 0;
     var epStatus = { state: 'cooldown', retry_after_seconds: 0, can_draw: false, can_upload: false };
-    var epApp = { app: { state: {} }, i18n: { t: function (key) { return key; } }, device: {
+    function panelCapability(width, height) {
+        var size = 40 + width * height / 2;
+        return { panel: { model: 'test-panel', width: width, height: height, colors: 6, color_codes: [0,1,2,3,5,6] },
+            image: { format: 'epdimg', header_bytes: 40, frame_bytes: size - 40, upload_bytes: size,
+                upload_uncompressed_bytes: size, stored_encoding: 'gzip', upload_encodings: ['gzip'], max_compressed_bytes: size + Math.floor(size / 100) + 2048 },
+            capabilities: { upload: true, refresh: true } };
+    }
+    var epCapability = panelCapability(800, 480);
+    var epWindow;
+    var epApp = { core: {}, app: { state: {} }, i18n: { t: function (key) { return key; } }, device: {
         live: { state: function () { return 'online'; }, subscribe: function () { return function () {}; } },
         api: { resources: {
-            epaperCapabilities: function () { return Promise.resolve({ panel: { width: 800, height: 480, colors: 6, color_codes: [0, 1, 2, 3, 5, 6] }, image: { format: 'epdimg', header_bytes: 40, frame_bytes: 192000, upload_bytes: 192040 }, capabilities: { upload: true, refresh: true } }); },
+            epaperCapabilities: function () { return Promise.resolve(epCapability); },
             epaperStatus: function () { epRequests++; return Promise.resolve(epStatus); }
         } }
     } };
-    harness.execute('device/device-epaper.js', { window: {
+    harness.execute('core/encoders/epaper-target.js', { window: { DitherApp: epApp } });
+    harness.execute('device/device-epaper.js', { window: epWindow = {
         DitherApp: epApp,
         setInterval: function (fn, ms) { epTimers.push({ fn: fn, ms: ms }); return epTimers.length; },
         clearInterval: function () {},
@@ -401,15 +411,80 @@
     realApp.device.epaperCalibration.colors = originalColors;
     var epdImage = new ImageData(800, 480);
     for (var epdOffset = 3; epdOffset < epdImage.data.length; epdOffset += 4) { epdImage.data[epdOffset] = 255; }
-    var encoded = realApp.core.epdimgEncoder.encode(epdImage);
+    var encoded = realApp.core.epdimgEncoder.encode(epdImage, realApp.core.epaperTarget.geometry(800, 480));
     var header = new DataView(encoded.payload.buffer);
     harness.assert(encoded.payload.length === 192040 && header.getUint32(12, true) === 40 && header.getUint32(16, true) === 800 && header.getUint32(20, true) === 480, 'EPDIMG v1 dimensions/length');
     harness.assert(header.getUint32(28, true) === 0x91875ccc && (header.getUint32(32, true) !== 0 || header.getUint32(36, true) !== 0), 'EPDIMG independent CRC and generation');
     epdImage.data[0] = 42;
-    rejects(function () { realApp.core.epdimgEncoder.encode(epdImage); }, 'EPDIMG palette rejects unsupported RGB');
+    rejects(function () { realApp.core.epdimgEncoder.encode(epdImage, realApp.core.epaperTarget.geometry(800, 480)); }, 'EPDIMG palette rejects unsupported RGB');
     epdImage.data[0] = 0; epdImage.data[3] = 0;
-    rejects(function () { realApp.core.epdimgEncoder.encode(epdImage); }, 'EPDIMG rejects alpha');
+    rejects(function () { realApp.core.epdimgEncoder.encode(epdImage, realApp.core.epaperTarget.geometry(800, 480)); }, 'EPDIMG rejects alpha');
     passed.push('W02 palette snapshot; W07 EPDIMG header/CRC/palette/alpha boundary');
+    // Runtime geometry is shared by policy, crop registry, input sizing and encoder.
+    var actualEpaper = realApp.device.epaper;
+    realApp.device.epaper = epApp.device.epaper;
+    for (var dimensions of [[800,480], [1600,1200], [1000,600], [1000,1000], [1000,700]]) {
+        epCapability = panelCapability(dimensions[0], dimensions[1]);
+        harness.assert(await epApp.device.epaper.probe(), 'alternate capability accepted');
+        var target = epApp.device.epaper.snapshot().target;
+        harness.assert(Object.isFrozen(target) && Object.isFrozen(epApp.device.epaper.snapshot().capabilities.panel), 'capability snapshot cannot be mutated');
+        var targetState = realEditor.state.create();
+        realEditor.targetPolicy.sync(targetState);
+        harness.assert(targetState.settings.resize.width === target.width && targetState.settings.resize.height === target.height, 'landscape resize follows capability');
+        targetState.settings.crop.aspectRatioId = target.portraitRatioId;
+        realEditor.targetPolicy.sync(targetState);
+        harness.assert(targetState.settings.resize.width === target.height && targetState.settings.resize.height === target.width, 'portrait resize follows capability');
+        harness.assert(realEditor.cropGeometry.ratios.filter(function (ratio) { return ratio.id === target.landscapeRatioId; }).length === 1, 'ratio registration deduplicates square and existing ratios');
+        harness.assert(realEditor.constants.inputLongEdge() >= Math.max(target.width, target.height), 'input limit covers panel');
+        harness.assert(!realEditor.targetPolicy.settingAllowed(targetState, 'crop', 'aspectRatioId', '16-9'), 'device rejects unrelated crop ratio');
+    }
+    epCapability = panelCapability(1600,1200);
+    await epApp.device.epaper.probe();
+    var largeTarget = epApp.device.epaper.snapshot().target;
+    harness.assert(largeTarget.landscapeRatioId === '4-3' && largeTarget.portraitRatioId === '3-4', 'large panel ratios');
+    var portrait = new ImageData(1200,1600);
+    for (var alpha = 3; alpha < portrait.data.length; alpha += 4) { portrait.data[alpha] = 255; }
+    portrait.data.set([255,0,0,255], ((1599 * 1200) * 4));
+    portrait.data.set([0,0,255,255], ((1598 * 1200) * 4));
+    portrait.data.set([0,255,0,255], ((0 * 1200 + 1199) * 4));
+    var largeEncoded = realApp.core.epdimgEncoder.encode(portrait, largeTarget);
+    var largeHeader = new DataView(largeEncoded.payload.buffer);
+    harness.assert(largeEncoded.rotated && largeEncoded.payload.length === 960040 && largeHeader.getUint32(24,true) === 960000, 'large EPDIMG size');
+    harness.assert(largeHeader.getUint32(16,true) === 1600 && largeHeader.getUint32(20,true) === 1200, 'large header dimensions');
+    harness.assert(largeEncoded.payload[40] === 0x35 && (largeEncoded.payload[largeEncoded.payload.length - 1] & 15) === 6, 'portrait clockwise corners and adjacent pixels');
+    for (var invalidDimensions of [[0,2], [3,2], [65536,2], [Infinity,2], [4098,2]]) {
+        rejects(function () { realApp.core.epaperTarget.geometry(invalidDimensions[0], invalidDimensions[1]); }, 'invalid geometry rejected');
+    }
+    var uploads = [], refreshes = 0;
+    epApp.device.api.resources.epaperUpload = function (body) {
+        uploads.push(body); return Promise.resolve({state: 'queued'});
+    };
+    epApp.device.api.resources.epaperRefresh = function () { refreshes++; return Promise.resolve({}); };
+    epStatus = { state: 'idle', can_draw: true, can_upload: true, last_operation: { result: 'success' } };
+    var operation = await epApp.device.epaper.beginOperation('upload');
+    var noGzip = await epApp.device.epaper.submitUpload(operation, largeEncoded.payload, largeTarget).then(function () { return ''; }, function (error) { return error.code; });
+    harness.assert(noGzip === 'gzip_unavailable' && uploads.length === 0, 'missing CompressionStream blocks request');
+    epWindow.CompressionStream = window.CompressionStream;
+    operation = await epApp.device.epaper.beginOperation('upload');
+    await epApp.device.epaper.submitUpload(operation, largeEncoded.payload, largeTarget);
+    harness.assert(uploads.length === 1 && uploads[0] instanceof Blob && uploads[0].size < largeEncoded.payload.length && refreshes === 0, 'one known-size compressed body, no extra refresh');
+    var inflated = new Uint8Array(await new Response(uploads[0].stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    harness.assert(inflated.length === largeEncoded.payload.length && inflated.every(function (value,index) { return value === largeEncoded.payload[index]; }), 'gzip round trip preserves EPDIMG');
+    operation = await epApp.device.epaper.beginOperation('upload');
+    var mismatch = await epApp.device.epaper.submitUpload(operation, new Uint8Array(192040), largeTarget).catch(function (error) { return error.code; });
+    harness.assert(mismatch === 'invalid_epaper_image' && uploads.length === 1, 'wrong logical size rejected');
+    operation = await epApp.device.epaper.beginOperation('upload');
+    var cancelledGzip = await epApp.device.epaper.submitUpload(operation, largeEncoded.payload, largeTarget, function () { var error = new Error('cancelled'); error.code = 'job_cancelled'; throw error; }).catch(function (error) { return error.code; });
+    harness.assert(cancelledGzip === 'job_cancelled' && uploads.length === 1, 'route disposal during gzip cannot send stale upload');
+    epCapability.image.upload_encodings = [];
+    harness.assert(!await epApp.device.epaper.probe() && !epApp.device.epaper.isSupported(), 'unsupported encoding revokes upload capability');
+    realApp.device.epaper = actualEpaper;
+    var originalFetch = window.fetch, uploadInit;
+    window.fetch = function (url, init) { uploadInit = init; return Promise.resolve(new Response(JSON.stringify({success:true,data:{state:'queued'}}), {status:202})); };
+    await realApp.device.api.resources.epaperUpload(uploads[0]);
+    window.fetch = originalFetch;
+    harness.assert(uploadInit.headers['Content-Encoding'] === 'gzip' && !Object.keys(uploadInit.headers).some(function (key) { return key.toLowerCase() === 'content-length'; }), 'gzip request header and browser-owned Content-Length');
+    passed.push('E-paper alternate geometry, crop, portrait, immutable target, gzip capability/roundtrip/cancellation/transport');
     realApp.core.imageLoader.loadDemoImage = originalDemoLoader;
     var fileDemo = await originalDemoLoader(800);
     harness.assert(fileDemo.imageData.width > 0 && fileDemo.sourceFile.blob.size > 0, 'source file demo and original Blob');

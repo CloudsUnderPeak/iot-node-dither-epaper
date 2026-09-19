@@ -118,7 +118,9 @@ class UserDataStorage {
                              void *context);
   UserDataFileResult deleteFile(const char *name);
 
-  UserDataDownloadBegin beginDownload(const char *name, const char *rangeHeader);
+  UserDataDownloadBegin beginDownload(const char *name, const char *rangeHeader,
+                                      bool retainAtEof = false);
+  bool rewindDownload(uint32_t sessionId);
   UserDataReadResult readDownload(uint32_t sessionId,
                                   uint8_t *buffer,
                                   size_t bufferLength);
@@ -158,6 +160,7 @@ class UserDataStorage {
   size_t receivedBytes_ = 0;
   size_t operationLimitBytes_ = 0;
   size_t downloadRemaining_ = 0;
+  bool retainDownloadAtEof_ = false;
   bool replacingTarget_ = false;
   char targetPath_[sizeof("/files/") + UserFilePolicy::kMaxFilenameBytes]{};
 

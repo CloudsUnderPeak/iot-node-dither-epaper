@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import struct
 import sys
@@ -16,11 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
-WIDTH = 800
-HEIGHT = 480
 HEADER_BYTES = 40
-FRAME_BYTES = WIDTH * HEIGHT // 2
-UPLOAD_BYTES = HEADER_BYTES + FRAME_BYTES
 MAGIC = b"EPDIMG\x00\x00"
 VERSION = 1
 
@@ -50,6 +47,59 @@ class ApiError(ToolError):
 
 
 @dataclass(frozen=True)
+class Geometry:
+    width: int
+    height: int
+
+    def __post_init__(self):
+        if (type(self.width) is not int or type(self.height) is not int
+                or not 0 < self.width <= 4096 or not 0 < self.height <= 4096
+                or self.width % 2):
+            raise ToolError("invalid packed panel dimensions (positive, even width, at most 4096)")
+
+    @property
+    def frame_bytes(self) -> int:
+        return self.width * self.height // 2
+
+    @property
+    def image_bytes(self) -> int:
+        return HEADER_BYTES + self.frame_bytes
+
+    @classmethod
+    def from_capabilities(cls, data: dict[str, Any]) -> Geometry:
+        try:
+            panel, image, actions = data["panel"], data["image"], data["capabilities"]
+            geometry = cls(panel["width"], panel["height"])
+            codes = panel["color_codes"]
+            valid = (isinstance(panel["model"], str) and panel["model"].strip()
+                     and type(panel["colors"]) is int and panel["colors"] == 6
+                     and isinstance(codes, list)
+                     and all(type(code) is int for code in codes)
+                     and sorted(codes) == [0, 1, 2, 3, 5, 6]
+                     and image["format"] == "epdimg" and image["header_bytes"] == HEADER_BYTES
+                     and image["frame_bytes"] == geometry.frame_bytes
+                     and image["upload_bytes"] == geometry.image_bytes
+                     and image["upload_uncompressed_bytes"] == geometry.image_bytes
+                     and image["stored_encoding"] == "gzip"
+                     and isinstance(image["upload_encodings"], list)
+                     and "gzip" in image["upload_encodings"]
+                     and type(image["max_compressed_bytes"]) is int
+                     and 0 < image["max_compressed_bytes"] <= geometry.image_bytes * 2 + 2048
+                     and actions["upload"] is True and actions["refresh"] is True)
+            if valid:
+                return geometry
+        except (KeyError, TypeError, ValueError):
+            pass
+        raise ToolError("unsupported or inconsistent e-paper capability")
+
+
+# Explicit offline conversion defaults; connected operations use capabilities.
+OFFLINE_GEOMETRY = Geometry(800, 480)
+WIDTH, HEIGHT = OFFLINE_GEOMETRY.width, OFFLINE_GEOMETRY.height
+FRAME_BYTES, UPLOAD_BYTES = OFFLINE_GEOMETRY.frame_bytes, OFFLINE_GEOMETRY.image_bytes
+
+
+@dataclass(frozen=True)
 class ConvertedImage:
     payload: bytes
     generation: int
@@ -67,19 +117,19 @@ def _pillow() -> tuple[Any, Any]:
     return Image, ImageOps
 
 
-def _orient_for_panel(image: Any, Image: Any, auto_rotate: bool) -> Any:
+def _orient_for_panel(image: Any, Image: Any, auto_rotate: bool, geometry: Geometry = OFFLINE_GEOMETRY) -> Any:
     """Rotate a portrait source clockwise when the target panel is landscape."""
-    if auto_rotate and image.height > image.width and WIDTH > HEIGHT:
+    if auto_rotate and image.height > image.width and geometry.width > geometry.height:
         return image.transpose(Image.Transpose.ROTATE_270)
     return image
 
 
-def _prepare_rgb(path: Path, fit: str, auto_rotate: bool) -> Any:
+def _prepare_rgb(path: Path, fit: str, auto_rotate: bool, geometry: Geometry) -> Any:
     Image, ImageOps = _pillow()
     try:
         with Image.open(path) as opened:
             image = ImageOps.exif_transpose(opened)
-            image = _orient_for_panel(image, Image, auto_rotate)
+            image = _orient_for_panel(image, Image, auto_rotate, geometry)
             if image.mode in ("RGBA", "LA") or "transparency" in image.info:
                 rgba = image.convert("RGBA")
                 white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
@@ -89,16 +139,16 @@ def _prepare_rgb(path: Path, fit: str, auto_rotate: bool) -> Any:
 
             resampling = Image.Resampling.LANCZOS
             if fit == "cover":
-                return ImageOps.fit(image, (WIDTH, HEIGHT), method=resampling)
+                return ImageOps.fit(image, (geometry.width, geometry.height), method=resampling)
             if fit == "stretch":
-                return image.resize((WIDTH, HEIGHT), resampling)
+                return image.resize((geometry.width, geometry.height), resampling)
             if fit != "contain":
                 raise ToolError(f"unsupported fit mode: {fit}")
-            contained = ImageOps.contain(image, (WIDTH, HEIGHT), method=resampling)
-            canvas = Image.new("RGB", (WIDTH, HEIGHT), (255, 255, 255))
+            contained = ImageOps.contain(image, (geometry.width, geometry.height), method=resampling)
+            canvas = Image.new("RGB", (geometry.width, geometry.height), (255, 255, 255))
             canvas.paste(
                 contained,
-                ((WIDTH - contained.width) // 2, (HEIGHT - contained.height) // 2),
+                ((geometry.width - contained.width) // 2, (geometry.height - contained.height) // 2),
             )
             return canvas
     except (OSError, ValueError) as exc:
@@ -119,34 +169,34 @@ def _codes_without_dither(pixels: Iterable[Sequence[int]]) -> bytearray:
     return bytearray(_nearest(pixel)[0] for pixel in pixels)
 
 
-def _codes_with_floyd_steinberg(pixels: Sequence[Sequence[int]]) -> bytearray:
-    output = bytearray(WIDTH * HEIGHT)
-    current = [[0.0, 0.0, 0.0] for _ in range(WIDTH + 2)]
-    following = [[0.0, 0.0, 0.0] for _ in range(WIDTH + 2)]
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            source = pixels[y * WIDTH + x]
+def _codes_with_floyd_steinberg(pixels: Sequence[Sequence[int]], geometry: Geometry) -> bytearray:
+    output = bytearray(geometry.width * geometry.height)
+    current = [[0.0, 0.0, 0.0] for _ in range(geometry.width + 2)]
+    following = [[0.0, 0.0, 0.0] for _ in range(geometry.width + 2)]
+    for y in range(geometry.height):
+        for x in range(geometry.width):
+            source = pixels[y * geometry.width + x]
             adjusted = [
                 min(255.0, max(0.0, source[channel] + current[x + 1][channel]))
                 for channel in range(3)
             ]
             code, chosen = _nearest(adjusted)
-            output[y * WIDTH + x] = code
+            output[y * geometry.width + x] = code
             error = [adjusted[channel] - chosen[channel] for channel in range(3)]
             for channel in range(3):
                 current[x + 2][channel] += error[channel] * 7.0 / 16.0
                 following[x][channel] += error[channel] * 3.0 / 16.0
                 following[x + 1][channel] += error[channel] * 5.0 / 16.0
                 following[x + 2][channel] += error[channel] * 1.0 / 16.0
-        current, following = following, [[0.0, 0.0, 0.0] for _ in range(WIDTH + 2)]
+        current, following = following, [[0.0, 0.0, 0.0] for _ in range(geometry.width + 2)]
     return output
 
 
-def pack_codes(codes: Sequence[int]) -> bytes:
-    if len(codes) != WIDTH * HEIGHT:
-        raise ToolError(f"expected {WIDTH * HEIGHT} pixels, got {len(codes)}")
+def pack_codes(codes: Sequence[int], geometry: Geometry = OFFLINE_GEOMETRY) -> bytes:
+    if len(codes) != geometry.width * geometry.height:
+        raise ToolError(f"expected {geometry.width * geometry.height} pixels, got {len(codes)}")
     valid = {code for code, _ in COLORS}
-    frame = bytearray(FRAME_BYTES)
+    frame = bytearray(geometry.frame_bytes)
     for index in range(0, len(codes), 2):
         left = codes[index]
         right = codes[index + 1]
@@ -156,9 +206,9 @@ def pack_codes(codes: Sequence[int]) -> bytes:
     return bytes(frame)
 
 
-def build_epdimg(frame: bytes, generation: int | None = None) -> ConvertedImage:
-    if len(frame) != FRAME_BYTES:
-        raise ToolError(f"expected {FRAME_BYTES} frame bytes, got {len(frame)}")
+def build_epdimg(frame: bytes, generation: int | None = None, geometry: Geometry = OFFLINE_GEOMETRY) -> ConvertedImage:
+    if len(frame) != geometry.frame_bytes:
+        raise ToolError(f"expected {geometry.frame_bytes} frame bytes, got {len(frame)}")
     if generation is None:
         generation = time.time_ns() & 0xFFFFFFFFFFFFFFFF
     if generation <= 0 or generation > 0xFFFFFFFFFFFFFFFF:
@@ -169,14 +219,14 @@ def build_epdimg(frame: bytes, generation: int | None = None) -> ConvertedImage:
         MAGIC,
         VERSION,
         HEADER_BYTES,
-        WIDTH,
-        HEIGHT,
-        FRAME_BYTES,
+        geometry.width,
+        geometry.height,
+        geometry.frame_bytes,
         crc32,
         generation,
     )
     payload = header + frame
-    if len(payload) != UPLOAD_BYTES:
+    if len(payload) != geometry.image_bytes:
         raise AssertionError("internal EPDIMG size mismatch")
     return ConvertedImage(payload=payload, generation=generation, crc32=crc32)
 
@@ -188,17 +238,18 @@ def convert_image(
     dither: str = "floyd-steinberg",
     auto_rotate: bool = True,
     generation: int | None = None,
+    geometry: Geometry = OFFLINE_GEOMETRY,
 ) -> ConvertedImage:
-    image = _prepare_rgb(path, fit, auto_rotate)
+    image = _prepare_rgb(path, fit, auto_rotate, geometry)
     flattened = getattr(image, "get_flattened_data", None)
     pixels = list(flattened() if flattened is not None else image.getdata())
     if dither == "none":
         codes = _codes_without_dither(pixels)
     elif dither == "floyd-steinberg":
-        codes = _codes_with_floyd_steinberg(pixels)
+        codes = _codes_with_floyd_steinberg(pixels, geometry)
     else:
         raise ToolError(f"unsupported dither mode: {dither}")
-    return build_epdimg(pack_codes(codes), generation)
+    return build_epdimg(pack_codes(codes, geometry), generation, geometry)
 
 
 def normalize_base_url(ip: str, port: int, https: bool) -> str:
@@ -226,12 +277,15 @@ class EpaperApiClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.token = token
+        self.panel_capabilities = None
 
-    def _request(self, method: str, path: str, body: bytes | None = None) -> dict[str, Any]:
+    def _request(self, method: str, path: str, body: bytes | None = None, *, encoding: str | None = None) -> dict[str, Any]:
         headers = {"Accept": "application/json"}
         if body is not None:
             headers["Content-Type"] = "application/octet-stream"
             headers["Content-Length"] = str(len(body))
+        if encoding:
+            headers["Content-Encoding"] = encoding
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         request = urllib.request.Request(
@@ -261,15 +315,27 @@ class EpaperApiClient:
         return document
 
     def capabilities(self) -> dict[str, Any]:
-        return self._request("GET", "/api/epaper")
+        document = self._request("GET", "/api/epaper")
+        self.panel_capabilities = document["data"]
+        return document
 
     def status(self) -> dict[str, Any]:
         return self._request("GET", "/api/epaper/status")
 
     def upload(self, payload: bytes) -> dict[str, Any]:
-        if len(payload) != UPLOAD_BYTES:
-            raise ToolError(f"upload must be exactly {UPLOAD_BYTES} bytes")
-        return self._request("POST", "/api/epaper/image", payload)
+        if self.panel_capabilities is None:
+            self.capabilities()
+        geometry = Geometry.from_capabilities(self.panel_capabilities)
+        if len(payload) != geometry.image_bytes:
+            raise ToolError(f"upload must be exactly {geometry.image_bytes} logical bytes")
+        header = struct.unpack("<8sIIIIIIQ", payload[:HEADER_BYTES])
+        if (header[:6] != (MAGIC, VERSION, HEADER_BYTES, geometry.width, geometry.height, geometry.frame_bytes)
+                or not header[7] or header[6] != zlib.crc32(payload[HEADER_BYTES:])):
+            raise ToolError("invalid EPDIMG header or CRC")
+        compressed = gzip.compress(payload, mtime=0)
+        if len(compressed) > self.panel_capabilities["image"]["max_compressed_bytes"]:
+            raise ToolError("compressed image exceeds device upload limit")
+        return self._request("POST", "/api/epaper/image", compressed, encoding="gzip")
 
     def action(self, name: str) -> dict[str, Any]:
         if name not in ("white", "palette", "refresh"):
@@ -310,6 +376,8 @@ def _print_json(document: Any) -> None:
 
 def _add_conversion_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("image", type=Path, help="PNG/JPEG/BMP/WebP or another Pillow image")
+    parser.add_argument("--width", type=int, help="offline width; supply together with --height")
+    parser.add_argument("--height", type=int, help="offline height; supply together with --width")
     parser.add_argument("--fit", choices=("contain", "cover", "stretch"), default="contain")
     parser.add_argument(
         "--no-auto-rotate",
@@ -327,7 +395,7 @@ def _add_conversion_options(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Convert images and control the IOT-Node Dither E-Paper 7.3-inch e-paper API."
+        description="Convert images and control the IOT-Node Dither E-Paper capability-driven API."
     )
     parser.add_argument("--ip", help="device IP/hostname, optionally including http:// or https://")
     parser.add_argument("--port", type=int, default=80, help="HTTP port (default: 80)")
@@ -374,13 +442,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         converted: ConvertedImage | None = None
+        client = None
+        geometry = OFFLINE_GEOMETRY
         if args.command in ("image", "convert"):
+            if (args.width is None) != (args.height is None):
+                raise ToolError("--width and --height must be supplied together")
+            requested = Geometry(args.width, args.height) if args.width is not None else None
+            if args.command == "image" and not args.output_only:
+                client = EpaperApiClient(normalize_base_url(args.ip or "", args.port, args.https),
+                                        timeout=args.timeout, token=args.token)
+                geometry = Geometry.from_capabilities(client.capabilities()["data"])
+                if requested is not None and requested != geometry:
+                    raise ToolError("requested dimensions do not match the device capability")
+            else:
+                geometry = requested or OFFLINE_GEOMETRY
             converted = convert_image(
                 args.image,
                 fit=args.fit,
                 dither=args.dither,
                 auto_rotate=args.auto_rotate,
                 generation=args.generation,
+                geometry=geometry,
             )
             output = args.output
             if args.command == "convert" and output is None:
@@ -390,7 +472,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "source": str(args.image),
                 "output": str(written) if written else None,
                 "upload_bytes": len(converted.payload),
-                "frame_bytes": FRAME_BYTES,
+                "frame_bytes": geometry.frame_bytes,
                 "generation": str(converted.generation),
                 "crc32": f"{converted.crc32:08X}",
             }
@@ -399,7 +481,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
 
         base_url = normalize_base_url(args.ip or "", args.port, args.https)
-        client = EpaperApiClient(base_url, timeout=args.timeout, token=args.token)
+        client = client or EpaperApiClient(base_url, timeout=args.timeout, token=args.token)
         if args.command == "status":
             _print_json(client.status())
             return 0

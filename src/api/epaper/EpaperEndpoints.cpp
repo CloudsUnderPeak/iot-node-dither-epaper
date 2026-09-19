@@ -122,7 +122,9 @@ Api::Response capabilities(const Api::Request &request) {
   if (rejectFields(request, error)) return error;
   JsonDocument data;
   JsonObject panel = data["panel"].to<JsonObject>();
-  panel["model"] = "waveshare-7in3e";
+  panel["model"] = EpaperPanelProfile::kModel;
+  panel["flip_horizontal"] = EpaperPanelProfile::kFlipHorizontal;
+  panel["flip_vertical"] = EpaperPanelProfile::kFlipVertical;
   panel["width"] = EpaperImageFormat::kWidth;
   panel["height"] = EpaperImageFormat::kHeight;
   panel["colors"] = EpaperImageFormat::kPaletteColorCount;
@@ -134,6 +136,10 @@ Api::Response capabilities(const Api::Request &request) {
   image["header_bytes"] = EpaperImageFormat::kHeaderBytes;
   image["frame_bytes"] = EpaperImageFormat::kFrameBytes;
   image["upload_bytes"] = EpaperImageFormat::kImageBytes;
+  image["upload_uncompressed_bytes"] = EpaperImageFormat::kImageBytes;
+  image["max_compressed_bytes"] = EpaperService::kMaxCompressedBytes;
+  image["stored_encoding"] = "gzip";
+  image["upload_encodings"].to<JsonArray>().add("gzip");
   JsonObject refresh = data["refresh"].to<JsonObject>();
   refresh["cpu_mhz"] = CpuFrequencyGuard::kEpaperMhz;
   refresh["cooldown_seconds"] = EpaperCooldown::kDurationMs / 1000U;
@@ -207,6 +213,8 @@ Api::Response metadata(const Api::Request &request,
   data["format"] = "epdimg";
   data["media_type"] = "application/octet-stream";
   data["size_bytes"] = stored.sizeBytes;
+  data["stored_size_bytes"] = stored.storedSizeBytes;
+  data["stored_encoding"] = "gzip";
   data["header_bytes"] = stored.header.headerBytes;
   data["frame_bytes"] = stored.header.frameBytes;
   data["width"] = stored.header.width;
@@ -281,6 +289,8 @@ Api::Response fromServiceResult(const EpaperServiceResult &result,
       }
       return Api::error(409, Api::json(data), result.message);
     }
+    case EpaperServiceStatusCode::PayloadTooLarge:
+      return Api::problem(413, "payload_too_large", result.message);
     case EpaperServiceStatusCode::InvalidImage: {
       JsonDocument data;
       data["code"] = "invalid_epaper_image";

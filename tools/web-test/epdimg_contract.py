@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def build_harness(root: Path, output: Path) -> Path:
-    encoder = (root / 'user-web-project/src/core/encoders/epdimg-encoder.js').read_text()
+    encoder = (root / 'user-web-project/src/core/encoders/epaper-target.js').read_text() + '\n' + (root / 'user-web-project/src/core/encoders/epdimg-encoder.js').read_text()
     harness = output / 'epdimg-consumer.html'
     harness.write_text('''<!doctype html><meta charset="utf-8"><pre id="result">RUNNING</pre>
 <pre id="payload"></pre><script>window.DitherApp={core:{}};</script><script>'''
@@ -15,7 +15,7 @@ try {
   const image = new ImageData(800,480);
   const colors = [[0,0,0],[255,255,255],[255,255,0],[255,0,0],[0,0,255],[0,255,0]];
   for(let pixel=0; pixel<800*480; pixel++) image.data.set([...colors[pixel%6],255],pixel*4);
-  const encoded = DitherApp.core.epdimgEncoder.encode(image).payload;
+  const encoded = DitherApp.core.epdimgEncoder.encode(image, DitherApp.core.epaperTarget.geometry(800,480)).payload;
   let binary=''; for(const byte of encoded) binary += String.fromCharCode(byte);
   document.getElementById('payload').textContent=btoa(binary);
   document.getElementById('result').textContent='PASS';

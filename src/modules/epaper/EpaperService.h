@@ -9,6 +9,8 @@
 #include "CpuFrequencyGuard.h"
 #include "EpaperCooldown.h"
 #include "EpaperFrameSource.h"
+#include "EpaperGzipReader.h"
+#include "EpaperTimingDiagnostics.h"
 #include "EpaperImageFormat.h"
 #include "EpaperSafetyStore.h"
 #include "EpaperShutdownCoordinator.h"
@@ -49,6 +51,7 @@ enum class EpaperServiceStatusCode : uint8_t {
   Busy,
   Unavailable,
   InvalidImage,
+  PayloadTooLarge,
   ImageNotFound,
   StorageBusy,
   StorageUnavailable,
@@ -69,6 +72,7 @@ struct EpaperStoredImageMetadata {
   bool present = false;
   bool valid = false;
   size_t sizeBytes = 0;
+  size_t storedSizeBytes = 0;
   EpaperImageFormat::Header header{};
   EpaperImageFormat::ValidationError validationError =
       EpaperImageFormat::ValidationError::None;
@@ -92,6 +96,7 @@ struct EpaperServiceSnapshot {
   const char *lastErrorCode = "none";
   const char *lastResetReason = "unknown";
   size_t transferredBytes = 0;
+  EpaperTimingDiagnostics timings;
 };
 
 enum class EpaperDrawAction : uint8_t {
@@ -103,6 +108,8 @@ enum class EpaperDrawAction : uint8_t {
 class EpaperService : public SystemRestartCoordinator {
  public:
   static constexpr const char *kImageName = "epaper-current.epd";
+  static constexpr const char *kStoredImageName = "epaper-current.epd.gz";
+  static constexpr size_t kMaxCompressedBytes = EpaperPanelProfile::Active::maxCompressedBytes;
   static constexpr size_t kWorkerStackBytes = 8192;
 
   Result begin(UserDataStorage *storage,
@@ -141,17 +148,16 @@ class EpaperService : public SystemRestartCoordinator {
  private:
   class StoredFrameSource final : public EpaperFrameSource {
    public:
-    StoredFrameSource(UserDataStorage *storage, uint32_t sessionId)
-        : storage_(storage), sessionId_(sessionId) {}
+    explicit StoredFrameSource(EpaperGzipReader *reader) : reader_(reader) {}
     size_t size() const override { return EpaperImageFormat::kFrameBytes; }
     size_t read(size_t offset, uint8_t *output, size_t capacity) const override;
-    bool failed() const { return failed_; }
-
+    bool rewind() const override;
+    void close() const override { reader_->close(); }
+    uint32_t readMs() const { return readMs_; }
    private:
-    UserDataStorage *storage_ = nullptr;
-    uint32_t sessionId_ = 0;
+    EpaperGzipReader *reader_;
     mutable size_t expectedOffset_ = 0;
-    mutable bool failed_ = false;
+    mutable uint32_t readMs_ = 0;
   };
 
   UserDataStorage *storage_ = nullptr;
@@ -191,14 +197,24 @@ class EpaperService : public SystemRestartCoordinator {
   bool brownoutDetected_ = false;
   bool brownoutDuringDraw_ = false;
   size_t transferredBytes_ = 0;
+  EpaperTimingDiagnostics timings_;
+  uint32_t operationStartedMs_ = 0;
   uint32_t uploadSessionId_ = 0;
   EpaperImageFormat::StreamingValidator uploadValidator_;
+  std::unique_ptr<EpaperGzip> uploadDecoder_;
+  size_t uploadCompressedBytes_ = 0;
+  size_t uploadDeclaredBytes_ = 0;
+  std::unique_ptr<EpaperGzipReader> downloadReader_;
+  size_t downloadRemaining_ = 0;
+  bool consumeUpload(const uint8_t *data, size_t length, bool finalInput);
+  const char *uploadError() const;
+
 
   static void workerEntry(void *context);
   void workerLoop();
   void processControl(uint32_t nowMs);
   void executeDraw(EpaperDrawAction action);
-  bool runDraw(const EpaperFrameSource &source, uint32_t storageSessionId = 0);
+  bool runDraw(const EpaperFrameSource &source);
   EpaperServiceResult queueDraw(EpaperDrawAction action, const char *source);
   EpaperServiceResult validateStoredImage();
   void setOperation(EpaperServiceState state,

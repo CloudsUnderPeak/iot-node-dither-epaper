@@ -337,7 +337,8 @@
         epaperErrorStorageUnavailable: 'Image storage is unavailable.',
         epaperErrorInsufficientStorage: 'There is not enough storage for the image.',
         epaperErrorStorage: 'The image could not be stored.',
-        epaperErrorUnsupported: 'This device does not expose the supported 800x480 six-color e-paper interface.',
+        epaperErrorGzipUnavailable: 'This browser does not support gzip compression. Use a browser with CompressionStream support.',
+        epaperErrorUnsupported: 'The device e-paper capability or gzip upload format is unsupported.',
         epaperErrorAsync: 'E-paper drawing failed ({code}).',
         mockBadge: 'PREVIEW',
         mockBadgeTitle: 'Device pages show mock data. Sign in with admin / password. Saving the "Mock-Fail" network simulates a Wi-Fi verification failure. Append ?mock=0 to disable.'

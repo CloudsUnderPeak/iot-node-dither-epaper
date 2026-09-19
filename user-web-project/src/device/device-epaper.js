@@ -42,6 +42,7 @@
         mode: 'standalone',
         discovery: 'unknown',
         capabilities: null,
+        target: null,
         status: null,
         cooldownRemainingSeconds: 0,
         lastError: null,
@@ -71,6 +72,7 @@
             mode: state.mode,
             discovery: state.discovery,
             capabilities: state.capabilities,
+            target: state.target,
             status: state.status,
             cooldownRemainingSeconds: state.cooldownRemainingSeconds,
             lastError: state.lastError,
@@ -102,18 +104,12 @@
         return error;
     }
 
-    function capabilityValid(data) {
-        var panel = data && data.panel;
-        var image = data && data.image;
-        var capabilities = data && data.capabilities;
-        var codes = panel && Array.isArray(panel.color_codes) ? panel.color_codes.slice().sort() : [];
-        return Boolean(
-            panel && panel.width === 800 && panel.height === 480 && panel.colors === 6
-            && codes.join(',') === '0,1,2,3,5,6'
-            && image && image.format === 'epdimg' && image.header_bytes === 40
-            && image.frame_bytes === 192000 && image.upload_bytes === 192040
-            && capabilities && capabilities.upload === true && capabilities.refresh === true
-        );
+    function immutableCopy(value) {
+        if (value && typeof value === 'object') {
+            Object.keys(value).forEach(function (key) { immutableCopy(value[key]); });
+            Object.freeze(value);
+        }
+        return value;
     }
 
     function updateCooldownRemaining() {
@@ -421,12 +417,15 @@
         notify();
         discoveryRequest = app.device.api.resources.epaperCapabilities()
             .then(function (capabilities) {
-                if (!capabilityValid(capabilities)) {
-                    throw makeError('epaper_unsupported', app.i18n.t('epaperErrorUnsupported'));
-                }
+                var target;
+                try { target = app.core.epaperTarget.fromCapabilities(capabilities); }
+                catch (error) { throw makeError('epaper_unsupported', app.i18n.t('epaperErrorUnsupported')); }
                 state.mode = 'epaper';
                 state.discovery = 'supported';
-                state.capabilities = capabilities;
+                state.capabilities = immutableCopy(JSON.parse(JSON.stringify(capabilities)));
+                state.target = target;
+                var constants = app.pages && app.pages.ditherEditor && app.pages.ditherEditor.constants;
+                if (constants) { constants.inputLongEdge(); }
                 state.lastError = null;
                 notify();
                 return refreshStatus().catch(function () {
@@ -436,10 +435,11 @@
                 });
             })
             .catch(function (error) {
-                if (state.mode !== 'epaper') {
+                if (state.mode !== 'epaper' || (error && error.code === 'epaper_unsupported')) {
                     state.mode = 'standalone';
                     state.discovery = error && error.code === 'epaper_unsupported' ? 'unsupported' : 'error';
                     state.capabilities = null;
+                    state.target = null;
                 } else {
                     // Once a compatible panel is found, keep the editor target stable for this session.
                     state.discovery = 'supported';
@@ -466,6 +466,7 @@
             return Promise.reject(makeError('epaper_unavailable', app.i18n.t('epaperErrorUnavailable')));
         }
         return refreshStatus().then(function (status) {
+            if (state.operation.active) { throw makeError('epaper_busy', app.i18n.t('epaperErrorBusy')); }
             if (!statusAllowsOperation(status)) {
                 var code = status && status.state === 'unavailable' ? 'epaper_unavailable' : 'epaper_busy';
                 throw makeError(code, app.i18n.t(code === 'epaper_busy' ? 'epaperErrorBusy' : 'epaperErrorUnavailable'), status);
@@ -510,15 +511,33 @@
         });
     }
 
-    function submitUpload(runId, payload) {
-        if (!payload || payload.byteLength !== 192040) {
+    function submitUpload(runId, payload, target, checkCurrent) {
+        target = target || state.target;
+        if (!state.operation.active || state.operation.runId !== runId || state.operation.accepted) {
+            return Promise.reject(makeError('epaper_stale_operation'));
+        }
+        if (!target || !state.target || target.width !== state.target.width || target.height !== state.target.height
+            || !payload || payload.byteLength !== target.imageBytes) {
             var invalid = makeError('invalid_epaper_image', app.i18n.t('epaperErrorInvalidImage'));
             failOperation(runId, invalid);
             return Promise.reject(invalid);
         }
         setClientStage(runId, 'uploading');
-        return app.device.api.resources.epaperUpload(payload)
-            .then(function (response) {
+        return Promise.resolve().then(function () {
+                if (typeof window.CompressionStream !== 'function') {
+                    throw makeError('gzip_unavailable', app.i18n.t('epaperErrorGzipUnavailable'));
+                }
+                return new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+            }).then(function (compressed) {
+                if (checkCurrent) { checkCurrent(); }
+                if (!state.operation.active || state.operation.runId !== runId || state.operation.accepted) {
+                    throw makeError('epaper_stale_operation');
+                }
+                if (compressed.size > target.maxCompressedBytes) {
+                    throw makeError('payload_too_large', app.i18n.t('epaperErrorInvalidImage'));
+                }
+                return app.device.api.resources.epaperUpload(compressed);
+            }).then(function (response) {
                 return acceptAndWait(runId, response);
             })
             .catch(function (error) {

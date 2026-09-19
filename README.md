@@ -10,6 +10,8 @@ Getting a picture onto e-paper brings together image processing, device connecti
 
 The current hardware pairing is the **DFRobot FireBeetle 2 ESP32-C6** and **Waveshare 7.3inch e-Paper HAT (E), 800 × 480, six colors**.
 
+Panel model, width, height and horizontal/vertical mounting flips are configured in [`EpaperPanelProfile.h`](src/modules/epaper/EpaperPanelProfile.h). The editor and Python tool use the device capability; EPDIMG uploads and storage use gzip, while downloads remain logical raw EPDIMG. Changing geometry assumes the same controller protocol and needs hardware verification.
+
 ## Try it online
 
 **[Open the demo](https://cloudsunderpeak.github.io/iot-node-dither-epaper/)**

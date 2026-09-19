@@ -42,7 +42,7 @@ Split From: SPEC_INDEX.md
 - 依固定效果順序預覽結果。
 - 預覽處理前後的結果。
 - 匯出 PNG。
-- 相容裝置上以固定 E-paper profile 更新圖片並繪製。
+- 相容裝置上以 runtime capability E-paper profile 更新圖片並繪製。
 - 電子紙空白、六色測試圖與 stored image refresh。
 - 保留基本工作狀態與設定。
 
@@ -279,11 +279,11 @@ As a user with a compatible device, I want the editor to lock its output to the 
 Acceptance:
 
 - `GET /api/alive` and a valid `GET /api/epaper` capability response switch the editor to E-paper Device Mode; an absent or unsupported endpoint leaves PNG export unchanged.
-- Crop only offers landscape 5:3 and portrait 3:5. Resize is read-only 800×480 or 480×800, and Palette is the fixed E6 six-color set.
-- A newly loaded image or demo initially selects 3:5 when its decoded original height exceeds its width; landscape and square images select 5:3. The user can still switch either ratio afterward, and background target/calibration synchronization does not override that valid choice.
+- Crop only offers the capability panel ratio W:H and its inverse H:W, reduced by gcd. Square panels have one option. Resize is read-only W×H or H×W, and Palette is the fixed E6 six-color set.
+- A newly loaded image or demo initially selects the inverse panel ratio when its decoded original height exceeds its width; landscape and square images select the panel ratio. The user can still switch either ratio afterward, and background target/calibration synchronization does not override that valid choice.
 - The fixed palette has separate display RGB A′ and protocol RGB A values. Both arrays and the six-color test image follow EPD code order `0,1,2,3,5,6` (black, white, yellow, red, blue, green). Swatches, the Result canvas, palette mapping, and dither error use A′; the encoder boundary maps the exact palette index back to A before producing EPDIMG.
-- The formal pipeline decides orientation from the actual output dimensions. 800×480 stays unchanged; 480×800 rotates clockwise to 800×480 before EPDIMG encoding; any other size is rejected before upload.
-- The e-paper action sends one raw `POST /api/epaper/image`. The accepted upload already updates the stored image and queues draw, so the editor does not append a refresh request.
+- The formal pipeline decides orientation from the actual output dimensions. W×H stays unchanged; H×W rotates clockwise to W×H before EPDIMG encoding; any other size is rejected before upload.
+- The e-paper action sends one gzip `POST /api/epaper/image`. The accepted upload already updates the stored image and queues draw, so the editor does not append a refresh request.
 - Processing, upload and physical draw show a blocking spinner, phase copy and simulated percentage. Percentage is weighted by expected time, with `refreshing` using the largest interval; repeated polling of the same phase must not reset its timer, and an over-time phase keeps moving asymptotically without reaching 100% before server success/cooldown.
 - While an operation is active, editing, Menu navigation and repeated action are blocked. Cooldown unlocks editing but keeps every e-paper action disabled and displays the interpolated `retry_after_seconds`. At local zero the client immediately rechecks status until the server restores `can_draw`.
 - A disconnect after HTTP 202 never causes automatic upload retry. The client waits for reconnect and confirms `/api/epaper/status` before allowing another action.
@@ -382,8 +382,8 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
 ### 電子紙模式與測試頁
 
 - 裝置 alive 後才查 `/api/epaper`；只有固定 panel/image/refresh/capabilities schema 可被前端支援時，E-paper target 才在本次 session 生效。曾確認的 target 遇到暫時斷線仍保持尺寸與色票鎖定，恢復後重新同步 status。
-- Dither Editor 的 Crop ratio 只允許 Landscape 5:3（800×480）與 Portrait 3:5（480×800）。使用者仍可 pan、zoom、rotate、flip 與選 fill；Resize 不可手動輸入，Palette 不可選 preset 或編輯 swatch。
-- E-paper Device Mode 載入新圖片或 demo 時，以瀏覽器解碼後、工作圖縮小前的原始尺寸判斷初始 Crop ratio：高大於寬用 3:5，寬大於或等於高用 5:3。圖片先載入而 capability 後確認時，首次切換裝置模式套用相同規則。這只設定該圖片的初始值；使用者可手動切換，後續輪詢、校色更新、斷線重連、旋轉、翻轉或重新繪製不可覆蓋合法的 3:5／5:3 選擇。
+- Dither Editor 的 Crop ratio 只允許 capability 的 Landscape W:H 與 Portrait H:W（gcd 化簡；正方形不重複）。使用者仍可 pan、zoom、rotate、flip 與選 fill；Resize 不可手動輸入，Palette 不可選 preset 或編輯 swatch。
+- E-paper Device Mode 載入新圖片或 demo 時，以瀏覽器解碼後、工作圖縮小前的原始尺寸判斷初始 Crop ratio：高大於寬用 H:W，寬大於或等於高用 W:H。圖片先載入而 capability 後確認時，首次切換裝置模式套用相同規則。這只設定該圖片的初始值；使用者可手動切換，後續輪詢、校色更新、斷線重連、旋轉、翻轉或重新繪製不可覆蓋目前 panel 合法的 H:W／W:H 選擇。
 - 固定六色以實體面板肉眼呈現的校色值 A′ 供網頁 Result、最近色判斷與 dither 誤差擴散使用；正式繪製時依六色固定 index 轉回裝置認得的協定色 A。調整校色值應改變網頁預覽與抖動選色，但不得改變硬體 color code。
 - 原 `Export PNG` 按鈕在此模式顯示「繪製到電子紙」，並使用處理過的 credit-card/edit SVG。其下方另顯示使用 export/download SVG 的主按鈕「下載圖片專案」；兩顆按鈕底色一致。圖片專案是本機操作，裝置離線或 cooldown 期間仍可使用，且不得呼叫裝置 API；建立期間文字保持不變、按鈕暫時停用，不顯示取消文案。Standalone Mode 隱藏此按鈕。繪製完成進入 cooldown 後，全頁操作鎖解除，但繪製 action 顯示實際剩餘秒數並維持 disabled；本地倒數歸零後透過共用的每 5 秒 status 更新確認，收到 `can_draw` 恢復後啟用，不另外增加高頻請求。
 - 全域操作 overlay 使用 spinner、目前 phase、percentage 與 progress bar。Percentage 是前端依預估時間插值的進度提示，不是 panel telemetry；`refreshing` 是最大區間，同一 phase 的重複 polling 不可重設計時，phase 超時後仍漸近移動，server 進入 cooldown success 才顯示 100%。
@@ -491,7 +491,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 
 - MVP 不提供 Free 自由比例。
 - 預設固定比例為 16:9。
-- E-paper Device Mode 覆蓋 standalone 預設，只顯示 5:3 與 3:5；新圖初始方向依原始尺寸選擇，切換比例時同步切換 800×480／480×800 target。Standalone 仍使用 16:9 預設。
+- E-paper Device Mode 覆蓋 standalone 預設，只顯示目前面板 W:H 與 H:W；新圖初始方向依原始尺寸選擇，切換比例時同步切換 W×H／H×W target。Standalone 仍使用 16:9 預設。
 - Crop 面板不顯示 X、Y、Width、Height 或 Lock ratio。
 - 使用者拖曳的是原圖位置，不是裁切框。
 - Crop overlay 固定代表最後輸出的裁切範圍。
@@ -512,7 +512,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 行為要求：
 
 - Width 與 Height 固定等比連動。
-- E-paper Device Mode 中 Width/Height 改為 read-only，依 Crop orientation 固定為 800×480 或 480×800。
+- E-paper Device Mode 中 Width/Height 改為 read-only，依 Crop orientation 固定為 capability W×H 或 H×W。
 - 使用者調整任一尺寸時，另一個尺寸必須立即依目前比例更新。
 - 使用者在 `edit` 重新展開 Crop 並改變 crop ratio 後，Resize 的 Width / Height 欄位必須同步更新到新的 crop output ratio。
 - Width 與 Height 必須顯示在同一列。
@@ -601,7 +601,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 - Export 只在 `edit` 可操作；`source` 與 `prepare` 時必須反灰停用。
 - 匯出失敗時要給出可理解的錯誤狀態。
 - Export 不應被當成效果順序的一部分拖曳。
-- E-paper Device Mode 以「繪製到電子紙」取代 Export PNG；它重新跑完整 pipeline、依實際尺寸正規化方向、編碼 EPDIMG，並只送一次 raw upload。
+- E-paper Device Mode 以「繪製到電子紙」取代 Export PNG；它重新跑完整 pipeline、依實際尺寸正規化方向、編碼 EPDIMG，並只送一次 gzip upload。
 - E-paper Device Mode 在繪製按鈕下另提供同為主按鈕樣式的「下載圖片專案」；Standalone Mode 不顯示這個 action。
 - 圖片專案使用 `<原檔名>.dither.png`，外層 PNG 是正式 pipeline 的最終 dither 結果，可直接由一般 PC 圖片檢視器預覽；內嵌原始檔、正規化工作圖與版本化設定供重新匯入還原，但圖片輸入面板不增加獨立原圖檢視操作。
 - Browse、dropzone 與其他檔案輸入都走同一個自動 routing 與驗證流程；不能只依 MIME 或副檔名信任內容。
@@ -871,3 +871,11 @@ Reviewer 應確認：
 - Web Setting theme / language 與 Dither Editor 頁面切換 session 狀態保存符合預期。
 - UI 文字集中管理。
 - 裝置 action 與本地匯出遵守各自的能力／連線限制。
+
+## 面板 capability 與 gzip 傳輸
+
+- `/api/epaper` 是 Device Mode 的面板尺寸來源。目前範例為 800×480，1600×1200 等相同六色 packed 格式亦可通過一致性驗證；瀏覽器尺寸上限每邊 4096、width 必須為偶數。
+- Discovery 驗證非空 model、six color codes、40-byte header、W×H/2 frame、40+frame logical bytes、gzip upload/storage 與 upload/refresh actions；不符合時禁止繪製，不偷偷使用 raw upload。Snapshot 的 capability 與 target 不可由 caller 修改。
+- 產生 EPDIMG 後用本地瀏覽器 `CompressionStream('gzip')` 壓縮，透過既有 resources API 上傳已知大小 Blob；沒有 CompressionStream 時顯示明確錯誤，不送 request、不加入遠端 library。上傳成功即已 queue draw，不追加 refresh。
+- Firmware mounting flip 在 draw-time 執行；瀏覽器不依 capability flip flags 改寫 pixels，避免套用兩次。使用者原有 Crop flip 維持自己的編輯語意。
+- Device Mode 載入 demo、檔案與圖片專案時，working long-edge limit 為 max(standalone default, panel long edge)，且不超過 resize 安全上限；不把較大面板的新輸入先縮為 standalone default。已在線但 discovery 未完成時，載入先等待 discovery。Help 的 input limit fact 與同一函式同步。已儲存圖片專案的 working image 本身解析度不足時不憑空還原來源細節。

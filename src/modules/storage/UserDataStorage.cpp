@@ -332,7 +332,8 @@ UserDataFileResult UserDataStorage::deleteFile(const char *name) {
 }
 
 UserDataDownloadBegin UserDataStorage::beginDownload(const char *name,
-                                                     const char *rangeHeader) {
+                                                     const char *rangeHeader,
+                                                     bool retainAtEof) {
   UserDataDownloadBegin begin;
   if (!UserFilePolicy::validPublicName(name)) {
     begin.result = fileError(UserDataFileStatus::InvalidName, "invalid filename");
@@ -387,6 +388,7 @@ UserDataDownloadBegin UserDataStorage::beginDownload(const char *name,
 
   activeSessionId_ = allocateSessionId();
   downloadRemaining_ = range.length;
+  retainDownloadAtEof_ = retainAtEof;
   begin.sessionId = activeSessionId_;
   begin.fileSize = fileSize;
   begin.rangeStart = range.start;
@@ -407,7 +409,7 @@ UserDataReadResult UserDataStorage::readDownload(uint32_t sessionId,
   }
   if (downloadRemaining_ == 0) {
     read.result = fileOk();
-    finishDownload(sessionId);
+    if (!retainDownloadAtEof_) finishDownload(sessionId);
     return read;
   }
   size_t requested = bufferLength;
@@ -423,8 +425,15 @@ UserDataReadResult UserDataStorage::readDownload(uint32_t sessionId,
   downloadRemaining_ -= received;
   read.bytesRead = received;
   read.result = fileOk();
-  if (downloadRemaining_ == 0) finishDownload(sessionId);
+  if (downloadRemaining_ == 0 && !retainDownloadAtEof_) finishDownload(sessionId);
   return read;
+}
+
+bool UserDataStorage::rewindDownload(uint32_t sessionId) {
+  if (!sessionMatches(ActiveOperation::Download, sessionId) ||
+      !retainDownloadAtEof_ || !activeFile_.seek(0, SeekSet)) return false;
+  downloadRemaining_ = activeFile_.size();
+  return true;
 }
 
 void UserDataStorage::finishDownload(uint32_t sessionId) {

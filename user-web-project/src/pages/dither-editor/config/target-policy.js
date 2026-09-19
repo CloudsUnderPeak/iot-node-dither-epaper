@@ -134,20 +134,28 @@
 
     // 正方形沒有自然方向，固定沿用面板的 landscape 預設。
     function aspectRatioForSize(size) {
-        return size && Number(size.height) > Number(size.width) ? '3-5' : '5-3';
+        var profile = app.device.epaper.snapshot().target;
+        if (!profile) { return app.pages.ditherEditor.cropGeometry.DEFAULT_ASPECT_RATIO_ID; }
+        app.pages.ditherEditor.cropGeometry.registerRatio(profile.width, profile.height);
+        app.pages.ditherEditor.cropGeometry.registerRatio(profile.height, profile.width);
+        return size && Number(size.height) > Number(size.width) ? profile.portraitRatioId : profile.landscapeRatioId;
     }
 
     function force(state) {
         if (!state || !state.settings || !app.device.epaper.isSupported()) {
             return false;
         }
+        var profile = app.device.epaper.snapshot().target;
+        var geometry = app.pages.ditherEditor.cropGeometry;
+        geometry.registerRatio(profile.width, profile.height);
+        geometry.registerRatio(profile.height, profile.width);
         var previousTarget = state.target || {};
         var previousPalette = state.settings.palette && state.settings.palette.palette;
         var crop = state.settings.crop;
-        var portrait = crop && crop.aspectRatioId === '3-5';
-        if (crop && crop.aspectRatioId !== '5-3' && crop.aspectRatioId !== '3-5') {
+        var portrait = crop && profile.width !== profile.height && crop.aspectRatioId === profile.portraitRatioId;
+        if (crop && crop.aspectRatioId !== profile.landscapeRatioId && crop.aspectRatioId !== profile.portraitRatioId) {
             crop.aspectRatioId = aspectRatioForSize(state.originalSize);
-            portrait = crop.aspectRatioId === '3-5';
+            portrait = profile.width !== profile.height && crop.aspectRatioId === profile.portraitRatioId;
             if (app.pages.ditherEditor.crop) {
                 app.pages.ditherEditor.crop.normalize(state);
             }
@@ -156,19 +164,21 @@
         var colors = displayColors();
         state.target = {
             mode: 'epaper',
+            profile: profile,
             orientation: portrait ? 'portrait' : 'landscape',
             calibrationRevision: revision
         };
         if (state.settings.resize) {
             Object.assign(state.settings.resize, portrait
-                ? { width: 480, height: 800, aspectRatio: 3 / 5 }
-                : { width: 800, height: 480, aspectRatio: 5 / 3 });
+                ? { width: profile.height, height: profile.width, aspectRatio: profile.height / profile.width }
+                : { width: profile.width, height: profile.height, aspectRatio: profile.width / profile.height });
         }
         if (state.settings.palette) {
             state.settings.palette.presetId = PALETTE_ID;
             state.settings.palette.palette = copyColors(colors);
         }
         return previousTarget.mode !== 'epaper'
+            || !previousTarget.profile || previousTarget.profile.width !== profile.width || previousTarget.profile.height !== profile.height
             || previousTarget.orientation !== state.target.orientation
             || previousTarget.calibrationRevision !== revision
             || !colorsEqual(previousPalette, colors);
@@ -192,7 +202,7 @@
         if (group === 'resize' || group === 'palette') {
             return false;
         }
-        return group !== 'crop' || key !== 'aspectRatioId' || value === '5-3' || value === '3-5';
+        return group !== 'crop' || key !== 'aspectRatioId' || value === state.target.profile.landscapeRatioId || value === state.target.profile.portraitRatioId;
     }
 
     app.pages.ditherEditor.targetPolicy = {

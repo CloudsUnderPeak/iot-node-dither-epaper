@@ -335,7 +335,8 @@
         epaperErrorStorageUnavailable: '圖片儲存空間無法使用。',
         epaperErrorInsufficientStorage: '圖片儲存空間不足。',
         epaperErrorStorage: '無法儲存圖片。',
-        epaperErrorUnsupported: '此裝置未提供相容的 800×480 六色電子紙介面。',
+        epaperErrorGzipUnavailable: '此瀏覽器不支援 gzip 壓縮，請使用支援 CompressionStream 的瀏覽器。',
+        epaperErrorUnsupported: '裝置的電子紙能力或 gzip 上傳格式不受支援。',
         epaperErrorAsync: '電子紙繪製失敗（{code}）。',
         mockBadge: 'PREVIEW',
         mockBadgeTitle: '裝置頁目前顯示假資料。登入帳密 admin / password。'

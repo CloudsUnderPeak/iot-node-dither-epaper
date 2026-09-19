@@ -62,6 +62,7 @@
             if (options.contentType) {
                 headers['Content-Type'] = options.contentType;
             }
+            if (options.contentEncoding) { headers['Content-Encoding'] = options.contentEncoding; }
             init.body = options.body;
         }
         var timeoutId = null;
@@ -187,6 +188,7 @@
                     auth: false,
                     body: payload,
                     contentType: 'application/octet-stream',
+                    contentEncoding: 'gzip',
                     timeoutMs: 30000
                 });
             },

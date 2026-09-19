@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include "modules/epaper/EpaperService.h"
+#include "support/EpaperGzipFixture.h"
 
 class FakeFrequency final : public CpuFrequencyDriver {
  public:
@@ -291,6 +292,7 @@ void testAcceptedUploadDrain() {
   EpaperImageFormat::Header header{1, 40, 800, 480, 192000,
       EpaperImageFormat::crc32(image.data() + 40, 192000), 1};
   assert(EpaperImageFormat::encodeHeader(header, image.data(), image.size()));
+  image = gzipBytes(image, 0);
   auto upload = f.service.beginUpload(image.size());
   assert(upload.ok());
   assert(f.service.requestRestart(millis()) == RestartRequest::Accepted);
@@ -311,7 +313,8 @@ void testMetadataFailuresAndReservation() {
   EpaperImageFormat::Header header{1, 40, 800, 480, 192000,
       EpaperImageFormat::crc32(image.data() + 40, 192000), 9};
   assert(EpaperImageFormat::encodeHeader(header, image.data(), image.size()));
-  auto upload = f.storage.beginUpload(EpaperService::kImageName, image.size());
+  image = gzipBytes(image, 0);
+  auto upload = f.storage.beginUpload(EpaperService::kStoredImageName, image.size());
   assert(f.storage.writeUpload(upload.sessionId, 0, image.data(), image.size()).ok());
   assert(f.storage.finishUpload(upload.sessionId).result.ok());
   assert(f.service.refreshMetadata().ok());
@@ -332,11 +335,27 @@ void testMetadataFailuresAndReservation() {
   assert(f.service.snapshot().stored.valid);
   assert(f.service.snapshot().stored.header.generation == 9);
   assert(f.service.snapshot().canUpload && nativefs::backend.handles == 0);
+  // A syntax error in the first chunk must not hide a later storage failure
+  // and replace the last fully observed metadata snapshot with a partial one.
+  auto &storedBytes = nativefs::backend.files.at(
+      std::string("/files/") + EpaperService::kStoredImageName)->bytes;
+  storedBytes[0] ^= 1;
+  reads = 0;
+  nativefs::backend.before = [&](const char *operation) {
+    if (std::strcmp(operation, "read") == 0 && ++reads == 2) nativefs::backend.fail = "read";
+  };
+  assert(f.service.refreshMetadata().status == EpaperServiceStatusCode::StorageError);
+  nativefs::backend.before = {};
+  nativefs::backend.fail.clear();
+  storedBytes[0] ^= 1;
+  assert(f.service.snapshot().stored.valid);
+  assert(f.service.snapshot().stored.header.generation == 9);
+  assert(nativefs::backend.handles == 0);
   // A later successful version can commit once validation releases admission.
   auto next = f.service.beginUpload(image.size());
   assert(next.ok());
   f.service.abortUpload(next.sessionId);
-  assert(f.storage.deleteFile(EpaperService::kImageName).ok());
+  assert(f.storage.deleteFile(EpaperService::kStoredImageName).ok());
   assert(f.service.refreshMetadata().status == EpaperServiceStatusCode::ImageNotFound);
   assert(!f.service.snapshot().stored.present);
 }
@@ -405,18 +424,197 @@ void testCooldownWithoutMainLoop() {
   }
 }
 
+
+void storeGzip(Fixture &f, const std::vector<uint8_t> &bytes) {
+  auto start = f.storage.beginUpload(EpaperService::kStoredImageName, bytes.size());
+  assert(start.result.ok());
+  assert(f.storage.writeUpload(start.sessionId, 0, bytes.data(), bytes.size()).ok());
+  assert(f.storage.finishUpload(start.sessionId).result.ok());
+}
+
+void testGzipStorageDownloadsAndFailures() {
+  const auto raw = epaperBytes(71);
+  const auto gzip = gzipBytes(raw);
+  const std::string storedPath = std::string("/files/") + EpaperService::kStoredImageName;
+  {
+    Fixture f;
+    assert(f.service.beginUpload(EpaperService::kMaxCompressedBytes + 1).status == EpaperServiceStatusCode::PayloadTooLarge);
+    auto upload = f.service.beginUpload(gzip.size());
+    assert(upload.ok());
+    for (size_t i = 0; i < gzip.size(); ++i) {
+      assert(f.service.writeUpload(upload.sessionId, i, &gzip[i], 1).ok());
+    }
+    assert(f.service.finishUpload(upload.sessionId).ok());
+    assert(!f.service.finishUpload(upload.sessionId).ok());
+    assert(nativefs::backend.files.at(storedPath)->bytes == gzip);
+    assert(nativefs::backend.files.count("/files/epaper-current.epd") == 0);
+    auto metadata = f.service.snapshot().stored;
+    assert(metadata.valid && metadata.sizeBytes == raw.size() && metadata.storedSizeBytes == gzip.size());
+    nativeRunWorker();
+    assert(std::count(f.transport.commands.begin(), f.transport.commands.end(), 0x12) == 1);
+    assert(f.service.snapshot().lastResult == std::string("success"));
+    for (const char *range : {"", "bytes=0-39", "bytes=100-999", "bytes=191900-", "bytes=-17"}) {
+      auto begin = f.service.beginImageDownload(range);
+      assert(begin.result.ok() && begin.fileSize == raw.size());
+      assert(f.storage.beginUpload("other.bin", 1).result.status == UserDataFileStatus::Busy);
+      std::vector<uint8_t> downloaded;
+      uint8_t buffer[137];
+      while (downloaded.size() < begin.contentLength) {
+        auto read = f.service.readImageDownload(begin.sessionId, buffer, sizeof(buffer));
+        assert(read.result.ok() && read.bytesRead);
+        downloaded.insert(downloaded.end(), buffer, buffer + read.bytesRead);
+      }
+      assert(downloaded == std::vector<uint8_t>(raw.begin() + begin.rangeStart,
+                                              raw.begin() + begin.rangeStart + begin.contentLength));
+      assert(nativefs::backend.handles == 0);
+    }
+    assert(f.service.beginImageDownload("bytes=999999-").result.status == UserDataFileStatus::RangeNotSatisfiable);
+    auto download = f.service.beginImageDownload("");
+    assert(download.result.ok());
+    f.service.finishImageDownload(download.sessionId);
+    assert(nativefs::backend.handles == 0);
+    // Boot revalidates compressed storage and publishes logical metadata.
+    EpaperService reboot;
+    assert(reboot.begin(&f.storage, &f.driver, &f.transport, &f.safety, &f.frequency, &f.shutdown, {}).ok());
+    assert(reboot.snapshot().stored.header.generation == 71);
+    assert(reboot.snapshot().stored.storedSizeBytes == gzip.size());
+  }
+  for (const char *failure : {"decode", "crc", "isize", "truncate", "disconnect", "write", "flush", "close", "rename"}) {
+    Fixture f;
+    storeGzip(f, gzip);
+    assert(f.service.refreshMetadata().ok());
+    auto candidate = gzipBytes(epaperBytes(72));
+    auto begin = f.service.beginUpload(candidate.size());
+    assert(begin.ok());
+    if (!strcmp(failure, "decode")) candidate[0] = 0;
+    if (!strcmp(failure, "crc")) candidate[candidate.size() - 8] ^= 1;
+    if (!strcmp(failure, "isize")) candidate[candidate.size() - 4] ^= 1;
+    if (!strcmp(failure, "truncate")) candidate.pop_back();
+    if (!strcmp(failure, "write")) nativefs::backend.fail = failure;
+    auto written = f.service.writeUpload(begin.sessionId, 0, candidate.data(), candidate.size());
+    if (!strcmp(failure, "disconnect")) f.service.abortUpload(begin.sessionId);
+    else {
+      if (!strcmp(failure, "flush") || !strcmp(failure, "close") || !strcmp(failure, "rename")) nativefs::backend.fail = failure;
+      assert(!written.ok() || !f.service.finishUpload(begin.sessionId).ok());
+    }
+    nativefs::backend.fail.clear();
+    assert(nativefs::backend.files.at(storedPath)->bytes == gzip);
+    assert(nativefs::backend.handles == 0 && f.service.snapshot().canUpload);
+    assert(nativefs::backend.files.count("/files/.upload.tmp") == 0);
+    nativeRunWorker();
+    assert(!f.transport.sawCommand(0x04));
+    assert(f.service.snapshot().stored.header.generation == 71);
+    auto next = f.service.beginUpload(gzip.size());
+    assert(next.ok());
+    f.service.abortUpload(next.sessionId);
+  }
+  {
+    Fixture f;
+    storeGzip(f, gzipBytes(raw, 0));
+    auto begin = f.service.beginImageDownload("bytes=0-39");
+    assert(begin.result.ok());
+    size_t reads = 0;
+    nativefs::backend.before = [&](const char *operation) {
+      if (!strcmp(operation, "read") && ++reads == 2) nativefs::backend.fail = "read";
+    };
+    uint8_t header[40];
+    const auto failed = f.service.readImageDownload(begin.sessionId, header, sizeof(header));
+    nativefs::backend.before = {};
+    nativefs::backend.fail.clear();
+    assert(!failed.result.ok() && failed.bytesRead == 0);
+    assert(f.service.snapshot().timings.downloadFailures == 1);
+    assert(nativefs::backend.handles == 0);
+    const auto next = f.service.beginImageDownload("bytes=-17");
+    assert(next.result.ok());
+    f.service.finishImageDownload(next.sessionId);
+  }
+  {
+    Fixture f;
+    storeGzip(f, gzip);
+    assert(f.service.refreshMetadata().ok());
+    assert(f.service.requestDraw(EpaperDrawAction::Stored).ok());
+    nativefs::backend.files.at(storedPath)->bytes.back() ^= 1;
+    nativeRunWorker();
+    assert(!f.transport.sawCommand(0x04) && f.frequency.setCalls == 0);
+    assert(f.safety.stage() == EpaperProtectionStage::None && nativefs::backend.handles == 0);
+  }
+  {
+    Fixture f;
+    storeGzip(f, gzipBytes(raw, 0));
+    assert(f.service.requestDraw(EpaperDrawAction::Stored).ok());
+    nativefs::backend.before = [&](const char *operation) {
+      if (!strcmp(operation, "read") && f.service.snapshot().phase == EpaperDrawPhase::Transferring) {
+        nativefs::backend.fail = "read";
+      }
+    };
+    nativeRunWorker();
+    nativefs::backend.before = {};
+    nativefs::backend.fail.clear();
+    assert(f.transport.sawCommand(0x02) && f.transport.sawCommand(0x07));
+    assert(!f.transport.sawCommand(0x12));
+    assert(f.service.snapshot().lastErrorCode == std::string("frame_read_failed"));
+    assert(f.frequency.current == 160 && nativefs::backend.handles == 0);
+  }
+}
+
+void testGzipMountingOrientation() {
+  Fixture f;
+  auto raw = epaperBytes(73);
+  EpaperPaletteFrameSource palette;
+  assert(palette.read(0, raw.data() + 40, palette.size()) == palette.size());
+  // Asymmetric corner/row data catches vertical direction and nibble order.
+  raw[40] = 0x35; raw[41] = 0x61; raw.back() = 0x23;
+  EpaperImageFormat::Header header{1,40,EpaperImageFormat::kWidth,EpaperImageFormat::kHeight,
+      EpaperImageFormat::kFrameBytes, EpaperImageFormat::crc32(raw.data()+40, raw.size()-40),73};
+  EpaperImageFormat::encodeHeader(header, raw.data(), raw.size());
+  storeGzip(f, gzipBytes(raw));
+  class Source final : public EpaperFrameSource {
+   public:
+    explicit Source(EpaperGzipReader &reader) : reader_(reader) {}
+    size_t size() const override { return EpaperImageFormat::kFrameBytes; }
+    size_t read(size_t offset, uint8_t *out, size_t capacity) const override {
+      if (reader_.offset() != offset + 40) return 0;
+      return reader_.read(out, capacity);
+    }
+    bool rewind() const override { return reader_.rewind() && reader_.skip(40); }
+   private: EpaperGzipReader &reader_;
+  };
+  for (bool horizontal : {false, true}) for (bool vertical : {false, true}) {
+    EpaperGzipReader reader(&f.storage);
+    assert(reader.open(EpaperService::kStoredImageName).result.ok());
+    assert(reader.complete() && reader.rewind() && reader.skip(40));
+    Source source(reader);
+    EpaperOrientedFrameSource oriented(source, EpaperImageFormat::kWidth, EpaperImageFormat::kHeight, horizontal, vertical);
+    std::vector<uint8_t> result(source.size());
+    for (size_t offset = 0; offset < result.size();) {
+      const auto count = oriented.read(offset, result.data() + offset, std::min(size_t{4096}, result.size()-offset));
+      assert(count); offset += count;
+      assert(f.storage.beginUpload("unrelated", 1).result.status == UserDataFileStatus::Busy);
+    }
+    const size_t rowBytes = EpaperPanelProfile::Active::rowBytes;
+    for (size_t y = 0; y < EpaperImageFormat::kHeight; ++y) for (size_t x = 0; x < rowBytes; ++x) {
+      uint8_t expected = raw[40 + (vertical ? EpaperImageFormat::kHeight-1-y : y)*rowBytes + (horizontal ? rowBytes-1-x : x)];
+      if (horizontal) expected = static_cast<uint8_t>((expected << 4) | (expected >> 4));
+      assert(result[y*rowBytes+x] == expected);
+    }
+  }
+  assert(nativefs::backend.handles == 0);
+}
+
 int main(int argc, char **) {
+  testGzipStorageDownloadsAndFailures();
+  testGzipMountingOrientation();
   testMarkerRetryRecovery();
   testCooldownWithoutMainLoop();
   if (argc > 1) {
     Fixture f;
-    auto uploaded = f.storage.beginUpload(EpaperService::kImageName, 1);
+    auto uploaded = f.storage.beginUpload(EpaperService::kStoredImageName, 1);
     const uint8_t corrupt = 0;
     assert(f.storage.writeUpload(uploaded.sessionId, 0, &corrupt, 1).ok());
     assert(f.storage.finishUpload(uploaded.sessionId).result.ok());
     assert(!f.service.refreshMetadata().ok());
     assert(f.service.snapshot().stored.present);
-    auto occupied = f.storage.beginDownload(EpaperService::kImageName, "");
+    auto occupied = f.storage.beginDownload(EpaperService::kStoredImageName, "");
     assert(occupied.result.ok());
     assert(f.service.refreshMetadata().status == EpaperServiceStatusCode::StorageBusy);
     assert(f.service.snapshot().stored.present);

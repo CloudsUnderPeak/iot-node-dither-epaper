@@ -315,7 +315,8 @@ ApiRouter::FileUploadStart ApiRouter::prepareFileUpload(
     start.response = request.response;
     return start;
   }
-  if (strcmp(request.name, EpaperService::kImageName) == 0) {
+  if ((strcmp(request.name, EpaperService::kImageName) == 0 ||
+       strcmp(request.name, EpaperService::kStoredImageName) == 0)) {
     start.response = Api::problem(
         403, "reserved_file", "e-paper image is managed by /api/epaper/image");
     return start;
@@ -398,8 +399,12 @@ void ApiRouter::finishFileDownload(uint32_t sessionId) {
 }
 
 ApiRouter::FileUploadStart ApiRouter::prepareEpaperUpload(
-    size_t contentLength) {
+    size_t contentLength, const char *encoding) {
   FileUploadStart start;
+  if (encoding == nullptr || strcmp(encoding, "gzip") != 0) {
+    start.response = Api::problem(415, "unsupported_content_encoding", "e-paper upload requires gzip");
+    return start;
+  }
   const EpaperServiceResult result = epaperService_->beginUpload(contentLength);
   if (!result.ok()) {
     start.response = EpaperEndpoints::fromServiceResult(
@@ -408,7 +413,7 @@ ApiRouter::FileUploadStart ApiRouter::prepareEpaperUpload(
   }
   start.ready = true;
   start.sessionId = result.sessionId;
-  start.maxUploadBytes = EpaperImageFormat::kImageBytes;
+  start.maxUploadBytes = EpaperService::kMaxCompressedBytes;
   start.response = Api::ok("{}");
   return start;
 }

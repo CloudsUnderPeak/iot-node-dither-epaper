@@ -151,9 +151,13 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 
 ## E-paper 行為與安全邊界
 
-- 目標面板固定為 Waveshare 7.3inch e-Paper HAT (E)，800×480、每 pixel 4-bit packed code；第一版只接受總長 192,040 bytes 的 `EPDIMG`，不接受裸 frame、PNG、JPEG 或 BMP。
-- 固定圖片名稱為 `epaper-current.epd`，保存於 `userdata:/files/`。成功 upload 以 atomic replace 更新並自動排程 draw；中止、格式錯誤或儲存失敗必須保留舊圖。Generic file PUT／DELETE 不得修改此 reserved file。
-- `white` 動態輸出 192,000 bytes `0x11`；`palette` 動態輸出 4-pixel 黑框與 black／white／yellow／red／blue／green直條。兩者不建立檔案，`refresh` 只重畫最近一次有效 upload。
+- 面板由唯一 firmware active profile 決定，目前為 `waveshare-7in3e`、800×480。相同 controller／六色 4-bit packed 協定的尺寸可參數化；`frameBytes = width × height / 2`、logical `imageBytes = 40 + frameBytes`。這不代表已支援其他控制器或任意 13.3 吋面板。圖片只接受 gzip 包裝的 EPDIMG v1，不接受 raw upload、裸 frame、PNG、JPEG 或 BMP。
+- Logical 圖片名稱保持 `epaper-current.epd`，新上傳只以 gzip 保存於 `userdata:/files/epaper-current.epd.gz`。HTTP Content-Length 是壓縮大小；成功驗證 gzip 與完整 EPDIMG 後才 atomic replace 並排程一次 draw。中止、CRC／格式錯誤、解壓失敗或儲存失敗保留上一張 gzip、不排程 draw。Generic PUT／DELETE 保護 logical name 與 compressed name。舊 raw client 改回 415；舊 raw 檔不自動轉換、不作為 stored image 載入，也不擅自刪除使用者既存資料。
+- `white` 動態輸出 profile 推導的 frameBytes 個 `0x11`（目前 192,000 bytes）；`palette` 動態輸出 4-pixel 黑框與 black／white／yellow／red／blue／green直條。兩者不建立檔案，`refresh` 只重畫最近一次有效 upload。
+- 每次 stored draw 在 active marker、CPU guard 與 panel wake 之前完整解壓驗證；成功後重開 gzip，跳過 header 並串流 frame。不得保存 raw temporary image 或配置完整 framebuffer。任何 draw-time read failure 仍走既有安全關機。
+- Firmware profile 的 `kFlipHorizontal`／`kFlipVertical` 是獨立 mounting compensation；目前 production 兩者皆為 true，用 180° rotation 補償上下顛倒安裝的面板。它們作用於 upload 後繪製、stored refresh、white／palette，與使用者 editor flip 分開。Logical EPDIMG 與下載內容不因 mounting 參數改變；更新韌體參數後 stored refresh 使用新的方向。只開其中一個是鏡射，不適合補償整塊面板旋轉 180°。
+- 垂直翻轉採有界 row-band 與重複解壓，因此比預設單次串流慢；仍沿用既有 watchdog／cooldown，不自行延長。更大尺寸需另驗 filesystem replacement 空間、heap、傳輸與 physical refresh timeout。
+- Download 保持 logical raw EPDIMG 與 logical byte Range，非零起點需解壓並丟棄前段。壓縮儲存大小與 logical 大小分開回報。
 - 六色顯示色準固定依 EPD code `0,1,2,3,5,6`（黑、白、黃、紅、藍、綠）保存。面板測試頁可即時預覽並一次儲存完整六色 RGB；未按儲存的草稿不得寫入 flash。已儲存值會成為抖色、色距、固定色票與 Result 預覽的共同來源，但 EPDIMG 協定色碼不變。
 - 色準 GET／PUT／reset 與其他 e-paper endpoint 一樣公開，不要求管理員登入。色準保存在 `user_nvs`；settings／完整 reset 會清除，data reset 保留。遇到未知持久化 schema 時只提供 recovery defaults，且必須明確 reset 後才能寫入新值。
 - 對外狀態固定為 `idle`、`uploading`、`queued`、`drawing`、`cooldown`、`unavailable`；client 只依 `can_upload`、`can_draw` 與 `retry_after_seconds` 判斷，不解析 message。

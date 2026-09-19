@@ -172,7 +172,7 @@ curl -H 'Authorization: Bearer <token>' \
 | `DELETE` | `/api/storage/files/{name}` | 是 | 刪除檔案。 |
 | `GET` | `/api/epaper` | 否 | 固定 panel、format、檔名、cooldown 與能力資訊。 |
 | `GET` | `/api/epaper/status` | 否 | 動態 operation、retry、CPU、stored image 與 brownout 狀態。 |
-| `POST` | `/api/epaper/image` | 否 | 上傳固定 `EPDIMG` 並自動排程 draw；raw HTTP only。 |
+| `POST` | `/api/epaper/image` | 否 | 上傳 gzip `EPDIMG` 並自動排程 draw；binary HTTP only。 |
 | `GET` | `/api/epaper/image` | 否 | 固定 image 的 header、CRC、generation 與 validity metadata。 |
 | `GET` | `/api/epaper/image/download` | 否 | 下載完整固定 image 或 single byte range；raw HTTP only。 |
 | `POST` | `/api/epaper/image/refresh` | 否 | 重新驗證並重畫 stored image。 |
@@ -1039,7 +1039,7 @@ Content-Disposition: inline; filename="photo.jpg"
 
 本節全部 endpoint 都是公開例外，不要求 Bearer token。這代表同網路 client 可讀取／替換固定圖片並觸發 draw；180 秒 cooldown 是面板保護，不是 authentication。JSON status、metadata 與 action 可由 HTTP 或 serial `api ...` 使用；raw upload/download 只支援 HTTP。
 
-`EPDIMG` request 固定為 192,040 bytes：40-byte little-endian header 後接 192,000-byte packed frame。Header layout 依序為 8-byte magic `EPDIMG\0\0`、uint32 version `1`、uint32 header size `40`、uint32 width `800`、uint32 height `480`、uint32 frame bytes `192000`、uint32 CRC32 與 non-zero uint64 generation。每 byte 的 high／low nibble 分別是左／右 pixel，只允許 `0,1,2,3,5,6`。
+`EPDIMG` logical 格式為 40-byte little-endian header 加 row-major packed frame。Header 依序為 magic `EPDIMG\0\0`、uint32 version `1`、uint32 header size `40`、uint32 width、uint32 height、uint32 frame bytes、uint32 frame CRC32、non-zero uint64 generation。尺寸必須等於 `/api/epaper` 的 active panel；`frame_bytes = width × height / 2`、`upload_bytes = 40 + frame_bytes`。每 byte high／low nibble 分別是左／右 pixel，只允許 `0,1,2,3,5,6`。目前 production 範例為 800×480、192000 frame bytes、192040 logical bytes。Upload body 使用 gzip；這些 logical 值不是 HTTP compressed Content-Length。
 
 ### `GET /api/epaper`
 
@@ -1049,14 +1049,16 @@ Content-Disposition: inline; filename="photo.jpg"
 {
   "success": true,
   "data": {
-    "panel": {"model": "waveshare-7in3e", "width": 800, "height": 480, "colors": 6, "color_codes": [0, 1, 2, 3, 5, 6]},
-    "image": {"name": "epaper-current.epd", "format": "epdimg", "header_bytes": 40, "frame_bytes": 192000, "upload_bytes": 192040},
+    "panel": {"model": "waveshare-7in3e", "width": 800, "height": 480, "colors": 6, "color_codes": [0, 1, 2, 3, 5, 6], "flip_horizontal": true, "flip_vertical": true},
+    "image": {"name": "epaper-current.epd", "format": "epdimg", "header_bytes": 40, "frame_bytes": 192000, "upload_bytes": 192040, "upload_uncompressed_bytes": 192040, "stored_encoding": "gzip", "upload_encodings": ["gzip"], "max_compressed_bytes": 196008},
     "refresh": {"cpu_mhz": 80, "cooldown_seconds": 180, "automatic_on_boot": false},
     "capabilities": {"upload": true, "metadata": true, "download": true, "refresh": true, "white": true, "palette": true}
   },
   "message": "ok"
 }
 ```
+
+`panel.flip_horizontal`／`flip_vertical` 描述 firmware draw-time mounting compensation；client 不得再套用一次。`upload_bytes` 保留 logical 長度語意，`upload_uncompressed_bytes` 為明確同值欄位。Internal storage path 不構成 download filename contract。
 
 ### `GET /api/epaper/status`
 
@@ -1131,7 +1133,23 @@ Content-Disposition: inline; filename="photo.jpg"
 
 ### `POST /api/epaper/image`
 
-Body 是 raw `EPDIMG`，不是 JSON、form 或 multipart；`Content-Type` 可為 `application/octet-stream` 或省略，`Content-Length` 必須精確等於 `192040`。成功 atomic commit 後回 `202` 與 `state: queued`，client再輪詢 status。中止、invalid frame 或 storage failure 不覆蓋舊檔、不排程 draw。Serial 回 `415 unsupported_transport`。
+Body 是單一 gzip member 包裝的完整 EPDIMG，不是 JSON／form／multipart。`Content-Type` 使用 `application/octet-stream`（仍容許省略）；`Content-Encoding: gzip` 必填；`Content-Length` 必須明確表示壓縮 bytes，不接受任何 Transfer-Encoding。大小上限讀 capability `image.max_compressed_bytes`，且不得超過 storage quota。解壓後必須精確為 `image.upload_uncompressed_bytes`。
+
+Gzip header 最多 1024 bytes，允許有界 FEXTRA／FNAME／FCOMMENT 與正確 FHCRC，拒絕 reserved flags、非 DEFLATE、concatenated members 和 trailing garbage。驗證 gzip CRC32／ISIZE、完整 EPDIMG header／palette／frame CRC 後才 atomic replace compressed image。成功回 `202` 與 `state: queued`，已自動排程一次 draw；client 不得追加 refresh。
+
+Raw upload 是 breaking change，缺少／不支援 Content-Encoding 回 `415 unsupported_content_encoding`，不提供 raw→gzip compatibility encoder。Disconnect 或任一 validation／storage failure 保留上一張 gzip、不排程 draw。Serial 回 `415 unsupported_transport`。
+
+| HTTP | code | reason／條件 |
+| ---: | --- | --- |
+| 415 | `unsupported_content_encoding` | 缺少 gzip 或其他 encoding；encoding token 不區分大小寫，允許前後空白。 |
+| 411 | `content_length_required` | 缺少／非法／與 callback 不一致的 Content-Length，或任何 Transfer-Encoding。 |
+| 413 | `payload_too_large` | 超過 capability 的 compressed body 上限。 |
+| 422 | `invalid_epaper_image` | `invalid_gzip`：gzip header、FHCRC、DEFLATE、截斷、第二 member 或 trailing bytes。 |
+| 422 | `invalid_epaper_image` | `bad_gzip_crc`：gzip trailer CRC32 不符。 |
+| 422 | `invalid_epaper_image` | `bad_gzip_size`：ISIZE、logical output 上下限或 compressed count／offset 不符。 |
+| 422 | `invalid_epaper_image` | EPDIMG 原有 reasons：`bad_magic`、`bad_version`、`bad_header_size`、`bad_dimensions`、`bad_frame_size`、`zero_generation`、`invalid_palette`、`bad_crc`、`incomplete_header`、`short_body`、`long_body`、`null_input`。 |
+
+Transport framing 先於 encoding 驗證；缺少 Content-Length 且缺少 encoding 時優先回 411。
 
 ### `GET /api/epaper/image`
 
@@ -1145,6 +1163,8 @@ Body 是 raw `EPDIMG`，不是 JSON、form 或 multipart；`Content-Type` 可為
     "format": "epdimg",
     "media_type": "application/octet-stream",
     "size_bytes": 192040,
+    "stored_encoding": "gzip",
+    "stored_size_bytes": 96252,
     "header_bytes": 40,
     "frame_bytes": 192000,
     "width": 800,
@@ -1161,7 +1181,7 @@ Body 是 raw `EPDIMG`，不是 JSON、form 或 multipart；`Content-Type` 可為
 
 ### `GET /api/epaper/image/download`
 
-HTTP body 是 raw 192,040-byte fixed file，不使用 JSON success envelope。完整下載回 `200`，single Range 與 generic download 相同，回 `206` 或 `416 range_not_satisfiable`。Response 至少包含：
+HTTP body 是解壓後 logical EPDIMG（目前 production 192,040 bytes），不帶 Content-Encoding、不使用 JSON success envelope。Content-Length 是 logical／range 長度；`size_bytes` 與 Range offset 均指解壓後資料，`stored_size_bytes` 才是 filesystem 中實際 gzip 大小。非零 Range 從 gzip 開頭 inflate/discard，先完整驗證才送 response；若傳輸開始後才發現 read／decoder failure，結束為短於宣告 Content-Length 的失敗傳輸，client 必須拒絕截短檔案。完整下載回 `200`，single Range 與 generic download 相同，回 `206` 或 `416 range_not_satisfiable`。Response 至少包含：
 
 ```text
 Content-Type: application/octet-stream
@@ -1179,7 +1199,7 @@ Serial 回 `415 unsupported_transport`。Userdata gate 正被 upload、validatio
 
 ### `POST /api/epaper/image/white`
 
-不接受 body fields；動態串流 `0x11` 共 192,000 bytes，不建立或替換 user file，接受後回 `202`。
+不接受 body fields；動態串流 `0x11` 共 capability `frame_bytes`（目前 192,000 bytes），不建立或替換 user file，接受後回 `202`。
 
 ### `POST /api/epaper/image/palette`
 
@@ -1193,7 +1213,7 @@ E-paper synchronous error mapping：
 | `422` | `invalid_epaper_image` | header、尺寸、generation、palette、CRC 或 byte count 錯誤。 |
 | `404` | `epaper_image_not_found` | metadata／refresh／download 沒有有效 fixed file。 |
 | `503` | `epaper_unavailable` | pin、SPI、worker、safety store 未 ready或 panel state unknown。 |
-| `403` | `reserved_file` | Generic file PUT／DELETE 嘗試修改 `epaper-current.epd`。 |
+| `403` | `reserved_file` | Generic file PUT／DELETE 嘗試修改 `epaper-current.epd` 或 internal `epaper-current.epd.gz`。 |
 
 Storage error沿用 `storage_busy`、`storage_unavailable`、`insufficient_storage`、`storage_error`。已回 `202` 後的 async failure只寫入 `last_operation.error_code`，至少包含 `cpu_frequency_failed`、`brownout`、`busy_timeout`、`operation_watchdog_timeout`、`frame_read_failed`、`panel_init_failed`、`refresh_failed`、`power_off_failed`、`sleep_failed`、`panel_state_unknown`；software restart shutdown失敗另由 runtime 診斷回 `epaper_shutdown_failed`。
 

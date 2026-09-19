@@ -97,7 +97,7 @@ Api::Response remove(const Api::Request &request,
   if (request.hasBody || request.hasJsonBody) {
     return Api::problem(400, "unsupported_field", "DELETE file does not accept a request body");
   }
-  if (strcmp(name, "epaper-current.epd") == 0) {
+  if ((strcmp(name, "epaper-current.epd") == 0 || strcmp(name, "epaper-current.epd.gz") == 0)) {
     return Api::problem(
         403, "reserved_file", "e-paper image is managed by /api/epaper/image");
   }

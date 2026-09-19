@@ -2,15 +2,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "EpaperPanelProfile.h"
 
 namespace EpaperImageFormat {
 
 constexpr size_t kMagicBytes = 8;
-constexpr size_t kHeaderBytes = 40;
+constexpr size_t kHeaderBytes = EpaperPanelProfile::kHeaderBytes;
 constexpr uint32_t kVersion = 1;
-constexpr uint32_t kWidth = 800;
-constexpr uint32_t kHeight = 480;
-constexpr size_t kFrameBytes = 192000;
+constexpr uint32_t kWidth = EpaperPanelProfile::Active::width;
+constexpr uint32_t kHeight = EpaperPanelProfile::Active::height;
+constexpr size_t kFrameBytes = EpaperPanelProfile::Active::frameBytes;
 constexpr size_t kImageBytes = kHeaderBytes + kFrameBytes;
 
 constexpr uint8_t kColorBlack = 0;
@@ -50,12 +51,16 @@ enum class ValidationError {
   ZeroGeneration,
   InvalidPalette,
   BadCrc,
+  InvalidGzip,
+  BadGzipCrc,
+  BadGzipSize,
 };
 
 const char *errorCode(ValidationError error);
 bool paletteCodeValid(uint8_t code);
 bool paletteByteValid(uint8_t value);
 uint32_t crc32(const uint8_t *data, size_t length);
+uint32_t updateCrc32(uint32_t state, const uint8_t *data, size_t length);
 
 bool encodeHeader(const Header &header, uint8_t *output, size_t outputLength);
 bool decodeHeader(const uint8_t *input,

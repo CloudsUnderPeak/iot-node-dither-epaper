@@ -1,6 +1,7 @@
 #include "EpaperImageFormat.h"
 
 #include <cstring>
+#include <array>
 
 namespace EpaperImageFormat {
 namespace {
@@ -31,18 +32,27 @@ void writeLe64(uint8_t *output, uint64_t value) {
   writeLe32(output + 4, static_cast<uint32_t>(value >> 32U));
 }
 
+}  // namespace
+
+namespace {
+constexpr std::array<uint32_t, 256> crcTable() {
+  std::array<uint32_t, 256> table{};
+  for (size_t i = 0; i < table.size(); ++i) {
+    uint32_t value = i;
+    for (int bit = 0; bit < 8; ++bit) value = (value >> 1) ^ ((0U - (value & 1U)) & 0xEDB88320U);
+    table[i] = value;
+  }
+  return table;
+}
+constexpr auto kCrcTable = crcTable();
+}
+
 uint32_t updateCrc32(uint32_t state, const uint8_t *data, size_t length) {
   for (size_t index = 0; index < length; ++index) {
-    state ^= data[index];
-    for (uint8_t bit = 0; bit < 8; ++bit) {
-      const uint32_t mask = 0U - (state & 1U);
-      state = (state >> 1U) ^ (0xEDB88320U & mask);
-    }
+    state = kCrcTable[(state ^ data[index]) & 0xFF] ^ (state >> 8);
   }
   return state;
 }
-
-}  // namespace
 
 const char *errorCode(ValidationError error) {
   switch (error) {
@@ -59,15 +69,15 @@ const char *errorCode(ValidationError error) {
     case ValidationError::ZeroGeneration: return "zero_generation";
     case ValidationError::InvalidPalette: return "invalid_palette";
     case ValidationError::BadCrc: return "bad_crc";
+    case ValidationError::InvalidGzip: return "invalid_gzip";
+    case ValidationError::BadGzipCrc: return "bad_gzip_crc";
+    case ValidationError::BadGzipSize: return "bad_gzip_size";
   }
   return "unknown";
 }
 
 bool paletteCodeValid(uint8_t code) {
-  for (uint8_t validCode : kPaletteCodes) {
-    if (code == validCode) return true;
-  }
-  return false;
+  return code <= kColorGreen && code != 4;
 }
 
 bool paletteByteValid(uint8_t value) {

@@ -42,6 +42,7 @@ class FakeTransport final : public EpdTransport {
     if (data == nullptr || length == 0 || failData) return false;
     dataLengths.push_back(length);
     dataFirstBytes.push_back(data[0]);
+    if (!commands.empty() && commands.back() == 0x61) resolution.assign(data, data + length);
     now += advancePerDataMs;
     return true;
   }
@@ -68,6 +69,7 @@ class FakeTransport final : public EpdTransport {
   std::vector<uint8_t> commands;
   std::vector<size_t> dataLengths;
   std::vector<uint8_t> dataFirstBytes;
+  std::vector<uint8_t> resolution;
 };
 
 class ShortSource final : public EpaperFrameSource {
@@ -98,6 +100,10 @@ void testNormalStreamingAndShutdown() {
   EpaperWhiteFrameSource source;
   expect(driver.begin(&transport) && driver.initialize(),
          "ready transport should initialize the panel command sequence");
+  expect(transport.resolution == std::vector<uint8_t>({
+      static_cast<uint8_t>(EpaperImageFormat::kWidth >> 8), static_cast<uint8_t>(EpaperImageFormat::kWidth),
+      static_cast<uint8_t>(EpaperImageFormat::kHeight >> 8), static_cast<uint8_t>(EpaperImageFormat::kHeight)}),
+      "resolution command follows the active profile in big-endian order");
   expect(transport.resetLevels == std::vector<bool>({true, false, true}),
          "panel reset should use the reviewed high-low-high pulse");
   expect(driver.state() == Epd7In3E::State::Powered && driver.panelMayBeActive(),

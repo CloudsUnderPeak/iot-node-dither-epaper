@@ -247,13 +247,17 @@
         };
     }
 
+    var MOCK_PANEL = { model: 'waveshare-7in3e', width: 800, height: 480 };
+    var MOCK_FRAME_BYTES = MOCK_PANEL.width * MOCK_PANEL.height / 2;
+    var MOCK_IMAGE_BYTES = 40 + MOCK_FRAME_BYTES;
+    var MOCK_MAX_COMPRESSED = MOCK_IMAGE_BYTES + Math.floor(MOCK_IMAGE_BYTES / 100) + 2048;
     var EPAPER_DRAW_MS = 5200;
     var EPAPER_COOLDOWN_MS = 8000;
 
     function epaperCapabilities() {
         return {
-            panel: { model: 'waveshare-7in3e', width: 800, height: 480, colors: 6, color_codes: [0, 1, 2, 3, 5, 6] },
-            image: { name: 'epaper-current.epd', format: 'epdimg', header_bytes: 40, frame_bytes: 192000, upload_bytes: 192040 },
+            panel: Object.assign({}, MOCK_PANEL, { colors: 6, color_codes: [0, 1, 2, 3, 5, 6], flip_horizontal: false, flip_vertical: false }),
+            image: { name: 'epaper-current.epd', format: 'epdimg', header_bytes: 40, frame_bytes: MOCK_FRAME_BYTES, upload_bytes: MOCK_IMAGE_BYTES, upload_uncompressed_bytes: MOCK_IMAGE_BYTES, stored_encoding: 'gzip', upload_encodings: ['gzip'], max_compressed_bytes: MOCK_MAX_COMPRESSED },
             refresh: { cpu_mhz: 80, cooldown_seconds: 180, automatic_on_boot: false },
             capabilities: { upload: true, metadata: true, download: true, refresh: true, white: true, palette: true }
         };
@@ -378,12 +382,36 @@
             return ok(epaperCalibrationSnapshot(), 'e-paper calibration reset');
         }
         if (path === 'api/epaper/image' && method === 'POST') {
-            var byteLength = init && init.body && init.body.byteLength;
-            if (byteLength !== 192040) {
-                return fail(422, 'invalid_epaper_image', 'invalid EPDIMG length');
+            if (new Headers(init.headers).get('Content-Encoding') !== 'gzip') {
+                return fail(415, 'unsupported_content_encoding', 'gzip is required');
             }
-            state.epaper.stored = true;
-            return beginEpaper('uploaded');
+            var compressed = new Blob([init.body]);
+            if (compressed.size > MOCK_MAX_COMPRESSED) { return fail(413, 'payload_too_large', 'gzip too large'); }
+            return new Response(compressed.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+                .then(function (raw) {
+                    if (raw.byteLength !== MOCK_IMAGE_BYTES) { return fail(422, 'invalid_epaper_image', 'invalid EPDIMG length'); }
+                    if (!epaperStatus().can_upload) { return fail(409, 'epaper_busy', 'e-paper is busy'); }
+                    var view = new DataView(raw);
+                    var bytes = new Uint8Array(raw);
+                    if (Array.from(bytes.slice(0,8)).join(',') !== '69,80,68,73,77,71,0,0'
+                        || view.getUint32(8,true) !== 1 || view.getUint32(12,true) !== 40
+                        || view.getUint32(16,true) !== MOCK_PANEL.width || view.getUint32(20,true) !== MOCK_PANEL.height
+                        || view.getUint32(24,true) !== MOCK_FRAME_BYTES || view.getBigUint64(32,true) === 0n) {
+                        return fail(422, 'invalid_epaper_image', 'invalid EPDIMG header');
+                    }
+                    state.epaper.stored = true;
+                    state.epaper.generation = view.getBigUint64(32,true).toString();
+                    state.epaper.crc32 = view.getUint32(28,true).toString(16).toUpperCase().padStart(8, '0');
+                    state.epaper.storedSize = compressed.size;
+                    return beginEpaper('uploaded');
+                }).catch(function () { return fail(422, 'invalid_epaper_image', 'invalid gzip'); });
+        }
+        if (path === 'api/epaper/image' && method === 'GET') {
+            return state.epaper.stored ? ok({ name: 'epaper-current.epd', format: 'epdimg', stored_encoding: 'gzip',
+                size_bytes: MOCK_IMAGE_BYTES, stored_size_bytes: state.epaper.storedSize,
+                header_bytes: 40, frame_bytes: MOCK_FRAME_BYTES, width: MOCK_PANEL.width, height: MOCK_PANEL.height,
+                generation: state.epaper.generation, crc32: state.epaper.crc32, media_type: 'application/octet-stream', valid: true
+            }) : fail(404, 'epaper_image_not_found', 'stored image not found');
         }
         if (path === 'api/epaper/image/white' && method === 'POST') {
             return beginEpaper('white');

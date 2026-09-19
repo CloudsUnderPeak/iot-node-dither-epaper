@@ -5,15 +5,21 @@ cd "$project_dir"
 build_dir="$project_dir/tmp/native-tests"
 mkdir -p "$build_dir"
 common=(-std=c++17 -Wall -Wextra -Werror -pthread -Itests/native/stubs -Isrc)
+g++ "${common[@]}" tests/native/EpaperGzipTest.cpp src/modules/epaper/EpaperGzip.cpp \
+  src/modules/epaper/EpaperImageFormat.cpp src/modules/epaper/miniz/miniz_tinfl.c \
+  -lz -o "$build_dir/epaper-gzip-test"
+"$build_dir/epaper-gzip-test"
 storage=(src/modules/storage/UserDataStorage.cpp src/modules/storage/UserFilePolicy.cpp)
 g++ "${common[@]}" tests/native/UserDataStorageTest.cpp "${storage[@]}" -o "$build_dir/userdata-storage-test"
 "$build_dir/userdata-storage-test"
 g++ "${common[@]}" tests/native/EpaperServiceTest.cpp "${storage[@]}" \
+  src/modules/epaper/EpaperGzip.cpp src/modules/epaper/EpaperGzipReader.cpp \
+  src/modules/epaper/miniz/miniz_tinfl.c \
   src/modules/epaper/EpaperService.cpp src/modules/epaper/EpaperCooldown.cpp \
   src/modules/epaper/EpaperImageFormat.cpp src/modules/epaper/EpaperFrameSource.cpp \
   src/modules/epaper/Epd7In3E.cpp src/modules/epaper/EpaperSafetyStore.cpp \
   src/modules/epaper/EpaperShutdownCoordinator.cpp src/modules/epaper/CpuFrequencyGuard.cpp \
-  src/modules/runtime/BootDiagnostics.cpp -o "$build_dir/epaper-service-test"
+  src/modules/runtime/BootDiagnostics.cpp -lz -o "$build_dir/epaper-service-test"
 "$build_dir/epaper-service-test"
 g++ "${common[@]}" tests/native/RuntimeActionSchedulerTest.cpp \
   src/modules/runtime/RuntimeActionScheduler.cpp src/modules/config/ConfigService.cpp \

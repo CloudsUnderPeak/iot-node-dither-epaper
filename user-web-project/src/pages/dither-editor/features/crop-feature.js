@@ -220,8 +220,9 @@
             var aspectRatioInput = ui.selectInput(
                 crop.aspectRatioId,
                 geometry.ratios.filter(function (ratio) {
-                    return !app.pages.ditherEditor.targetPolicy.isEpaper(state)
-                        || ratio.id === '5-3' || ratio.id === '3-5';
+                    return app.pages.ditherEditor.targetPolicy.isEpaper(state)
+                        ? ratio.id === state.target.profile.landscapeRatioId || ratio.id === state.target.profile.portraitRatioId
+                        : !ratio.deviceOnly;
                 }).map(function (ratio) {
                     return { value: ratio.id, label: ratio.label };
                 }),

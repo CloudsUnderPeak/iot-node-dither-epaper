@@ -1,5 +1,5 @@
 (function (app) {
-    // Display profiles 描述目標顯示器尺寸與輸出特性。
+    // Standalone editor presets only. Device Mode uses GET /api/epaper.
     // 目前主要作為新圖、初始 resize/crop 的尺寸來源，不直接耦合特定硬體 API。
     app.pages.ditherEditor = app.pages.ditherEditor || {};
     app.pages.ditherEditor.config = app.pages.ditherEditor.config || {};

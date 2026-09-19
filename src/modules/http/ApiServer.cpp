@@ -465,12 +465,11 @@ void ApiServer::prepareEpaperUpload(AsyncWebServerRequest *request,
   size_t declaredBytes = 0;
   const String declaredHeader = request->getHeader("Content-Length")->value();
   if (!UserFilePolicy::parseSize(declaredHeader.c_str(), declaredBytes) ||
-      declaredBytes != EpaperImageFormat::kImageBytes ||
       declaredBytes != request->contentLength() ||
       (callbackTotal != 0 && callbackTotal != declaredBytes)) {
     saveUploadError(*state, Api::problem(
         411, "content_length_required",
-        "EPDIMG Content-Length must be exactly 192040 bytes"));
+        "invalid compressed Content-Length"));
     return;
   }
   if (request->contentType().length() != 0) {
@@ -483,8 +482,12 @@ void ApiServer::prepareEpaperUpload(AsyncWebServerRequest *request,
       return;
     }
   }
+  String encoding = request->hasHeader("Content-Encoding")
+      ? request->getHeader("Content-Encoding")->value() : String();
+  encoding.trim();
+  encoding.toLowerCase();
   const ApiRouter::FileUploadStart start =
-      streams_.run([&]() { return router_->prepareEpaperUpload(declaredBytes); });
+      streams_.run([&]() { return router_->prepareEpaperUpload(declaredBytes, encoding.c_str()); });
   if (!start.ready) {
     saveUploadError(*state, start.response);
     return;

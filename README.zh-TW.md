@@ -10,6 +10,8 @@
 
 目前搭配 **DFRobot FireBeetle 2 ESP32-C6** 與 **Waveshare 7.3inch e-Paper HAT (E)，800 × 480 六色電子紙**。
 
+面板 model、width、height 與水平／垂直安裝翻轉集中在 [`EpaperPanelProfile.h`](src/modules/epaper/EpaperPanelProfile.h)。編輯器與 Python 工具依裝置 capability 使用尺寸；EPDIMG 上傳與儲存採 gzip，下載維持 logical raw EPDIMG。更換尺寸限相同控制器協定，仍需實板驗證。
+
 ## 線上體驗
 
 **[開啟 Demo](https://cloudsunderpeak.github.io/iot-node-dither-epaper/)**

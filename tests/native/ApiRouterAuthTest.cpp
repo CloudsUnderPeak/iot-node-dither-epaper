@@ -273,6 +273,16 @@ void testEpaperPublicContract() {
              capabilityData.find("\"cooldown_seconds\":180") != std::string::npos,
          "e-paper capabilities must expose the fixed image and cooldown contract");
 
+  for (const char *encoding : {static_cast<const char *>(nullptr), "", "identity", "br", "gzip, gzip"}) {
+    const auto upload = fixture.router.prepareEpaperUpload(100, encoding);
+    expect(!upload.ready && upload.response.statusCode == 415, "non-gzip upload rejected");
+  }
+  expect(fixture.router.prepareEpaperUpload(100, "gzip").ready, "gzip upload admitted");
+  expect(fixture.router.prepareFileUpload("valid-token", "/api/storage/files/epaper-current.epd.gz", 12).response.statusCode == 403,
+         "compressed image reserved from generic PUT");
+  expect(fixture.router.dispatch(requestFor(Api::Method::Delete, "/api/storage/files/epaper-current.epd.gz", "valid-token")).statusCode == 403,
+         "compressed image reserved from generic DELETE");
+  expect(capabilityData.find("\"stored_encoding\":\"gzip\"") != std::string::npos, "gzip capability");
   const Api::Response defaultCalibration = fixture.router.dispatch(
       requestFor(Api::Method::Get, "/api/epaper/calibration"));
   const std::string defaultCalibrationData = defaultCalibration.data.c_str();

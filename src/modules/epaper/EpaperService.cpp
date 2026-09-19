@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
+#include <new>
 
 namespace {
 
@@ -265,15 +267,17 @@ EpaperServiceSnapshot EpaperService::snapshot(uint32_t nowMs) const {
   snapshot.lastErrorCode = lastErrorCode_;
   snapshot.lastResetReason = lastResetReason_;
   snapshot.transferredBytes = transferredBytes_;
+  snapshot.timings = timings_;
   return snapshot;
 }
 
 EpaperServiceResult EpaperService::beginUpload(size_t contentLength) {
   if (!ready_) return {EpaperServiceStatusCode::Unavailable, "e-paper unavailable"};
-  if (contentLength != EpaperImageFormat::kImageBytes) {
-    return {EpaperServiceStatusCode::InvalidImage,
-            "EPDIMG Content-Length must be exactly 192040 bytes",
-            "bad_size"};
+  if (contentLength > kMaxCompressedBytes) {
+    return {EpaperServiceStatusCode::PayloadTooLarge, "compressed image exceeds panel limit"};
+  }
+  if (contentLength == 0) {
+    return {EpaperServiceStatusCode::InvalidImage, "empty gzip image", "invalid_gzip"};
   }
   {
     SemaphoreLock lock(mutex_);
@@ -282,15 +286,26 @@ EpaperServiceResult EpaperService::beginUpload(size_t contentLength) {
       return {EpaperServiceStatusCode::Busy, "e-paper is busy"};
     }
     ++operationGeneration_;
+    timings_ = {};
+    operationStartedMs_ = millis();
     state_ = EpaperServiceState::Uploading;
     phase_ = EpaperDrawPhase::None;
     uploadValidator_.reset();
   }
-  const UserDataUploadBegin begin = storage_->beginUpload(kImageName, contentLength);
+  const UserDataUploadBegin begin = storage_->beginUpload(kStoredImageName, contentLength);
   if (!begin.result.ok()) {
     setIdleAfterUploadFailure("storage_error");
     return fromStorage(begin.result);
   }
+  uploadDecoder_.reset(new (std::nothrow) EpaperGzip);
+  if (!uploadDecoder_ || !uploadDecoder_->reset()) {
+    storage_->abortUpload(begin.sessionId);
+    uploadDecoder_.reset();
+    setIdleAfterUploadFailure("decoder_allocation_failed");
+    return {EpaperServiceStatusCode::Unavailable, "failed to allocate gzip decoder"};
+  }
+  uploadCompressedBytes_ = 0;
+  uploadDeclaredBytes_ = contentLength;
   uploadSessionId_ = begin.sessionId;
   return {EpaperServiceStatusCode::Ok, "upload started", "none", begin.sessionId};
 }
@@ -304,21 +319,26 @@ EpaperServiceResult EpaperService::writeUpload(
     return {EpaperServiceStatusCode::UploadIncomplete, "upload session is not active"};
   }
   if (sessionId == 0 || sessionId != uploadSessionId_ ||
-      index != uploadValidator_.bytesReceived() ||
-      !uploadValidator_.consume(data, length)) {
+      index != uploadCompressedBytes_ ||
+      length > uploadDeclaredBytes_ - uploadCompressedBytes_ ||
+      !consumeUpload(data, length, index + length == uploadDeclaredBytes_)) {
     storage_->abortUpload(sessionId);
     uploadSessionId_ = 0;
-    const char *reason = EpaperImageFormat::errorCode(uploadValidator_.error());
+    const char *reason = uploadError();
+    uploadDecoder_.reset();
     setIdleAfterUploadFailure(reason);
     return {EpaperServiceStatusCode::InvalidImage, "invalid EPDIMG", reason};
   }
   const UserDataFileResult written =
       storage_->writeUpload(sessionId, index, data, length);
   if (!written.ok()) {
+    storage_->abortUpload(sessionId);
+    uploadDecoder_.reset();
     uploadSessionId_ = 0;
     setIdleAfterUploadFailure("storage_error");
     return fromStorage(written);
   }
+  uploadCompressedBytes_ += length;
   return {EpaperServiceStatusCode::Ok, "upload chunk accepted"};
 }
 
@@ -327,13 +347,17 @@ EpaperServiceResult EpaperService::finishUpload(uint32_t sessionId) {
     return {EpaperServiceStatusCode::UploadIncomplete, "upload session is not active"};
   }
   if (sessionId == 0 || sessionId != uploadSessionId_ ||
+      uploadCompressedBytes_ != uploadDeclaredBytes_ ||
+      !consumeUpload(nullptr, 0, true) || !uploadDecoder_->finish() ||
       !uploadValidator_.finish()) {
     storage_->abortUpload(sessionId);
     uploadSessionId_ = 0;
-    const char *reason = EpaperImageFormat::errorCode(uploadValidator_.error());
+    const char *reason = uploadError();
+    uploadDecoder_.reset();
     setIdleAfterUploadFailure(reason);
     return {EpaperServiceStatusCode::InvalidImage, "invalid EPDIMG", reason};
   }
+  uploadDecoder_.reset();
   const UserDataUploadCommit commit = storage_->finishUpload(sessionId);
   uploadSessionId_ = 0;
   if (!commit.result.ok()) {
@@ -344,7 +368,8 @@ EpaperServiceResult EpaperService::finishUpload(uint32_t sessionId) {
     SemaphoreLock lock(mutex_);
     stored_.present = true;
     stored_.valid = true;
-    stored_.sizeBytes = commit.sizeBytes;
+    stored_.sizeBytes = EpaperImageFormat::kImageBytes;
+    stored_.storedSizeBytes = commit.sizeBytes;
     stored_.header = uploadValidator_.header();
     stored_.validationError = EpaperImageFormat::ValidationError::None;
     state_ = EpaperServiceState::Queued;
@@ -362,6 +387,7 @@ EpaperServiceResult EpaperService::finishUpload(uint32_t sessionId) {
 void EpaperService::abortUpload(uint32_t sessionId) {
   if (sessionId == 0 || sessionId != uploadSessionId_) return;
   storage_->abortUpload(sessionId);
+  uploadDecoder_.reset();
   uploadSessionId_ = 0;
   setIdleAfterUploadFailure("upload_aborted");
 }
@@ -384,6 +410,8 @@ EpaperServiceResult EpaperService::queueDraw(EpaperDrawAction action,
       return {EpaperServiceStatusCode::Busy, "e-paper is busy"};
     }
     ++operationGeneration_;
+    timings_ = {};
+    operationStartedMs_ = millis();
     state_ = EpaperServiceState::Queued;
     phase_ = EpaperDrawPhase::None;
     queuedSource_ = source;
@@ -414,6 +442,8 @@ EpaperServiceResult EpaperService::refreshMetadata() {
       return {EpaperServiceStatusCode::Busy, "e-paper is busy"};
     }
     ++operationGeneration_;
+    timings_ = {};
+    operationStartedMs_ = millis();
     state_ = EpaperServiceState::Queued; // reservation, no worker item yet
   }
   const auto result = validateStoredImage();
@@ -432,7 +462,10 @@ EpaperServiceResult EpaperService::validateStoredImage() {
     generation = operationGeneration_;
   }
   EpaperStoredImageMetadata candidate;
-  const UserDataDownloadBegin begin = storage_->beginDownload(kImageName, "");
+  // Reader contains input/skip buffers; allocate it off the worker stack.
+  std::unique_ptr<EpaperGzipReader> reader(new (std::nothrow) EpaperGzipReader(storage_));
+  if (!reader) return {EpaperServiceStatusCode::StorageError, "gzip reader allocation failed"};
+  const auto begin = reader->open(kStoredImageName);
   if (!begin.result.ok()) {
     if (begin.result.status == UserDataFileStatus::NotFound) {
       SemaphoreLock lock(mutex_);
@@ -440,39 +473,29 @@ EpaperServiceResult EpaperService::validateStoredImage() {
     }
     return fromStorage(begin.result);
   }
-  EpaperImageFormat::StreamingValidator validator;
-  uint8_t buffer[UserDataStorage::kFileIoChunkBytes];
-  size_t receivedBytes = 0;
-  bool contentValid = true;
-  while (receivedBytes < begin.contentLength) {
-    const auto read = storage_->readDownload(begin.sessionId, buffer, sizeof(buffer));
-    if (!read.result.ok() || read.bytesRead == 0) {
-      storage_->finishDownload(begin.sessionId);
-      return {EpaperServiceStatusCode::StorageError, "failed to read stored image"};
-    }
-    receivedBytes += read.bytesRead;
-    // Consume the whole file even after invalid syntax, so an I/O failure
-    // cannot be mislabeled as a fully validated corrupt file.
-    if (contentValid) contentValid = validator.consume(buffer, read.bytesRead);
+  const uint32_t validationStarted = millis();
+  const bool valid = reader->complete();
+  { SemaphoreLock lock(mutex_); timings_.storedValidationMs = millis() - validationStarted; }
+  if ((!valid && !reader->drainStored()) || reader->ioFailed()) {
+    return {EpaperServiceStatusCode::StorageError, "failed to read stored image"};
   }
-  const bool valid = contentValid && validator.finish() &&
-                     begin.fileSize == EpaperImageFormat::kImageBytes;
   candidate.present = true;
   candidate.valid = valid;
-  candidate.sizeBytes = begin.fileSize;
-  candidate.header = validator.header();
-  candidate.validationError = validator.error();
+  candidate.sizeBytes = EpaperImageFormat::kImageBytes;
+  candidate.storedSizeBytes = begin.fileSize;
+  candidate.header = reader->header();
+  candidate.validationError = reader->error();
   bool published = false;
   {
     SemaphoreLock lock(mutex_);
     // Every runtime validator owns admission before opening storage. This
-    // reservation excludes upload/rename until candidate publication, even
-    // if readDownload auto-releases its gate at EOF. Generic routes cannot
+    // reservation and retained storage gate exclude upload/rename until
+    // candidate publication. Generic routes cannot
     // mutate the reserved image filename.
     published = generation == operationGeneration_;
     if (published) stored_ = candidate;
   }
-  storage_->finishDownload(begin.sessionId);
+  reader->close();
   if (!published) return {EpaperServiceStatusCode::Busy, "stored image validation superseded"};
   if (!valid) {
     return {EpaperServiceStatusCode::InvalidImage, "stored EPDIMG is invalid",
@@ -490,35 +513,90 @@ UserDataDownloadBegin EpaperService::beginImageDownload(const char *rangeHeader)
       return denied;
     }
   }
-  return storage_->beginDownload(kImageName, rangeHeader);
+  UserDataDownloadBegin begin;
+  begin.fileSize = EpaperImageFormat::kImageBytes;
+  UserFilePolicy::ByteRange range;
+  if (!UserFilePolicy::parseRange(rangeHeader, begin.fileSize, range)) {
+    begin.result = {UserDataFileStatus::RangeNotSatisfiable, "invalid logical image range"};
+    return begin;
+  }
+  if (downloadReader_) {
+    begin.result = {UserDataFileStatus::Busy, "image download is active"};
+    return begin;
+  }
+  std::unique_ptr<EpaperGzipReader> reader(new (std::nothrow) EpaperGzipReader(storage_));
+  if (!reader) {
+    begin.result = {UserDataFileStatus::StorageError, "gzip reader allocation failed"};
+    return begin;
+  }
+  auto opened = reader->open(kStoredImageName);
+  if (!opened.result.ok()) { begin.result = opened.result; return begin; }
+  // Validate the whole stream before response headers, even for a short Range.
+  if (!reader->complete() || !reader->rewind() || !reader->skip(range.start)) {
+    { SemaphoreLock lock(mutex_); ++timings_.downloadFailures; }
+    begin.result = {UserDataFileStatus::StorageError, "stored gzip validation failed"};
+    return begin;
+  }
+  begin.result = {UserDataFileStatus::Ok, "ok"};
+  begin.sessionId = reader->sessionId();
+  begin.rangeStart = range.start;
+  begin.contentLength = range.length;
+  begin.partial = range.partial;
+  downloadRemaining_ = range.length;
+  downloadReader_ = std::move(reader);
+  return begin;
 }
 
 UserDataReadResult EpaperService::readImageDownload(
-    uint32_t sessionId,
-    uint8_t *buffer,
-    size_t bufferLength) {
-  return storage_->readDownload(sessionId, buffer, bufferLength);
+    uint32_t sessionId, uint8_t *buffer, size_t bufferLength) {
+  UserDataReadResult result;
+  if (!downloadReader_ || sessionId != downloadReader_->sessionId() || !buffer) {
+    result.result = {UserDataFileStatus::StorageError, "image download is not active"};
+    return result;
+  }
+  const size_t count = downloadReader_->read(buffer, std::min(bufferLength, downloadRemaining_));
+  if (!count && downloadRemaining_) {
+    finishImageDownload(sessionId);
+    { SemaphoreLock lock(mutex_); ++timings_.downloadFailures; }
+    result.result = {UserDataFileStatus::StorageError, "logical gzip read failed"};
+    return result;
+  }
+  downloadRemaining_ -= count;
+  if (!downloadRemaining_) {
+    // Validate the tail before delivering the final Range bytes. If this fails,
+    // HTTP closes a short fixed-length response; it cannot report success.
+    const bool valid = downloadReader_->complete();
+    finishImageDownload(sessionId);
+    if (!valid) {
+      { SemaphoreLock lock(mutex_); ++timings_.downloadFailures; }
+      result.result = {UserDataFileStatus::StorageError, "logical gzip trailer failed"};
+      return result;
+    }
+  }
+  result.result = {UserDataFileStatus::Ok, "ok"};
+  result.bytesRead = count;
+  return result;
 }
 
 void EpaperService::finishImageDownload(uint32_t sessionId) {
-  storage_->finishDownload(sessionId);
+  if (downloadReader_ && downloadReader_->sessionId() == sessionId) downloadReader_.reset();
 }
 
-size_t EpaperService::StoredFrameSource::read(
-    size_t offset,
-    uint8_t *output,
-    size_t capacity) const {
-  if (failed_ || storage_ == nullptr || offset != expectedOffset_) {
-    failed_ = true;
-    return 0;
-  }
-  const UserDataReadResult result = storage_->readDownload(sessionId_, output, capacity);
-  if (!result.result.ok()) {
-    failed_ = true;
-    return 0;
-  }
-  expectedOffset_ += result.bytesRead;
-  return result.bytesRead;
+size_t EpaperService::StoredFrameSource::read(size_t offset, uint8_t *output, size_t capacity) const {
+  if (offset != expectedOffset_) return 0;
+  const uint32_t started = millis();
+  const size_t count = reader_->read(output, std::min(capacity, size() - offset));
+  readMs_ += millis() - started;
+  expectedOffset_ += count;
+  return count;
+}
+
+bool EpaperService::StoredFrameSource::rewind() const {
+  expectedOffset_ = 0;
+  const uint32_t started = millis();
+  const bool ok = reader_->rewind() && reader_->skip(EpaperImageFormat::kHeaderBytes);
+  readMs_ += millis() - started;
+  return ok;
 }
 
 void EpaperService::workerEntry(void *context) {
@@ -560,34 +638,44 @@ void EpaperService::executeDraw(EpaperDrawAction action) {
     lastErrorCode_ = validation.reason;
     return;
   }
-  char range[48]{};
-  snprintf(range, sizeof(range), "bytes=%u-%u",
-           static_cast<unsigned>(EpaperImageFormat::kHeaderBytes),
-           static_cast<unsigned>(EpaperImageFormat::kImageBytes - 1));
-  const UserDataDownloadBegin begin = storage_->beginDownload(kImageName, range);
-  if (!begin.result.ok() || begin.contentLength != EpaperImageFormat::kFrameBytes) {
-    if (begin.result.ok()) storage_->finishDownload(begin.sessionId);
+  std::unique_ptr<EpaperGzipReader> reader(new (std::nothrow) EpaperGzipReader(storage_));
+  if (!reader || !reader->open(kStoredImageName).result.ok() ||
+      !reader->skip(EpaperImageFormat::kHeaderBytes)) {
     SemaphoreLock lock(mutex_);
     state_ = EpaperServiceState::Idle;
     lastResult_ = "failed";
     lastErrorCode_ = "storage_error";
     return;
   }
-  StoredFrameSource source(storage_, begin.sessionId);
-  runDraw(source, begin.sessionId);
+  StoredFrameSource source(reader.get());
+  runDraw(source);
+  { SemaphoreLock lock(mutex_); timings_.frameReadMs = source.readMs(); }
 }
 
-bool EpaperService::runDraw(const EpaperFrameSource &source,
-                            uint32_t storageSessionId) {
+bool EpaperService::runDraw(const EpaperFrameSource &source) {
+  std::unique_ptr<EpaperOrientedFrameSource> oriented;
+  if (EpaperPanelProfile::kFlipHorizontal || EpaperPanelProfile::kFlipVertical) {
+    oriented.reset(new (std::nothrow) EpaperOrientedFrameSource(source,
+        EpaperImageFormat::kWidth, EpaperImageFormat::kHeight,
+        EpaperPanelProfile::kFlipHorizontal, EpaperPanelProfile::kFlipVertical));
+    if (!oriented || !oriented->ready()) {
+      source.close();
+      SemaphoreLock lock(mutex_);
+      state_ = EpaperServiceState::Idle;
+      lastResult_ = "failed";
+      lastErrorCode_ = "orientation_allocation_failed";
+      return false;
+    }
+  }
   setOperation(EpaperServiceState::Drawing, EpaperDrawPhase::Prewake,
                EpaperPanelState::Inactive);
   if (!safetyStore_->markActive()) {
-    if (storageSessionId != 0) storage_->finishDownload(storageSessionId);
+    source.close();
     finishDraw(false, false, true, EpdDriverError::None);
     return false;
   }
   if (!driver_->begin(transport_)) {
-    if (storageSessionId != 0) storage_->finishDownload(storageSessionId);
+    source.close();
     const bool safe = shutdownCoordinator_->finishOperation();
     finishDraw(false, safe, true, driver_->lastError());
     return false;
@@ -595,7 +683,7 @@ bool EpaperService::runDraw(const EpaperFrameSource &source,
   const uint32_t originalMhz = frequencyDriver_->currentMhz();
   CpuFrequencyGuard frequencyGuard;
   if (!frequencyGuard.acquire(frequencyDriver_)) {
-    if (storageSessionId != 0) storage_->finishDownload(storageSessionId);
+    source.close();
     const bool safe = shutdownCoordinator_->finishOperation();
     finishDraw(false, safe, frequencyDriver_->currentMhz() == originalMhz, EpdDriverError::None);
     return false;
@@ -612,8 +700,11 @@ bool EpaperService::runDraw(const EpaperFrameSource &source,
     setOperation(EpaperServiceState::Drawing, EpaperDrawPhase::Transferring,
                  EpaperPanelState::Active);
   }
-  const bool transferred = initialized && driver_->transferFrame(source);
-  if (storageSessionId != 0) storage_->finishDownload(storageSessionId);
+  const uint32_t transferStarted = millis();
+  const bool transferred = initialized && driver_->transferFrame(oriented ? *oriented : source);
+  { SemaphoreLock lock(mutex_); timings_.transferMs = millis() - transferStarted; }
+  oriented.reset();
+  source.close();
   const bool drawn = transferred && [&]() {
     setOperation(EpaperServiceState::Drawing, EpaperDrawPhase::Refreshing,
                  EpaperPanelState::Active);
@@ -644,6 +735,7 @@ void EpaperService::finishDraw(bool drawSucceeded,
                                EpdDriverError driverError) {
   SemaphoreLock lock(mutex_);
   phase_ = EpaperDrawPhase::None;
+  timings_.totalOperationMs = millis() - operationStartedMs_;
   if (!shutdownSafe) {
     state_ = EpaperServiceState::Unavailable;
     panelState_ = EpaperPanelState::Unknown;
@@ -749,4 +841,32 @@ const char *epaperPanelStateToString(EpaperPanelState state) {
     case EpaperPanelState::Unknown: return "unknown";
   }
   return "unknown";
+}
+
+bool EpaperService::consumeUpload(const uint8_t *data, size_t length, bool finalInput) {
+  const uint32_t started = millis();
+  struct Timing {
+    EpaperService *service;
+    uint32_t started;
+    ~Timing() {
+      SemaphoreLock lock(service->mutex_);
+      service->timings_.uploadValidationMs += millis() - started;
+    }
+  } timing{this, started};
+  uint8_t output[UserDataStorage::kFileIoChunkBytes];
+  size_t offset = 0;
+  while (true) {
+    size_t consumed = 0, produced = 0;
+    if (!uploadDecoder_->step(data ? data + offset : nullptr, length - offset,
+          consumed, output, sizeof(output), produced, finalInput)) return false;
+    offset += consumed;
+    if (produced && !uploadValidator_.consume(output, produced)) return false;
+    if (!consumed && !produced) return offset == length;
+  }
+}
+
+const char *EpaperService::uploadError() const {
+  auto error = uploadDecoder_->error();
+  if (error == EpaperImageFormat::ValidationError::None) error = uploadValidator_.error();
+  return error == EpaperImageFormat::ValidationError::None ? "bad_gzip_size" : EpaperImageFormat::errorCode(error);
 }

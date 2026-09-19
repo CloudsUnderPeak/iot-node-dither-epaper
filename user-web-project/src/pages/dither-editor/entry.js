@@ -13,6 +13,7 @@
         'src/pages/dither-editor/config/pipeline-presets.js',
         'src/pages/dither-editor/config/display-profiles.js',
         'src/pages/dither-editor/config/target-policy.js',
+        'src/core/encoders/epaper-target.js',
         'src/core/encoders/epdimg-encoder.js',
         'src/vendor/rgbquant.js',
         'src/pages/dither-editor/dither/rgbquant-adapter.js',

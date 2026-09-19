@@ -1,7 +1,4 @@
 (function (app) {
-    var WIDTH = 800;
-    var HEIGHT = 480;
-    var FRAME_BYTES = WIDTH * HEIGHT / 2;
     var HEADER_BYTES = 40;
     var COLOR_CODES = {
         '0,0,0': 0,
@@ -35,16 +32,24 @@
         return COLOR_CODES[key];
     }
 
-    function encode(imageData) {
-        var portrait = imageData && imageData.width === 480 && imageData.height === 800;
+    function encode(imageData, target) {
+        if (!target) { throw new Error('E-paper target is required.'); }
+        var checked = app.core.epaperTarget.geometry(target.width, target.height);
+        if (checked.imageBytes !== target.imageBytes || checked.frameBytes !== target.frameBytes) {
+            throw new Error('Inconsistent e-paper target.');
+        }
+        var WIDTH = target.width;
+        var HEIGHT = target.height;
+        var FRAME_BYTES = target.frameBytes;
+        var portrait = WIDTH !== HEIGHT && imageData && imageData.width === HEIGHT && imageData.height === WIDTH;
         if (!imageData || (!portrait && !(imageData.width === WIDTH && imageData.height === HEIGHT))) {
-            throw new Error('E-paper output must be 800x480 or 480x800.');
+            throw new Error('E-paper output dimensions do not match the device target.');
         }
         var frame = new Uint8Array(FRAME_BYTES);
         for (var y = 0; y < HEIGHT; y += 1) {
             for (var x = 0; x < WIDTH; x += 2) {
-                var first = portrait ? codeAt(imageData, y, 799 - x) : codeAt(imageData, x, y);
-                var second = portrait ? codeAt(imageData, y, 798 - x) : codeAt(imageData, x + 1, y);
+                var first = portrait ? codeAt(imageData, y, WIDTH - 1 - x) : codeAt(imageData, x, y);
+                var second = portrait ? codeAt(imageData, y, WIDTH - 2 - x) : codeAt(imageData, x + 1, y);
                 frame[(y * WIDTH + x) / 2] = (first << 4) | second;
             }
         }

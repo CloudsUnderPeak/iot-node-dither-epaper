@@ -936,7 +936,7 @@ src/device/
 - 頁面一律透過 `app.device.api.resources` 取用 endpoint，不直接呼叫 `fetch`；path 使用相對路徑（部署後與裝置 API 同源）。
 - REST envelope 固定 `{success, data, message}`；HTTP 200 但 `success !== true` 也視為錯誤。錯誤統一帶 `status`、`code`、`fields`；網路層失敗包成 `{code: 'transport_error', status: 0}`。
 - 常見 error code 由 `app.device.errorText()` 翻成使用者語言；API `message` 只作 fallback。
-- Raw EPDIMG upload 仍透過 `device-api.resources`，使用 `fetch` 的 binary body 與 `application/octet-stream`；頁面不可直接呼叫 fetch。Content-Length 由瀏覽器依固定 192,040-byte body 設定。
+- EPDIMG 先透過 CompressionStream gzip，使用已知大小 Blob 由 `device-api.resources` 以 binary body、`application/octet-stream`、`Content-Encoding: gzip` 上傳；頁面不可直接 fetch，也不可手動設 Content-Length。Compressed Content-Length 由瀏覽器設定，與 logical imageBytes 不同。
 
 ### 裝置連線監看（device-live）
 
@@ -977,10 +977,10 @@ src/device/
 
 ### E-paper Device Mode
 
-- `device-live` 仍只擁有 connection truth；`device-epaper` 在 online 後 probe `GET /api/epaper`，驗證固定 800×480、EPDIMG、192,040 bytes、六個 color codes 與必要 capabilities。
-- Target state 與 connection state 分離。Capability 一旦在 session 內確認，offline 不清除 target，只禁止 operation；reconnect 後重抓 capability/status。
+- `device-live` 仍只擁有 connection truth；`device-epaper` 在 online 後 probe `GET /api/epaper`，透過 `core/encoders/epaper-target.js` 驗證 model、safe positive dimensions、even width、EPDIMG、40-byte header、由尺寸推導的 frame/image bytes、gzip 與必要 capabilities。正規化 frozen target 供 policy／encoder／upload 共用，公開 capability 亦遞迴 freeze。
+- Target state 與 connection state 分離。Capability 一旦在 session 內確認，offline 不清除 target，只禁止 operation；reconnect 後重抓 capability/status；明確 unsupported capability 會撤銷舊 upload target，transport failure 才保留先前 target。
 - E-paper editor action 區第一顆按鈕為「繪製到電子紙」，使用正規化為 24×24/currentColor/aria-hidden 的 `credit-card-edit-svgrepo-com.svg`；第二顆為相同 primary 樣式的純本機「下載圖片專案」，沿用 `export-download.svg`。後者不綁 `can_draw`、cooldown 或 online，但仍須有合法 edit state；執行時維持固定文案並暫時 disabled，不轉為 Cancel。
-- E-paper target policy 擁有尺寸到方向的單一規則：使用 image loader 回傳的 `originalSize`，`height > width` 對應 `3-5`，其餘（含正方形或無有效圖片尺寸）對應 `5-3`。Crop `onImageLoaded` 僅在 capability 已確認時於幾何正規化前套用；若 capability 晚到，target policy 只在目前比例不是合法 `5-3`／`3-5` 時套用並呼叫既有 Crop normalize。合法比例視為使用者選擇，不得在後續 sync 覆寫。Resize 再由相同 orientation 固定成 800×480 或 480×800。
+- Target policy 從同一 normalized profile 取得 W/H 與 gcd ratio id；originalSize 高大於寬預選 H:W，否則 W:H。Crop registry 重用既有比例或登記 deviceOnly ratio，standalone list 排除此類新項目，square 只一項。合法 user ratio 不被背景 sync 覆蓋，resize、readonly UI、pipeline normalization 共用 state.target.profile。
 - `device-epaper` 擁有 cached status、operation run id、polling、blocking state、phase progress與 cooldown deadline。Editor 與 test page 只能訂閱 snapshot及呼叫公開 operation method。
 - `device-epaper-calibration` 擁有六色 canonical snapshot。所有對外 colors 都 deep copy；只有 response 通過固定 id/code、channel integer/range 與 duplicate RGB 驗證後才發布。`revision` 只在 RGB 真正改變時遞增；較舊 GET 不得覆蓋較新的 save/reset，斷線或 request failure 保留最後 canonical。
 - 面板測試 draft 與 canonical 分離，高頻 e-paper status render 不得重建輸入 DOM 或覆蓋草稿。save/reset/reload 期間以 request generation 防 stale response；dirty 遇到外部 revision 只標記 conflict，不自動 rebase。
@@ -1045,6 +1045,8 @@ pages/help/
 
 ### E-paper Display Profile
 
+下列 config 是明確的 standalone editor default 範例，不能用來判定實體装置相容性。Device Mode 使用 capability normalized target。
+
 顯示器必須透過 display profile registry 擴充，不可在 crop、resize、upload 邏輯中硬寫某一個尺寸。Profile 對使用者與程式都以像素尺寸為主，不使用 7.3 吋、13.3 吋這類實體尺寸作為主要識別。
 
 ```js
@@ -1081,8 +1083,8 @@ pages/help/
 Device Mode 啟用 device display target 時：
 
 - 固定 panel profile 由 ESP32 `GET /api/epaper` 回傳；local registry 只描述前端支援形狀，不可單獨宣告真裝置存在。
-- E-paper Crop ratio allowlist 固定為 landscape `5-3` 與 portrait `3-5`。
-- Landscape output 固定 800×480；portrait output 固定 480×800。Resize UI 為 read-only。
+- E-paper Crop ratio allowlist 為 capability normalized profile 的 landscapeRatioId 與 portraitRatioId；正方形只一項。
+- Landscape output 為 capability W×H；portrait output 為 H×W。Resize UI 為 read-only。
 - Effective palette 固定為 `e6-color-epaper`；Palette UI 不建立 add/remove control，color input、preset、Original size 均不可修改。`OUTPUT_COLORS` 與 calibration service 的動態 display colors 必須平行採用 EPD code order `0,1,2,3,5,6`，即黑、白、黃、紅、藍、綠；前者是 EPDIMG 協定色 A，後者是 pipeline 的實體參考色 A′，固定 swatch、Result viewport、palette mapping 與 dither error 都使用 A′。`target-policy.outputImageData()` 必須在 encoder boundary 以 exact DISPLAY/OUTPUT RGB lookup 取得固定 code slot，再轉成 OUTPUT RGB；非六色像素必須拒絕，不可用 nearest-color 猜測硬體色碼。
 - `target-policy` 的 display/output `WeakMap` cache 必須帶 calibration revision。Editor 訂閱色準 service；revision 改變時重新 force target palette、清除 stage cache、live preview 與 output image，再依目前模式排程正式 preview，確保已開啟的工作區不沿用舊色盤。
 - `target-policy.js` 同時提供 UI guard、controller setting guard 與 formal pipeline 前 normalization。DOM disabled 不是安全邊界。
@@ -1122,10 +1124,10 @@ src/core/encoders/
 
 規則：
 
-- Formal pipeline output 只接受 800×480 或 480×800。Encoder 必須直接檢查 ImageData dimensions，不依賴 UI orientation flag。
-- 800×480 原樣編碼；480×800 在六色 pipeline 完成後逐 pixel 順時針旋轉 90°，不重新 resize或 dither；其他尺寸在 API 前失敗。
-- Normalized 800×480 pixel 必須精確匹配 E6 reference RGB，mapping 固定為 black=0、white=1、yellow=2、red=3、blue=5、green=6；不可用 palette array index。
-- 每兩 pixel 打包一 byte（left high nibble、right low nibble），frame CRC32 後寫 40-byte little-endian header與 non-zero uint64 generation，總長固定 192,040 bytes。
+- Formal pipeline output 只接受 target W×H 或 H×W。Encoder 必須直接檢查 ImageData dimensions，不依賴 UI orientation flag。
+- W×H 原樣編碼；H×W 在六色 pipeline 完成後逐 pixel 順時針旋轉 90°，不重新 resize或 dither；其他尺寸在 API 前失敗。
+- Normalized W×H pixel 必須精確匹配 E6 reference RGB，mapping 固定為 black=0、white=1、yellow=2、red=3、blue=5、green=6；不可用 palette array index。
+- 每兩 pixel 打包一 byte（left high nibble、right low nibble），frame CRC32 後寫 40-byte little-endian header與 non-zero uint64 generation，logical 總長為 40 + W×H/2 bytes（目前 profile example 192,040）。
 - `POST /api/epaper/image` 成功已同時 atomic update stored image並 queue draw，client 不得自動追加 refresh。
 
 ## 圖片處理流程與固定效果堆疊
@@ -1671,7 +1673,7 @@ accept="image/png,image/jpeg,image/webp"
 
 ## 圖片尺寸與效能策略
 
-MVP 建議最大輸入尺寸：
+Standalone 最大輸入長邊預設：
 
 ```js
 const MAX_INPUT_LONG_EDGE = 800;
@@ -1680,7 +1682,7 @@ const MAX_INPUT_LONG_EDGE = 800;
 規則：
 
 - 使用者丟入圖片後，先檢查寬高。
-- 如果圖片長邊超過 `MAX_INPUT_LONG_EDGE`，依比例縮小到長邊 800px。
+- Standalone 超過 `MAX_INPUT_LONG_EDGE` 時按比例縮小。Device Mode 使用 `constants.inputLongEdge()` = min(MAX_RESIZE_OUTPUT_SIZE, max(MAX_INPUT_LONG_EDGE, panel.width, panel.height))，涵蓋 demo/file/project import；Help maxInputLongEdge fact 同步此值。
 - 編輯器後續使用縮小後的圖片作為工作圖。
 - UI 需提示使用者圖片已被縮小，顯示原始尺寸與工作尺寸。
 - 輸入縮小、cache retained-byte budget 與有界 job admission 共同控制資源。Diffusion 在 HTTP 可用時使用 controller-owned Worker。
@@ -1875,3 +1877,10 @@ assets/
 - 讀取本機使用者上傳圖片。
 - 讀取專案內 `assets/demo/*`。
 - 使用瀏覽器內建字型。
+
+## Gzip 與尺寸參數化的實作邊界
+
+- `epaper-target.js` 的 geometry helper 驗證每邊最多 4096、even packed width，建立同一組 frameBytes、imageBytes、ratio ids；fromCapabilities 再驗證 server identity、palette、actions、encoding 與 size 一致性。`display-profiles.js` 與 DEFAULT_NEW_IMAGE_SIZE 只是 standalone defaults；mock 尺寸只在 MOCK_PANEL 定義一次，derived sizes 不作 production truth。
+- `epdimgEncoder.encode(imageData, target)` 顯式接收該 target；portrait source index 為 `(y, W-1-x)`，沒有 production 尺寸 magic numbers；square 視為 landscape。Controller 在 operation 開始取得 target 與 palette snapshot，同次 encoder／submitUpload 共用。
+- `submitUpload` 驗證 target logical size，gzip 成 Blob，再檢查 job/run generation 與 compressed limit 後送 resources API；compression 失敗、取消或 stale run 不送 request。CompressionStream 缺少回 `gzip_unavailable`。不提供 raw fallback 或 remote runtime dependency。
+- EPDIMG version／header layout／CRC／generation／palette codes 不變；gzip-only upload 是 transport breaking change。Metadata 同時提供 logical size 與 stored compressed size，mock 與 firmware 同步。下載仍是 raw logical EPDIMG，這與 gzip upload body 不同。

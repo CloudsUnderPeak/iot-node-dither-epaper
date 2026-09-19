@@ -3,7 +3,7 @@
     app.pages.ditherEditor = app.pages.ditherEditor || {};
     app.pages.ditherEditor.constants = {
         MAX_INPUT_LONG_EDGE: 800,
-        MAX_RESIZE_OUTPUT_SIZE: 4096,
+        MAX_RESIZE_OUTPUT_SIZE: app.core.epaperTarget ? app.core.epaperTarget.MAX_DIMENSION : 4096,
         PREVIEW_DEBOUNCE_MS: 80,
         SHOW_PREVIEW_TIMING_LABEL: true,
         PREVIEW_TIMING_LABEL_HIDE_DELAY_MS: 2000,
@@ -22,10 +22,18 @@
             height: 480
         }
     };
+    app.pages.ditherEditor.constants.inputLongEdge = function () {
+        var constants = app.pages.ditherEditor.constants;
+        var target = app.device && app.device.epaper && app.device.epaper.snapshot().target;
+        var limit = Math.min(constants.MAX_RESIZE_OUTPUT_SIZE, Math.max(constants.MAX_INPUT_LONG_EDGE,
+            target ? Math.max(target.width, target.height) : 0));
+        if (app.app.projectCapabilities) { app.app.projectCapabilities.setFact('maxInputLongEdge', limit); }
+        return limit;
+    };
     if (app.app.projectCapabilities) {
         app.app.projectCapabilities.setFact(
             'maxInputLongEdge',
-            app.pages.ditherEditor.constants.MAX_INPUT_LONG_EDGE
+            app.pages.ditherEditor.constants.inputLongEdge()
         );
         app.app.projectCapabilities.setFact(
             'maxResizeOutputSize',

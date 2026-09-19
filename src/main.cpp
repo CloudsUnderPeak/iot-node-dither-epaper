@@ -561,6 +561,15 @@ void printHeartbeat() {
         readyLabel(subsystemHealthy(subsystem)));
   }
   printHeartbeatField("epaper_busy", epaperBusyLabel());
+  if (epaperService.ready()) {
+    const auto timing = epaperService.snapshot(millis()).timings;
+    printHeartbeatField("epd_upload_validate_ms", timing.uploadValidationMs);
+    printHeartbeatField("epd_stored_validate_ms", timing.storedValidationMs);
+    printHeartbeatField("epd_frame_read_ms", timing.frameReadMs);
+    printHeartbeatField("epd_transfer_ms", timing.transferMs);
+    printHeartbeatField("epd_total_ms", timing.totalOperationMs);
+    printHeartbeatField("epd_download_failures", timing.downloadFailures);
+  }
   printHeartbeatField(
       "epaper_marker",
       epaperProtectionStageToString(epaperSafetyStore.stage()));

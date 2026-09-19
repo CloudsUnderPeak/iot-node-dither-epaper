@@ -45,7 +45,8 @@
             }
             this.lastImageData = null;
             this.lastTransformKey = '';
-            var emptyCtx = this.prepareBuffer(800, 480);
+            var dimensions = (app.device.epaper && app.device.epaper.snapshot().target) || app.pages.ditherEditor.constants.DEFAULT_NEW_IMAGE_SIZE;
+            var emptyCtx = this.prepareBuffer(dimensions.width, dimensions.height);
             emptyCtx.fillStyle = '#f7f9fa';
             emptyCtx.fillRect(0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
             emptyCtx.fillStyle = '#6b7c88';

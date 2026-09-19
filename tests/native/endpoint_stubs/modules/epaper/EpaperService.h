@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "modules/epaper/EpaperTimingDiagnostics.h"
 
 #include "modules/epaper/EpaperCooldown.h"
 #include "modules/epaper/EpaperImageFormat.h"
@@ -11,7 +12,7 @@
 enum class EpaperServiceState : uint8_t { Idle, Uploading, Queued, Drawing, Cooldown, Unavailable };
 enum class EpaperDrawPhase : uint8_t { None, Prewake, Initializing, Transferring, Refreshing, PoweringOff, Sleeping, Quiescing };
 enum class EpaperPanelState : uint8_t { Inactive, Active, Sleeping, Unknown };
-enum class EpaperServiceStatusCode : uint8_t { Ok, Busy, Unavailable, InvalidImage, ImageNotFound, StorageBusy, StorageUnavailable, StorageError, UploadIncomplete };
+enum class EpaperServiceStatusCode : uint8_t { Ok, Busy, Unavailable, InvalidImage, PayloadTooLarge, ImageNotFound, StorageBusy, StorageUnavailable, StorageError, UploadIncomplete };
 enum class EpaperDrawAction : uint8_t { Stored, White, Palette };
 
 struct EpaperServiceResult {
@@ -26,6 +27,7 @@ struct EpaperStoredImageMetadata {
   bool present = false;
   bool valid = false;
   size_t sizeBytes = 0;
+  size_t storedSizeBytes = 0;
   EpaperImageFormat::Header header{};
   EpaperImageFormat::ValidationError validationError = EpaperImageFormat::ValidationError::None;
 };
@@ -48,11 +50,14 @@ struct EpaperServiceSnapshot {
   const char *lastErrorCode = "none";
   const char *lastResetReason = "software";
   size_t transferredBytes = 0;
+  EpaperTimingDiagnostics timings;
 };
 
 class EpaperService {
  public:
   static constexpr const char *kImageName = "epaper-current.epd";
+  static constexpr const char *kStoredImageName = "epaper-current.epd.gz";
+  static constexpr size_t kMaxCompressedBytes = EpaperPanelProfile::Active::maxCompressedBytes;
   EpaperServiceSnapshot current;
   EpaperServiceResult actionResult{EpaperServiceStatusCode::Ok, "draw queued"};
   EpaperServiceResult uploadResult{EpaperServiceStatusCode::Ok, "upload started", "none", 51};

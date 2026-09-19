@@ -18,8 +18,14 @@ epaper_transport = (project / "src/modules/epaper/EpdSpiTransport.cpp").read_tex
 board_profile = (
     project / "src/board/profiles/FireBeetle2Esp32C6Profile.h"
 ).read_text()
-if "while (receivedBytes < begin.contentLength)" not in epaper_service:
-    print("Stored image validation must stop at the auto-closing download length", file=sys.stderr)
+gzip_reader = (project / "src/modules/epaper/EpaperGzipReader.cpp").read_text()
+gzip_decoder = (project / "src/modules/epaper/EpaperGzip.cpp").read_text()
+tinfl_header = (project / "src/modules/epaper/miniz/miniz_tinfl.h").read_text()
+if "epaper_tinfl_decompress" not in gzip_decoder or "epaper_tinfl_decompress" not in tinfl_header:
+    print("E-paper tinfl must use a project-prefixed symbol to avoid the ESP32 ROM ABI", file=sys.stderr)
+    raise SystemExit(1)
+if 'beginDownload(name, "", true)' not in gzip_reader or "reader->complete()" not in epaper_service:
+    print("Stored gzip validation must retain the storage session through complete validation", file=sys.stderr)
     raise SystemExit(1)
 
 if "-D ENABLE_EPAPER_PANEL_SELF_TEST=0" not in platformio:
@@ -77,9 +83,9 @@ if 'printHeartbeatField("epaper_busy", epaperBusyLabel())' not in main:
 if "if (Serial && now - lastHeartbeatMs >= 1000U)" not in main:
     print("USB CDC heartbeat must not block the runtime loop without a reader", file=sys.stderr)
     raise SystemExit(1)
-epaper_transfer = epaper_service.index("driver_->transferFrame(source)")
+epaper_transfer = epaper_service.index("driver_->transferFrame(oriented ? *oriented : source)")
 epaper_release = epaper_service.index(
-    "storage_->finishDownload(storageSessionId)", epaper_transfer
+    "source.close()", epaper_transfer
 )
 if not epaper_transfer < epaper_release < epaper_service.index(
     "driver_->refresh()", epaper_release

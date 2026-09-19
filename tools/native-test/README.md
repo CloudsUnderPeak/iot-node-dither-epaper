@@ -11,6 +11,7 @@ from `contract_checks.py`.
 - HTTP JSON content type, empty/malformed body, and payload-size error contract
 - User-file filename, MIME, strict size, byte Range, cursor, and console path policies
 - EPDIMG header/CRC/palette streaming validation across arbitrary chunk boundaries
+- Strict gzip decoding, compressed atomic storage, logical downloads and bounded image mirroring
 - Framebuffer-free white/six-color packed frame generation and wrap-safe 180-second cooldown policy
 - FireBeetle 2 ESP32-C6 restricted-pin policy, atomic pin claims, safe e-paper boot levels, and write-only shared SPI ownership
 - 4 KiB streaming e-paper driver, initialization/refresh sequence, BUSY and operation timeouts, and protocol shutdown failure paths
@@ -29,7 +30,7 @@ from `contract_checks.py`.
 
 ## Requirements
 
-- `g++`, Python 3, and PlatformIO
+- `g++`, Python 3, PlatformIO, and zlib development headers/library (`zlib1g-dev` on Debian/Ubuntu; used only to generate native gzip fixtures)
 - ArduinoJson headers in `.pio/`; run a firmware build first if the dependencies have not been installed
 
 ## Usage

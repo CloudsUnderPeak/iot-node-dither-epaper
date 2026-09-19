@@ -15,6 +15,17 @@
         { id: '9-16', label: '9 : 16', width: 9, height: 16 }
     ];
 
+    function registerRatio(width, height) {
+        var a = width, b = height;
+        while (b) { var next = a % b; a = b; b = next; }
+        width /= a; height /= a;
+        var id = width + '-' + height;
+        if (!ASPECT_RATIOS.some(function (ratio) { return ratio.id === id; })) {
+            ASPECT_RATIOS.push({ id: id, label: width + ' : ' + height, width: width, height: height, deviceOnly: true });
+        }
+        return id;
+    }
+
     // 依 id 取得固定比例設定；找不到時回到預設 16:9。
     function ratioFor(id) {
         return ASPECT_RATIOS.find(function (ratio) {
@@ -120,7 +131,8 @@
         DEFAULT_ASPECT_RATIO_ID: DEFAULT_ASPECT_RATIO_ID,
         MIN_ZOOM: MIN_ZOOM,
         MAX_ZOOM: MAX_ZOOM,
-        ratios: ASPECT_RATIOS.slice(),
+        ratios: ASPECT_RATIOS,
+        registerRatio: registerRatio,
         ratioFor: ratioFor,
         clamp: clamp,
         mirroredRotation: mirroredRotation,

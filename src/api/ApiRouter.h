@@ -106,7 +106,7 @@ class ApiRouter {
                                       uint8_t *buffer,
                                       size_t bufferLength);
   void finishFileDownload(uint32_t sessionId);
-  FileUploadStart prepareEpaperUpload(size_t contentLength);
+  FileUploadStart prepareEpaperUpload(size_t contentLength, const char *encoding);
   Api::Response writeEpaperUpload(uint32_t sessionId,
                                   size_t index,
                                   const uint8_t *data,

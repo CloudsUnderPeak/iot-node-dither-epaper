@@ -98,7 +98,11 @@ bool Epd7In3E::initialize() {
   const uint8_t pll[] = {0x03};
   const uint8_t vcomAndDataInterval[] = {0x3F};
   const uint8_t tcon[] = {0x02, 0x00};
-  const uint8_t resolution[] = {0x03, 0x20, 0x01, 0xE0};
+  const uint8_t resolution[] = {
+      static_cast<uint8_t>(EpaperImageFormat::kWidth >> 8),
+      static_cast<uint8_t>(EpaperImageFormat::kWidth),
+      static_cast<uint8_t>(EpaperImageFormat::kHeight >> 8),
+      static_cast<uint8_t>(EpaperImageFormat::kHeight)};
   const uint8_t vcomDc[] = {0x01};
   const uint8_t powerSaving[] = {0x2F};
 

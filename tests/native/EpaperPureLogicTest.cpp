@@ -250,7 +250,60 @@ void testCooldownState() {
 
 }  // namespace
 
+
+void testGeometryAndOrientation() {
+  using namespace EpaperPanelProfile;
+  static_assert(Geometry<800, 480>::frameBytes == 192000);
+  static_assert(Geometry<800, 480>::imageBytes == 192040);
+  static_assert(Geometry<1600, 1200>::frameBytes == 960000);
+  static_assert(Geometry<1600, 1200>::imageBytes == 960040);
+  static_assert(!validGeometry(0, 2) && !validGeometry(3, 2));
+  static_assert(!validGeometry(65536, 2) && !validGeometry(2, 65536));
+  static_assert(!validGeometry(UINT64_MAX, UINT64_MAX));
+  class SequentialSource final : public EpaperFrameSource {
+   public:
+    explicit SequentialSource(size_t bytes) : bytes_(bytes) {}
+    size_t size() const override { return bytes_; }
+    size_t read(size_t offset, uint8_t *out, size_t capacity) const override {
+      if (offset != offset_) return 0;
+      size_t count = std::min(capacity, bytes_ - offset);
+      for (size_t i = 0; i < count; ++i) out[i] = value(offset + i);
+      offset_ += count; return count;
+    }
+    bool rewind() const override { offset_ = 0; ++rewinds; return true; }
+    static uint8_t value(size_t offset) { return static_cast<uint8_t>(offset * 37 + offset / 199); }
+    mutable size_t rewinds = 0;
+   private:
+    size_t bytes_;
+    mutable size_t offset_ = 0;
+  };
+  for (auto dimensions : {std::pair<uint32_t, uint32_t>{800,480}, {1600,1200}, {6,7}, {2,1}}) {
+    size_t rowBytes = dimensions.first / 2, height = dimensions.second;
+    for (bool horizontal : {false, true}) for (bool vertical : {false, true}) {
+      SequentialSource source(rowBytes * height);
+      EpaperOrientedFrameSource oriented(source, dimensions.first, dimensions.second, horizontal, vertical);
+      expect(oriented.ready(), "orientation buffer allocation");
+      std::vector<uint8_t> result(source.size());
+      for (size_t offset = 0; offset < result.size();) {
+        size_t count = oriented.read(offset, result.data() + offset, std::min(size_t{4093}, result.size() - offset));
+        expect(count != 0, "orientation reads arbitrary chunk boundaries");
+        if (!count) break;
+        offset += count;
+      }
+      bool correct = true;
+      for (size_t y = 0; y < height; ++y) for (size_t x = 0; x < rowBytes; ++x) {
+        auto expected = SequentialSource::value((vertical ? height - 1 - y : y) * rowBytes + (horizontal ? rowBytes - 1 - x : x));
+        if (horizontal) expected = static_cast<uint8_t>((expected << 4) | (expected >> 4));
+        correct = correct && result[y * rowBytes + x] == expected;
+      }
+      expect(correct, "horizontal/vertical flip preserves rows and reverses packed nibbles");
+      if (!vertical) expect(source.rewinds == 0, "horizontal flip stays sequential");
+    }
+  }
+}
+
 int main() {
+  testGeometryAndOrientation();
   testCrcAndHeaderContract();
   testValidationFailures();
   testDynamicFrameSources();
