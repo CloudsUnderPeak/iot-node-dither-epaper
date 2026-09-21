@@ -43,6 +43,7 @@ self.onmessage = function (event) {
         self.postMessage({
             id: request.id,
             ok: false,
+            code: error instanceof RangeError ? 'image_memory_exhausted' : 'worker_failure',
             message: error && error.message ? error.message : String(error)
         });
     }

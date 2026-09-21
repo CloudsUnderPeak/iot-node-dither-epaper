@@ -118,6 +118,15 @@ class ApiRouter {
                                         uint8_t *buffer,
                                         size_t bufferLength);
   void finishEpaperDownload(uint32_t sessionId);
+  Api::Response checkStreamingFileAccess(Api::Method method,
+                                         const String &token,
+                                         const char *path) const;
+  static constexpr uint32_t kUploadIdleTimeoutMs = 60000;
+  struct ExpiredUpload {
+    uint32_t sessionId = 0;
+    bool epaper = false;
+  };
+  ExpiredUpload expireIdleUpload(uint32_t nowMs);
 
  private:
   enum class RouteAccess : uint8_t {
@@ -153,6 +162,8 @@ class ApiRouter {
   RuntimeActionScheduler *runtimeActions_ = nullptr;
   EpaperService *epaperService_ = nullptr;
   EpaperCalibrationService *epaperCalibrationService_ = nullptr;
+  ExpiredUpload activeUpload_;
+  uint32_t uploadLastDataMs_ = 0;
   BatteryMonitor *batteryMonitor_ = nullptr;
   const BootDiagnostics *bootDiagnostics_ = nullptr;
   AuthEndpoints authEndpoints_;

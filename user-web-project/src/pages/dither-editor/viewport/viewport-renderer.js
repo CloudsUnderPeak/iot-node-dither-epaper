@@ -69,8 +69,9 @@
     ViewportRenderer.prototype.renderTransformed = function renderTransformed(imageData, settings, layout) {
         // Crop 模式下 canvas 顯示的是「原圖被移動、縮放、旋轉後」的預覽。
         // 裁切框由 overlay renderer 負責，所以這裡只處理影像本身的 transform。
-        layout = layout || app.pages.ditherEditor.crop.previewLayout(imageData, settings);
-        var backgroundColor = app.pages.ditherEditor.crop.backgroundColor(settings, imageData);
+        var crop = app.pages.ditherEditor.featureRegistry.api('crop');
+        layout = layout || crop.previewLayout(imageData, settings);
+        var backgroundColor = crop.backgroundColor(settings, imageData);
         // transformKey 包含所有會影響 crop preview 的設定；漏掉 flip/rotation 會造成 UI 不更新。
         var transformKey = [
             settings.aspectRatioId,

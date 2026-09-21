@@ -12,8 +12,8 @@
             .concat(pipeline.effectsOrder)
             .concat(pipeline.fixedAfter)
             .filter(function (id) {
-                // export 是 action，不是會改變 pixels 的 pipeline operation。
-                return id !== 'export' && pipeline.enabled[id] !== false;
+                return Boolean(app.pages.ditherEditor.operationRegistry.get(id)) &&
+                    pipeline.enabled[id] !== false;
             });
     }
 

@@ -135,9 +135,12 @@
     // 正方形沒有自然方向，固定沿用面板的 landscape 預設。
     function aspectRatioForSize(size) {
         var profile = app.device.epaper.snapshot().target;
-        if (!profile) { return app.pages.ditherEditor.cropGeometry.DEFAULT_ASPECT_RATIO_ID; }
-        app.pages.ditherEditor.cropGeometry.registerRatio(profile.width, profile.height);
-        app.pages.ditherEditor.cropGeometry.registerRatio(profile.height, profile.width);
+        var geometry = app.pages.ditherEditor.cropGeometry;
+        if (!profile) { return geometry ? geometry.DEFAULT_ASPECT_RATIO_ID : null; }
+        if (geometry) {
+            geometry.registerRatio(profile.width, profile.height);
+            geometry.registerRatio(profile.height, profile.width);
+        }
         return size && Number(size.height) > Number(size.width) ? profile.portraitRatioId : profile.landscapeRatioId;
     }
 
@@ -147,8 +150,10 @@
         }
         var profile = app.device.epaper.snapshot().target;
         var geometry = app.pages.ditherEditor.cropGeometry;
-        geometry.registerRatio(profile.width, profile.height);
-        geometry.registerRatio(profile.height, profile.width);
+        if (geometry) {
+            geometry.registerRatio(profile.width, profile.height);
+            geometry.registerRatio(profile.height, profile.width);
+        }
         var previousTarget = state.target || {};
         var previousPalette = state.settings.palette && state.settings.palette.palette;
         var crop = state.settings.crop;
@@ -156,8 +161,9 @@
         if (crop && crop.aspectRatioId !== profile.landscapeRatioId && crop.aspectRatioId !== profile.portraitRatioId) {
             crop.aspectRatioId = aspectRatioForSize(state.originalSize);
             portrait = profile.width !== profile.height && crop.aspectRatioId === profile.portraitRatioId;
-            if (app.pages.ditherEditor.crop) {
-                app.pages.ditherEditor.crop.normalize(state);
+            var cropApi = app.pages.ditherEditor.featureRegistry.api('crop');
+            if (cropApi) {
+                cropApi.normalize(state);
             }
         }
         var revision = calibrationRevision();
@@ -199,10 +205,16 @@
         if (!isEpaper(state)) {
             return true;
         }
-        if (group === 'resize' || group === 'palette') {
+        if (featureLocked(state, group)) {
             return false;
         }
         return group !== 'crop' || key !== 'aspectRatioId' || value === state.target.profile.landscapeRatioId || value === state.target.profile.portraitRatioId;
+    }
+
+    function featureLocked(state, id) {
+        var registry = app.pages.ditherEditor.featureRegistry;
+        var feature = registry && registry.get && registry.get(id);
+        return Boolean(isEpaper(state) && feature && feature.targetLocked);
     }
 
     app.pages.ditherEditor.targetPolicy = {
@@ -210,6 +222,7 @@
         sync: sync,
         normalizeBeforePipeline: force,
         settingAllowed: settingAllowed,
+        featureLocked: featureLocked,
         aspectRatioForSize: aspectRatioForSize,
         paletteId: PALETTE_ID,
         colors: displayColors,

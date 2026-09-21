@@ -150,11 +150,11 @@
         return blobToImageData(blob, maxLongEdge);
     }
 
-    function loadDemoManifest() {
-        if (!app.app || !app.app.scriptLoader || !app.app.scriptLoader.load) {
+    function loadDemoManifest(loadScript) {
+        if (typeof loadScript !== 'function') {
             return Promise.reject(loaderError('demo-load-failed', 'Demo image could not be loaded.'));
         }
-        return app.app.scriptLoader.load(DEMO_IMAGE_MANIFEST_SCRIPT)
+        return loadScript(DEMO_IMAGE_MANIFEST_SCRIPT)
             .then(function () {
                 var demoImage = app.assets && app.assets.demoImage;
                 if (!demoImage || !demoImage.url || !demoImage.fileName) {
@@ -164,12 +164,12 @@
             });
     }
 
-    function loadGeneratedDemoImage(demoImage, maxLongEdge) {
+    function loadGeneratedDemoImage(demoImage, maxLongEdge, loadScript) {
         var dataScript = demoImage.dataScript || DEMO_IMAGE_DATA_SCRIPT;
-        if (!app.app || !app.app.scriptLoader || !app.app.scriptLoader.load) {
+        if (typeof loadScript !== 'function') {
             return Promise.reject(loaderError('demo-load-failed', 'Demo image could not be loaded.'));
         }
-        return app.app.scriptLoader.load(dataScript)
+        return loadScript(dataScript)
             .then(function () {
                 var embeddedDemo = app.assets && app.assets.demoImageData;
                 if (!embeddedDemo || !embeddedDemo.dataUrl) {
@@ -215,12 +215,12 @@
     }
 
     // 載入專案內建 demo 圖。
-    function loadDemoImage(maxLongEdge) {
-        return loadDemoManifest()
+    function loadDemoImage(maxLongEdge, loadScript) {
+        return loadDemoManifest(loadScript)
             .then(function (demoImage) {
                 return loadDemoImageFile(demoImage, maxLongEdge)
                     .catch(function () {
-                        return loadGeneratedDemoImage(demoImage, maxLongEdge);
+                        return loadGeneratedDemoImage(demoImage, maxLongEdge, loadScript);
                     })
                     .then(function (result) {
                         result.fileName = demoImage.fileName;

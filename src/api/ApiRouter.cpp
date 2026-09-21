@@ -331,6 +331,8 @@ ApiRouter::FileUploadStart ApiRouter::prepareFileUpload(
   }
   start.ready = true;
   start.sessionId = storageStart.sessionId;
+  activeUpload_ = {start.sessionId, false};
+  uploadLastDataMs_ = millis();
   start.response = Api::ok("{}");
   return start;
 }
@@ -341,11 +343,16 @@ Api::Response ApiRouter::writeFileUpload(uint32_t sessionId,
                                          size_t length) {
   const UserDataFileResult result = userData_->writeUpload(
       sessionId, index, data, length);
+  if (activeUpload_.sessionId == sessionId && !activeUpload_.epaper) {
+    if (result.ok() && length != 0) uploadLastDataMs_ = millis();
+    if (!result.ok()) activeUpload_ = {};
+  }
   return UserFileEndpoints::fromStorageResult(result);
 }
 
 Api::Response ApiRouter::finishFileUpload(uint32_t sessionId,
                                           const char *path) {
+  if (activeUpload_.sessionId == sessionId && !activeUpload_.epaper) activeUpload_ = {};
   char name[UserFilePolicy::kMaxFilenameBytes + 1]{};
   if (!fileNameFromPath(path, name, sizeof(name))) {
     userData_->abortUpload(sessionId);
@@ -356,6 +363,7 @@ Api::Response ApiRouter::finishFileUpload(uint32_t sessionId,
 }
 
 void ApiRouter::abortFileUpload(uint32_t sessionId) {
+  if (activeUpload_.sessionId == sessionId && !activeUpload_.epaper) activeUpload_ = {};
   userData_->abortUpload(sessionId);
 }
 
@@ -413,6 +421,8 @@ ApiRouter::FileUploadStart ApiRouter::prepareEpaperUpload(
   }
   start.ready = true;
   start.sessionId = result.sessionId;
+  activeUpload_ = {start.sessionId, true};
+  uploadLastDataMs_ = millis();
   start.maxUploadBytes = EpaperService::kMaxCompressedBytes;
   start.response = Api::ok("{}");
   return start;
@@ -422,11 +432,16 @@ Api::Response ApiRouter::writeEpaperUpload(uint32_t sessionId,
                                            size_t index,
                                            const uint8_t *data,
                                            size_t length) {
-  return EpaperEndpoints::fromServiceResult(
-      epaperService_->writeUpload(sessionId, index, data, length));
+  const EpaperServiceResult result = epaperService_->writeUpload(sessionId, index, data, length);
+  if (activeUpload_.sessionId == sessionId && activeUpload_.epaper) {
+    if (result.ok() && length != 0) uploadLastDataMs_ = millis();
+    if (!result.ok()) activeUpload_ = {};
+  }
+  return EpaperEndpoints::fromServiceResult(result);
 }
 
 Api::Response ApiRouter::finishEpaperUpload(uint32_t sessionId) {
+  if (activeUpload_.sessionId == sessionId && activeUpload_.epaper) activeUpload_ = {};
   const EpaperServiceResult result = epaperService_->finishUpload(sessionId);
   if (!result.ok()) return EpaperEndpoints::fromServiceResult(result);
   JsonDocument data;
@@ -435,7 +450,18 @@ Api::Response ApiRouter::finishEpaperUpload(uint32_t sessionId) {
 }
 
 void ApiRouter::abortEpaperUpload(uint32_t sessionId) {
+  if (activeUpload_.sessionId == sessionId && activeUpload_.epaper) activeUpload_ = {};
   epaperService_->abortUpload(sessionId);
+}
+
+ApiRouter::ExpiredUpload ApiRouter::expireIdleUpload(uint32_t nowMs) {
+  if (activeUpload_.sessionId == 0 ||
+      nowMs - uploadLastDataMs_ < kUploadIdleTimeoutMs) return {};
+  const ExpiredUpload expired = activeUpload_;
+  activeUpload_ = {};
+  if (expired.epaper) epaperService_->abortUpload(expired.sessionId, "upload_timeout");
+  else userData_->abortUpload(expired.sessionId);
+  return expired;
 }
 
 ApiRouter::FileDownloadStart ApiRouter::prepareEpaperDownload(
@@ -517,6 +543,11 @@ ApiRouter::StreamingFileRequest ApiRouter::prepareStreamingFileRequest(
   }
   request.response = Api::problem(404, "not_found", "not found");
   return request;
+}
+
+Api::Response ApiRouter::checkStreamingFileAccess(
+    Api::Method method, const String &token, const char *path) const {
+  return prepareStreamingFileRequest(method, token, path).response;
 }
 
 Api::Response ApiRouter::fileStorageError(

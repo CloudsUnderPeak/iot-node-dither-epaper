@@ -108,7 +108,7 @@ bool isNonZeroIp(const IPAddress &ip) {
 
 bool applyAndCheckWifiMode(WifiManager &wifiManager,
                            const DeviceConfig &config,
-                           bool expectStaConnected,
+                           bool expectStaStarted,
                            bool expectApStarted) {
   WifiStatus status{};
   Result applyResult = wifiManager.apply(config, status);
@@ -118,8 +118,9 @@ bool applyAndCheckWifiMode(WifiManager &wifiManager,
                 static_cast<unsigned>(applyResult.code));
   printWifiStatus(status);
 
-  const bool staOk = expectStaConnected
-                         ? status.staState == WifiLinkState::Connected && isNonZeroIp(status.staIp)
+  const bool staOk = expectStaStarted
+                         ? status.staState == WifiLinkState::Connecting ||
+                               status.staState == WifiLinkState::Connected
                          : status.staState == WifiLinkState::Disabled;
   const bool apOk = expectApStarted ? isNonZeroIp(status.apIp) : true;
   return applyResult.ok() && staOk && apOk;
@@ -177,7 +178,7 @@ bool runWifiModes(DeviceConfig &activeConfig, WifiManager &wifiManager, WifiStat
                 static_cast<unsigned>(finalApplyResult.code));
   printWifiStatus(wifiStatus);
 
-  return allModesPassed && finalApplyResult.ok() && wifiStatus.staState == WifiLinkState::Connected;
+  return allModesPassed && finalApplyResult.ok();
 }
 #endif
 

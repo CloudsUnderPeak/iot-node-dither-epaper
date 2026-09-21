@@ -256,18 +256,29 @@
                     || algorithm.processorId === 'dot-diffusion';
                 var job = context && context.job;
                 if (job) { job.check(); }
+                function runCpu() {
+                    try {
+                        return registry.run(imageData, algorithm, options);
+                    } catch (error) {
+                        if (error instanceof RangeError) {
+                            error.code = 'image_memory_exhausted';
+                        }
+                        throw error;
+                    }
+                }
                 var workerClient = (context && context.workerClient) || app.pages.ditherEditor.ditherWorkerClient;
                 if (isDiffusion && workerClient) {
                     var workerRun = workerClient.run(imageData, algorithm, options, job);
                     if (workerRun) {
                         return workerRun.catch(function (error) {
                             if (error.code === 'job_cancelled') { throw error; }
+                            if (error.code === 'image_memory_exhausted') { throw error; }
                             if (job) { job.check(); }
-                            return registry.run(imageData, algorithm, options);
+                            return runCpu();
                         });
                     }
                 }
-                return registry.run(imageData, algorithm, options);
+                return runCpu();
             }
         }
     });

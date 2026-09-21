@@ -1,5 +1,5 @@
+var passed = [];
 (async function () {
-    var passed = [];
     var epTimers = [];
     var epRequests = 0;
     var epStatus = { state: 'cooldown', retry_after_seconds: 0, can_draw: false, can_upload: false };
@@ -92,6 +92,15 @@
         if (path !== 'src/device/device-mock.js') { loadModule(path); }
     });
     var realApp = window.DitherApp;
+    var englishKeys = Object.keys(realApp.i18n.en || {}).sort();
+    var chineseKeys = Object.keys(realApp.i18n['zh-TW'] || {}).sort();
+    englishKeys.forEach(function (key) {
+        harness.assert(Object.prototype.hasOwnProperty.call(realApp.i18n['zh-TW'], key), 'zh-TW missing key: ' + key);
+    });
+    chineseKeys.forEach(function (key) {
+        harness.assert(Object.prototype.hasOwnProperty.call(realApp.i18n.en, key), 'en missing key: ' + key);
+    });
+    passed.push('Main en/zh-TW dictionary keys');
     realApp.app.scriptLoader.loadMany = function (paths) {
         paths.forEach(loadModule);
         return Promise.resolve();
@@ -99,6 +108,52 @@
     loadModule('src/pages/dither-editor/entry.js');
     await realApp.app.whenPageEntriesReady();
     var realEditor = realApp.pages.ditherEditor;
+    // Golden values were captured from the pre-row-buffer implementation.
+    // The fixture crosses both image edges and exercises non-default strength,
+    // serpentine traversal and pair-mix mapping.
+    var pixelFixture = new Uint8ClampedArray(17 * 9 * 4);
+    for (var fy = 0; fy < 9; fy++) {
+        for (var fx = 0; fx < 17; fx++) {
+            var fi = (fy * 17 + fx) * 4;
+            pixelFixture[fi] = (fx * 71 + fy * 13 + fx * fy * 19) % 256;
+            pixelFixture[fi + 1] = (fx * 37 + fy * 83 + fx * fy * 7) % 256;
+            pixelFixture[fi + 2] = (fx * 17 + fy * 53 + fx * fy * 29) % 256;
+            pixelFixture[fi + 3] = (fx * 23 + fy * 41) % 256;
+        }
+    }
+    function pixelChecksum(data) {
+        var hash = 2166136261;
+        for (var px = 0; px < data.length; px++) {
+            hash ^= data[px];
+            hash = Math.imul(hash, 16777619);
+        }
+        return ('00000000' + (hash >>> 0).toString(16)).slice(-8);
+    }
+    var pixelOptions = {
+        palette: [{r:0,g:0,b:0},{r:255,g:255,b:255},{r:255,g:0,b:0},
+            {r:255,g:255,b:0},{r:0,g:0,b:255},{r:0,g:170,b:0}],
+        paletteMapping: 'pair-mix', colorDistance: 'euclidean-bt709',
+        errorStrength: 130, serpentine: true
+    };
+    var pixelGolden = {floydSteinberg:'f50b9093',atkinson:'acf54563',jarvis:'a73b7daa',
+        sierraLite:'bea1277c',stevensonArce:'50fd4e87',adaptive1:'cd6efc97',
+        adaptive3:'f38ded8c',dot:'46bacc0d'};
+    Object.keys(pixelGolden).forEach(function (algorithmId) {
+        var image = new ImageData(new Uint8ClampedArray(pixelFixture), 17, 9);
+        var options = Object.assign({}, pixelOptions, {matrixId: algorithmId});
+        var result;
+        if (algorithmId === 'dot') {
+            result = realEditor.dotDiffusion.apply(image, options);
+        } else if (algorithmId.indexOf('adaptive') === 0) {
+            result = realEditor.ditherAlgorithmRegistry.run(image,
+                {id: algorithmId, processorId: 'adaptive-error-diffusion', adaptiveRadius: Number(algorithmId.slice(8))}, options);
+        } else {
+            result = realEditor.errorDiffusion.apply(image, options);
+        }
+        harness.assert(pixelChecksum(result.data) === pixelGolden[algorithmId],
+            'legacy pixel checksum: ' + algorithmId);
+    });
+    passed.push('Diffusion golden pixels: five kernels, two adaptive radii and dot');
     cache = runner.createStageCache({ maxBytes: 16 });
     var replacements = [harness.deferred(), harness.deferred()], replacementIndex = 0;
     editor.operationRegistry.get = function () { return { run: function () { return replacements[replacementIndex++].promise; } }; };
@@ -106,12 +161,16 @@
     replacements[0].resolve(input); await replaceA;
     replacements[1].resolve(alias); await replaceB;
     harness.assert(cache.entries.size === 1 && cache.retainedBytes === 12 && cache.buffers.size === 1, 'same-key replacement accounting');
-    var feature, fallbackRuns = 0;
+    var feature, fallbackRuns = 0, refuseAllocation = false;
     var workEditor = {
         panelUtils: {}, constants: { DEFAULT_DITHER_ERROR_STRENGTH: 100, MIN_DITHER_ERROR_STRENGTH: 0, MAX_DITHER_ERROR_STRENGTH: 150 },
         featureRegistry: { register: function (f) { feature = f; }, api: function () { return { getActivePalette: function () { return [{ r: 0, g: 0, b: 0 }, { r: 255, g: 255, b: 255 }]; } }; } },
         paletteMapping: { normalizeId: function (x) { return x; } },
-        ditherAlgorithmRegistry: { get: realEditor.ditherAlgorithmRegistry.get, run: function () { fallbackRuns++; return realEditor.ditherAlgorithmRegistry.run.apply(null, arguments); } }
+        ditherAlgorithmRegistry: { get: realEditor.ditherAlgorithmRegistry.get, run: function () {
+            fallbackRuns++;
+            if (refuseAllocation) { throw new RangeError('allocation refused'); }
+            return realEditor.ditherAlgorithmRegistry.run.apply(null, arguments);
+        } }
     };
     var workApp = { pages: { ditherEditor: workEditor }, core: { paletteUtils: { normalizeColorDistanceId: function (x) { return x; } } } };
     var workWindow = { DitherApp: workApp };
@@ -139,10 +198,26 @@
     newWorker.postMessage = function () { throw new Error('clone failed'); };
     await client.run(input, {}, {}).catch(function () {});
     harness.assert(client.pendingCount() === 0, 'postMessage throw drains pending');
+    var memoryClient = workEditor.ditherWorkerClient.create();
+    var memoryRun = feature.operation.run(input, { algorithm: 'floyd-steinberg' },
+        { state: {}, workerClient: memoryClient }).catch(function (error) { return error.code; });
+    var memoryWorker = harness.FakeWorker.instances[harness.FakeWorker.instances.length - 1];
+    memoryWorker.onmessage({ data: { id: memoryWorker.messages[0].message.id, ok: false,
+        code: 'image_memory_exhausted', message: 'allocation refused' } });
+    harness.assert(await memoryRun === 'image_memory_exhausted' && fallbackRuns === 1 &&
+        memoryClient.pendingCount() === 0, 'worker allocation refusal retains workspace and skips CPU retry');
+    memoryClient.terminate();
     harness.execute('pages/dither-editor/worker/dither-worker-client.js', { window: workWindow, Worker: function () { throw new Error('Worker unavailable'); } });
     var unavailable = workEditor.ditherWorkerClient.create();
     var cpuFallback = feature.operation.run(input, { algorithm: 'floyd-steinberg' }, { state: {}, workerClient: unavailable });
     harness.assert(cpuFallback.data.length === 4 && fallbackRuns === 2, 'constructor failure uses real CPU processor once');
+    refuseAllocation = true;
+    var memoryCode = '';
+    try { feature.operation.run(input, { algorithm: 'floyd-steinberg' }, { state: {}, workerClient: unavailable }); }
+    catch (error) { memoryCode = error.code; }
+    refuseAllocation = false;
+    harness.assert(memoryCode === 'image_memory_exhausted' && fallbackRuns === 3,
+        'CPU allocation refusal returns recoverable image memory error');
     var owner = workEditor.createJobOwner(client);
     var barrier = harness.deferred(), entered = harness.deferred(), runs = [];
     var first = owner.preview(async function (job) { runs.push(0); entered.resolve(); await barrier.promise; job.check(); });
@@ -161,7 +236,7 @@
     harness.assert(heavyRuns === 1, 'heavy admission rejects duplicates');
     owner.dispose();
     await owner.preview(function () { throw new Error('disposed owner ran'); });
-    passed.push('W02 cancellation, failure, worker epoch/settlement, transfer copy, bounded jobs');
+    passed.push('W02 cancellation, failure, allocation refusal, worker epoch/settlement, transfer copy, bounded jobs');
     var waiting = [], started = harness.deferred();
     function decode() { var d = harness.deferred(); waiting.push(d); started.resolve(); return d.promise; }
     var originalDemoLoader = realApp.core.imageLoader.loadDemoImage;
@@ -486,10 +561,10 @@
     harness.assert(uploadInit.headers['Content-Encoding'] === 'gzip' && !Object.keys(uploadInit.headers).some(function (key) { return key.toLowerCase() === 'content-length'; }), 'gzip request header and browser-owned Content-Length');
     passed.push('E-paper alternate geometry, crop, portrait, immutable target, gzip capability/roundtrip/cancellation/transport');
     realApp.core.imageLoader.loadDemoImage = originalDemoLoader;
-    var fileDemo = await originalDemoLoader(800);
+    var fileDemo = await originalDemoLoader(800, realApp.app.scriptLoader.load);
     harness.assert(fileDemo.imageData.width > 0 && fileDemo.sourceFile.blob.size > 0, 'source file demo and original Blob');
     var filePng = await realApp.core.canvasUtils.imageDataToBlob(fileDemo.imageData);
     harness.assert(filePng.type === 'image/png' && filePng.size > 0, 'file mode local PNG');
     passed.push('W08 source file demo decode and local PNG export bytes');
     document.getElementById('result').textContent = JSON.stringify({ passed: passed, memoryObservations: memoryObservations });
-})().catch(function (error) { document.getElementById('result').textContent = JSON.stringify({ error: error.stack }); });
+})().catch(function (error) { document.getElementById('result').textContent = JSON.stringify({ passed: passed, error: error.stack }); });

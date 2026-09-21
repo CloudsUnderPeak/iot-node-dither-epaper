@@ -22,6 +22,7 @@ body[data-theme="light"] {
     --color-shadow: rgba(15, 24, 30, 0.08);
     --color-shadow-strong: rgba(15, 24, 30, 0.18);
     --color-accent: #206d64;
+    --accent-icon-filter: brightness(0) saturate(100%) invert(31%) sepia(20%) saturate(1441%) hue-rotate(126deg) brightness(91%) contrast(91%);
     --color-accent-strong: #15534d;
     --color-accent-soft: #e4f3f0;
     --color-on-accent: #ffffff;
@@ -39,6 +40,7 @@ body[data-theme="light"] {
 body[data-theme="dark"] {
     /* Dark theme 覆寫同一組精簡 token，和 light theme 維持相同語意層級。 */
     color-scheme: dark;
+    --accent-icon-filter: brightness(0) saturate(100%) invert(57%) sepia(36%) saturate(674%) hue-rotate(126deg) brightness(93%) contrast(88%);
     --color-root-bg: #0e1215;
     --color-page-bg-start: #171d20;
     --color-page-bg-end: #0e1215;

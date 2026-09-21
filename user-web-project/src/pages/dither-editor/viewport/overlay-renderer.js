@@ -18,7 +18,8 @@
     }
 
     ViewportOverlayRenderer.prototype.shouldShowCropOverlay = function shouldShowCropOverlay(state) {
-        return Boolean(state.sourceImageData && state.mode === this.prepareMode);
+        return Boolean(state.sourceImageData && state.settings.crop &&
+            app.pages.ditherEditor.featureRegistry.api('crop') && state.mode === this.prepareMode);
     };
 
     ViewportOverlayRenderer.prototype.previewFrameInset = function previewFrameInset(isNarrowScreen) {
@@ -56,7 +57,7 @@
     ViewportOverlayRenderer.prototype.cropDisplayMetrics = function cropDisplayMetrics(state) {
         // Crop overlay 的 CSS 尺寸與 canvas 內部尺寸分開計算。
         // overlay 固定代表輸出框；canvas 可以比 overlay 大，用來顯示旋轉/平移後的原圖脈絡。
-        var baseLayout = app.pages.ditherEditor.crop.previewLayout(state.sourceImageData, state.settings.crop);
+        var baseLayout = app.pages.ditherEditor.featureRegistry.api('crop').previewLayout(state.sourceImageData, state.settings.crop);
         var layout = {
             width: baseLayout.width,
             height: baseLayout.height,
@@ -268,7 +269,8 @@
 
     // 將 crop 的 aspectRatioId 轉成使用者看得懂的比例文字。
     function cropRatioLabel(crop) {
-        var ratios = app.pages.ditherEditor.crop && app.pages.ditherEditor.crop.ratios || [];
+        var crop = app.pages.ditherEditor.featureRegistry.api('crop');
+        var ratios = crop ? crop.ratios : [];
         var ratio = ratios.find(function (entry) {
             return entry.id === crop.aspectRatioId;
         });

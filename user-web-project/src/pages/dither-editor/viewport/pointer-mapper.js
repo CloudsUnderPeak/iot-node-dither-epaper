@@ -49,6 +49,8 @@
             this.controller
             && this.controller.state
             && this.controller.state.sourceImageData
+            && this.controller.state.settings.crop
+            && app.pages.ditherEditor.featureRegistry.api('crop')
             && this.controller.state.mode === this.prepareMode
         );
     };

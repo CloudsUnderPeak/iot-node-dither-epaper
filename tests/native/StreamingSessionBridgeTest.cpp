@@ -48,6 +48,7 @@ struct RouterFixture {
 
 
 int main() {
+  nativeMillis = 0;
   RouterFixture f;
   StreamingSessionBridge bridge;
   const char *path = "/api/storage/files/bridge.bin";
@@ -94,5 +95,33 @@ int main() {
   assert(bridge.run([&] { return f.router.readFileDownload(newer.sessionId, buffer, 3); }).bytesRead == 3);
   assert(buffer[0] == 1 && buffer[2] == 3 && nativefs::backend.handles == 0);
   bridge.run([&] { f.router.finishFileDownload(newer.sessionId); });
+  const char *slowPath = "/api/storage/files/slow.bin";
+  auto slow = bridge.run([&] { return f.router.prepareFileUpload("valid-token", slowPath, 4); });
+  assert(slow.ready);
+  nativeMillis = ApiRouter::kUploadIdleTimeoutMs - 1;
+  assert(bridge.run([&] { return f.router.expireIdleUpload(nativeMillis); }).sessionId == 0);
+  assert(bridge.run([&] { return f.router.writeFileUpload(slow.sessionId, 0, bytes, 2); }).success);
+  nativeMillis += ApiRouter::kUploadIdleTimeoutMs - 1;
+  assert(bridge.run([&] { return f.router.expireIdleUpload(nativeMillis); }).sessionId == 0);
+  assert(bridge.run([&] { return f.router.writeFileUpload(slow.sessionId, 2, bytes, 2); }).success);
+  assert(bridge.run([&] { return f.router.finishFileUpload(slow.sessionId, slowPath); }).success);
+  auto stalled = bridge.run([&] { return f.router.prepareFileUpload("valid-token", slowPath, 2); });
+  assert(stalled.ready);
+  nativeMillis += ApiRouter::kUploadIdleTimeoutMs;
+  const auto expired = bridge.run([&] { return f.router.expireIdleUpload(nativeMillis); });
+  assert(expired.sessionId == stalled.sessionId && !expired.epaper);
+  assert(nativefs::backend.handles == 0);
+  assert(!bridge.run([&] { return f.router.writeFileUpload(stalled.sessionId, 0, bytes, 2); }).success);
+  auto preserved = bridge.run([&] { return f.router.prepareFileDownload("valid-token", slowPath, ""); });
+  assert(preserved.ready && preserved.contentLength == 4);
+  bridge.run([&] { f.router.finishFileDownload(preserved.sessionId); });
+  nativeMillis = UINT32_MAX - 10;
+  auto wrapped = bridge.run([&] { return f.router.prepareFileUpload("valid-token", slowPath, 2); });
+  assert(wrapped.ready);
+  nativeMillis += ApiRouter::kUploadIdleTimeoutMs - 1;
+  assert(bridge.run([&] { return f.router.expireIdleUpload(nativeMillis); }).sessionId == 0);
+  bridge.run([&] { f.router.abortFileUpload(stalled.sessionId); });
+  assert(bridge.run([&] { return f.router.writeFileUpload(wrapped.sessionId, 0, bytes, 2); }).success);
+  assert(bridge.run([&] { return f.router.finishFileUpload(wrapped.sessionId, slowPath); }).success);
   std::cout << "Streaming bridge -> real Router -> real storage callback lifecycle passed\n";
 }

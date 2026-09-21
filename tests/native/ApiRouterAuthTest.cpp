@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "api/ApiRouter.h"
+#include "modules/http/UserFileHttpPreflight.h"
 
 namespace {
 int failures = 0;
@@ -433,6 +434,35 @@ void testUnknownRoutesRemainNotFound() {
            "unknown routes must remain not found regardless of credentials");
   }
 }
+void testHttpFilePreflightOrder() {
+  RouterFixture f;
+  const char *path = "/api/storage/files/a.txt";
+  for (const String &token : {String(), String("invalid-token")}) {
+    expect(UserFileHttpPreflight::upload(f.router, token, path, true, true,
+        nullptr, 2, 3, "text/plain").statusCode == 401,
+        "HTTP upload must authorize before query, length and media checks");
+    expect(UserFileHttpPreflight::download(f.router, token, path, true, true).statusCode == 401,
+        "HTTP download must authorize before body and query checks");
+  }
+  expect(f.userData.uploadBeginCount == 0 && f.userData.downloadBeginCount == 0,
+         "HTTP authorization and shape gate must not open storage sessions");
+  expect(UserFileHttpPreflight::upload(f.router, "valid-token", path, true, false,
+      "2", 2, 2, "").statusCode == 400, "authorized upload query remains 400");
+  expect(UserFileHttpPreflight::upload(f.router, "valid-token", path, false, false,
+      nullptr, 2, 2, "").statusCode == 411, "authorized missing length remains 411");
+  expect(UserFileHttpPreflight::upload(f.router, "valid-token", path, false, false,
+      "bogus", 2, 2, "").statusCode == 411, "authorized invalid length remains 411");
+  expect(UserFileHttpPreflight::upload(f.router, "valid-token", path, false, false,
+      "2", 2, 2, "text/plain").statusCode == 415, "authorized media rejection remains 415");
+  expect(UserFileHttpPreflight::download(f.router, "valid-token", path, true, false).statusCode == 400,
+         "authorized download body remains 400");
+  expect(UserFileHttpPreflight::download(f.router, "valid-token", path, false, true).statusCode == 400,
+         "authorized download query remains 400");
+  expect(UserFileHttpPreflight::upload(f.router, "", "/api/storage/files/bad/name", false,
+      false, nullptr, 0, 0, "").statusCode == 404, "unknown dynamic route remains 404");
+  expect(f.userData.uploadBeginCount == 0 && f.userData.downloadBeginCount == 0,
+         "shape failures must not open storage sessions");
+}
 void testDeferredScanPrincipal() {
   for (auto transport : {Api::Transport::Http, Api::Transport::Serial}) {
     RouterFixture f;
@@ -455,6 +485,7 @@ void testDeferredScanPrincipal() {
 }  // namespace
 
 int main() {
+  testHttpFilePreflightOrder();
   testDeferredScanPrincipal();
   testExactRouteAuthorizationMatrix();
   testWebIdentityMatchesAcrossTransports();

@@ -1168,6 +1168,8 @@ Crop -> Resize -> Adjust -> Palette -> Dither -> Export
 
 工具列順序、operation、panel builder、feature hook 與可見性必須由 feature script 產生，並由 `feature-manifest.js` 控制是否載入。若未來要移除 `Crop`，主要應只從 `feature-manifest.js` 停用或移除該 feature；`entry.js`、`pipeline-presets.js`、`page.js`、`controller.js` 不應還有另一份 `crop` 載入、順序、工具列、panel builder 或 image-loaded hook 定義需要同步刪除。
 
+Crop 幾何／背景／zoom 公開能力只由 `featureRegistry.api('crop')` 取得；沒有註冊 Crop 時 preview overlay、pointer 與 toolbar 不進入 Crop 分支，mode state machine 直接進入 edit。Resize、Palette 的裝置模式鎖定由 feature `targetLocked` metadata 與 `target-policy.featureLocked()` 共用同一份 policy。Action feature 可以沒有 operation；宣告 pipeline stage 且不是 action 的 feature 必須提供有效 `operation.run()`，pipeline runner 依 operation registry 能力略過 action，不依賴 `export` 等固定 ID。Core image loader 的 demo script 載入函式由 controller 明確傳入，維持 classic script 與 `file://` fallback。
+
 每個項目需要：
 
 - 功能圖示。
@@ -1387,6 +1389,8 @@ function runPipeline(sourceImageData, state) {
 - Operation 不可修改 upstream `ImageData`；cache 會重用 operation 回傳的 `ImageData`。若 operation 為 no-op 並回傳原物件，下游 stage identity 應保持與輸入相同，讓後續 stage 可重用。
 - Export 不使用 preview Stage Cache，也不直接使用暫存 preview bitmap；它仍從工作圖執行完整正式 pipeline，確保輸出與最新 settings 一致。
 
+Error diffusion 的 Floyd–Steinberg、各 matrix kernel 與 adaptive FS 使用最多 `max(matrix.dy)+1` 列 Float32 RGBA 工作緩衝與一份完整 Uint8Clamped RGBA output；adaptive FS 另保留 Float32 integral image 與 local mean map。Dot diffusion 按 class 跨全圖遍歷，使用完整 Float32 RGB 工作緩衝（不保存無需擴散的 alpha）與一份完整 RGBA output。以 4096² 計，單純掃描式工作緩衝從約 256 MiB 降為 kernel 列數乘 4096×16 bytes，output 約 64 MiB；dot RGB 約 192 MiB 加 output 64 MiB。這些是配置模型，不含 source、Worker 傳遞、canvas、cache、export 與 browser overhead，不能當作實測 peak 或低記憶體裝置的保證。Worker 傳遞仍複製一次 input 以維持 workspace owner；RangeError allocation failure 傳 `image_memory_exhausted`，Controller 保留 state 並顯示雙語訊息。直接 OOM 殺掉分頁不在 try/catch 可恢復範圍內。
+
 ## Editor job 與 source ownership
 
 `controller.js` 的窄 job owner 管理 generation、active job、最新 pending preview 與 dispose。最多一份 active computation 和一份可被取代的 pending preview；heavy export/import 不接受重複 admission。開始 heavy job 時作廢 preview並在必要時終止自己的 Worker。匯出 snapshot 深拷貝可變 settings／pipeline／target，EPDIMG 邊界也使用同次擷取的校色色盤，保留 immutable ImageData／Blob reference；不對整個 state 做 JSON round-trip。
@@ -1406,6 +1410,8 @@ Worker client factory 提供 mount-local ownership；request id 與 worker epoch
 Workspace 管理 feature set／版本、pipeline stage／member／enabled 與候選 state，沒有 feature ID schema switch。委派前保留 depth 12、字串 4096、array/object 64 項與禁止 __proto__／prototype／constructor 等一般防護。新增 feature 只需提供契約；既有 schema、renderer、feature version 與 diMF／diOR／diWK chunks 不變。
 
 ## Correctness 與產物驗證入口
+
+Browser regression runner 以獨立 HTML/profile 執行 legacy、Crop disabled/removed、Wi-Fi、e-paper、history 與共用樣式案例，各自回報 passed／failed 與已完成 assertion；單例失敗繼續執行後續案例，任一失敗或逾時仍使 runner 非零退出。主 en／zh-TW 字典的頂層鍵集合必須一致；缺鍵回報語言與 key。
 
 - `make test`：build/helper Python tests、雙語 Help、PNG container／來源 startup、core／persistence／lifecycle regression、file demo／本地 PNG。
 - `make test-production`：在 ignored tmp/verification 下建立新 production gzip 與 demo，臨時 loopback HTTP 驗證 startup、真實 Worker／CPU pixels、PNG、relative API、tooltip／Help styles 與 mock boundary；不部署，也不操作硬體。
@@ -1553,6 +1559,8 @@ MVP 至少：
 - tooltip。
 
 `ui` 元件只能透過 options、callback、custom event 對外溝通。它們不可依賴 `pages/*`，也不可依賴 `pages/dither-editor/dither/*`。例如 `sortable-list.js` 只負責排序 UI，不知道排序的是 pipeline、menu item 或 preset list。
+
+E-paper operation overlay 位於 `src/app/`，由 app shell 建立並訂閱 e-paper service；銷毀時解除訂閱與移除 DOM。一般 modal 規則屬 `assets/styles/components.css`（含窄螢幕覆寫），裝置專屬 dialog 與 scan 規則仍屬 `device.css`。Light/dark 共用 `themes.css` 的 `--accent-icon-filter`，元件只引用 token。
 
 ### Canvas Ownership
 

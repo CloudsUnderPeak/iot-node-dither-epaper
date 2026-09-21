@@ -132,6 +132,7 @@
         iconPath: 'assets/icons/editor/resize.svg',
         labelKey: 'panelResize',
         panelGroup: 'edit',
+        targetLocked: true,
         pipelineStage: 'fixedBefore',
         pipelineOrder: 20,
         // 預設輸出尺寸跟 display profile 一致。

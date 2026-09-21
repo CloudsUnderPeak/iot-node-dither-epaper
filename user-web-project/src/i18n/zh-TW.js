@@ -122,6 +122,7 @@
         errorProjectFeature: '圖片設定檔使用目前不支援的編輯功能。',
         errorProjectSettings: '圖片設定檔內的圖片設定無效。',
         errorGeneric: '發生錯誤，請再試一次。',
+        errorImageMemory: '處理這張圖片需要更多可用記憶體。專案仍可使用；請關閉其他分頁或改用較小圖片。',
         helpTitle: '說明',
         aboutTitle: '關於',
         placeholderAbout: '靜態瀏覽器版 抖色圖片編輯器 MVP。',

@@ -86,6 +86,7 @@ unsupported_media_type
 unsupported_transport
 range_not_satisfiable
 upload_incomplete
+upload_timeout
 insufficient_storage
 runtime_unavailable
 wifi_scan_failed
@@ -107,7 +108,7 @@ not_found
 ## Auth
 
 除明列的公開例外外，所有 `POST` / `PUT` / `DELETE` 預設需要 Bearer token。`/api/storage/files` collection 與 item 的 `GET` 也需要 Bearer token；未來若新增免登入例外，必須明確記錄在本文件。
-Dynamic user-file item route 會先驗證 token，才開始 HTTP streaming storage session、判斷 serial raw transport 不支援，或執行 JSON delete；因此缺少或無效 token 固定先回 `401 unauthorized`。
+Dynamic user-file item route 會先驗證 token，才檢查 HTTP upload/download 的 query、body、Content-Length、Content-Type、開始 streaming storage session、判斷 serial raw transport 不支援，或執行 JSON delete；因此已辨識 route 缺少或無效 token 固定先回 `401 unauthorized`，未知 route 仍回 404。已授權但格式不符者保留原 400／411／415／416 規則。
 
 公開例外：
 
@@ -976,6 +977,8 @@ Request 只含功率也合法：
 
 需要 Bearer token。Request body 是檔案的 raw bytes，不是 JSON、form 或 multipart；client 應使用 `Content-Type: application/octet-stream`，也可完全省略 Content-Type。`multipart/form-data`、`application/x-www-form-urlencoded` 與 `text/plain` 會被 HTTP framework 當 form／plain-post 解析，因此明確回 `415 unsupported_media_type`，不接受其內容相依的模糊行為。Request 必須提供可嚴格解析且與實際 body 完全相等的 `Content-Length`，不支援 `Transfer-Encoding`；缺少或無效長度回 `411 content_length_required`。超過開始操作時重新計算的 limit 回 `413 payload_too_large`，並在 `data.max_upload_bytes` 回報該次限制。此 endpoint 不接受 query fields。
 
+已接納的 generic 與 e-paper raw upload 在 60 秒沒有成功接收非空資料後中止 matching session；若連線仍有效，HTTP 回 `408` JSON error envelope，`data.code: upload_timeout`。斷線時無法送 response，但 temporary upload 會清除，原正式檔保留。此期限從初次接納與每次有效非空 chunk 重新計算，不限制持續傳輸的總耗時。
+
 新檔成功回 `201`：
 
 ```json
@@ -1094,6 +1097,7 @@ Content-Disposition: inline; filename="photo.jpg"
 - `logical_only` 必須搭配 `state: unavailable`、`panel_state: unknown`、`recovery_required: full_power_cycle`、`can_draw: false`，不得表示成功 safe-off。
 - `retry_after_seconds` 在 cooldown 中向上取整；無可自行到期 cooldown 時為 `null`。Brownout + active marker 映射為 `last_operation.result: interrupted`、`error_code: brownout`、兩個 brownout bool 為 `true`，並要求 full power cycle。
 - `last_operation.error_code: marker_clear_failed` 表示冷卻後 protection marker 清除或驗證失敗，維持 `unavailable` 並每秒重試。成功後回 `idle`、`recovery_required: null`，歷史 error 保留；其他 unknown-panel／brownout 故障不自動重試。
+- `last_operation.error_code: marker_active_failed` 表示尚未喚醒面板前無法確認 active marker；狀態為 `unavailable`、`panel_state: inactive`、`shutdown_method: none`。若可能寫入的 marker 已清除並讀回，`recovery_required` 為 null，允許受控軟體重啟；否則為 `full_power_cycle`，不得靠軟體重啟解除。`upload_timeout` 表示上傳閒置中止，通常返回 `idle` 並保留上一張 stored image。
 
 ### `GET /api/epaper/calibration`
 

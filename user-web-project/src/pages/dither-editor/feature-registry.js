@@ -139,7 +139,7 @@
         if (feature.dock !== false && usesPanelGroup(feature) && (!feature.icon || !feature.labelKey)) {
             throw new Error('Dock feature requires icon and labelKey: ' + feature.id);
         }
-        if (feature.pipelineStage && feature.id !== 'export' && !feature.operation) {
+        if (feature.pipelineStage && !feature.operation && typeof feature.buildAction !== 'function') {
             throw new Error('Pipeline feature requires operation: ' + feature.id);
         }
         if (feature.operation && typeof feature.operation.run !== 'function') {
@@ -231,7 +231,8 @@
 
     // 判斷 feature 是否有可放進 pipeline 的 operation。
     function isPipelineFeatureAvailable(feature) {
-        return feature.id === 'export' || app.pages.ditherEditor.operationRegistry.get(feature.id);
+        return Boolean(feature.operation && app.pages.ditherEditor.operationRegistry.get(feature.id)) ||
+            typeof feature.buildAction === 'function';
     }
 
     // 呼叫所有 feature 的指定 lifecycle hook。

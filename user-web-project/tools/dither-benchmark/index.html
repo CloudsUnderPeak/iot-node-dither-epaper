@@ -477,8 +477,8 @@
             function collectSettingsFromQuery() {
                 var params = new URLSearchParams(window.location.search);
                 return {
-                    width: Math.max(64, Math.min(1600, queryNumber(params, 'width', 800) | 0)),
-                    height: Math.max(64, Math.min(1600, queryNumber(params, 'height', 480) | 0)),
+                    width: Math.max(64, Math.min(4096, queryNumber(params, 'width', 800) | 0)),
+                    height: Math.max(64, Math.min(4096, queryNumber(params, 'height', 480) | 0)),
                     iterations: Math.max(1, Math.min(30, queryNumber(params, 'iterations', 5) | 0)),
                     warmup: Math.max(0, Math.min(10, queryNumber(params, 'warmup', 1) | 0)),
                     imageKind: params.get('image') || 'gradient',

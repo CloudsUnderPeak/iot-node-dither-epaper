@@ -164,6 +164,64 @@ void testRestartPhases() {
   }
 }
 
+void testPrewakeMarkerFailures() {
+  for (int fault = 0; fault < 4; ++fault) {
+    Fixture f;
+    if (fault == 0 || fault == 3) f.persistence.writeOk = false;
+    if (fault == 1) f.persistence.readError = true;
+    if (fault == 2) {
+      f.persistence.present = true;
+      f.persistence.stage = static_cast<uint8_t>(EpaperProtectionStage::ShutdownConfirmed);
+      f.persistence.ignoreWrite = true;
+    }
+    if (fault == 3) {
+      f.persistence.present = true;
+      f.persistence.stage = static_cast<uint8_t>(EpaperProtectionStage::Active);
+      f.persistence.clearOk = false;
+    }
+    assert(f.service.requestDraw(EpaperDrawAction::White).ok());
+    nativeRunWorker();
+    const auto state = f.service.snapshot();
+    assert(state.state == EpaperServiceState::Unavailable);
+    assert(state.panelState == EpaperPanelState::Inactive);
+    assert(std::string(state.lastErrorCode) == "marker_active_failed");
+    assert(!state.canDraw && !state.canUpload);
+    assert(f.transport.commands.empty() && f.frequency.setCalls == 0);
+    const bool cleared = fault == 0 || fault == 2;
+    assert(state.recoveryRequired == !cleared);
+    EpaperSafetyStore reloaded;
+    assert(reloaded.begin(&f.persistence) == (fault != 1));
+    if (cleared) {
+      assert(reloaded.stage() == EpaperProtectionStage::None);
+      assert(f.service.requestRestart(millis()) == RestartRequest::Accepted);
+      f.service.pollRestart(millis());
+      nativeRunWorker();
+      assert(f.restart.calls == 1);
+    } else {
+      if (fault == 3) assert(reloaded.stage() == EpaperProtectionStage::Active);
+      assert(f.service.requestRestart(millis()) == RestartRequest::Rejected);
+    }
+  }
+}
+
+void testUploadIdleCleanup() {
+  Fixture f;
+  const auto upload = f.service.beginUpload(100);
+  assert(upload.ok() && nativefs::backend.handles == 1);
+  f.service.abortUpload(upload.sessionId, "upload_timeout");
+  const auto state = f.service.snapshot();
+  assert(state.state == EpaperServiceState::Idle &&
+         std::string(state.lastErrorCode) == "upload_timeout" &&
+         nativefs::backend.handles == 0);
+  assert(!f.service.finishUpload(upload.sessionId).ok());
+  const auto next = f.service.beginUpload(100);
+  assert(next.ok() && next.sessionId != upload.sessionId);
+  f.service.abortUpload(upload.sessionId);
+  assert(nativefs::backend.handles == 1);
+  f.service.abortUpload(next.sessionId);
+  assert(nativefs::backend.handles == 0 && f.service.snapshot().canUpload);
+}
+
 void testControlAndTimeouts() {
   {
     Fixture f;
@@ -240,8 +298,10 @@ void testControlAndTimeouts() {
     assert(f.service.requestRestart(0) == RestartRequest::Accepted);
     f.service.pollRestart(0);
     nativeRunWorker();
-    assert(f.restart.calls == 0 && !f.service.snapshot().canDraw);
-    assert(f.service.restartProgress() == RestartProgress::Failed);
+    assert(f.restart.calls == (failure == 2 ? 1U : 0U) &&
+           !f.service.snapshot().canDraw);
+    assert(f.service.restartProgress() == (failure == 2
+        ? RestartProgress::Ready : RestartProgress::Failed));
   }
   {
     Fixture f(false);
@@ -602,6 +662,8 @@ void testGzipMountingOrientation() {
 }
 
 int main(int argc, char **) {
+  testUploadIdleCleanup();
+  testPrewakeMarkerFailures();
   testGzipStorageDownloadsAndFailures();
   testGzipMountingOrientation();
   testMarkerRetryRecovery();

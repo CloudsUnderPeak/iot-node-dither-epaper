@@ -139,15 +139,6 @@
         });
     }
 
-    // 對外的 crop 小 API：viewport 模組只透過這裡取用幾何與背景色，不重寫 crop 規則。
-    app.pages.ditherEditor.crop = {
-        ratios: geometry.ratios,
-        frameForBounds: geometry.frameForBounds,
-        previewLayout: geometry.previewLayout,
-        backgroundColor: background.backgroundColor,
-        normalize: applyNormalizedCrop
-    };
-
     app.pages.ditherEditor.featureRegistry.register({
         id: 'crop',
         persistence: {
@@ -170,6 +161,15 @@
         panelGroup: 'prepare',
         // 跨 feature 查詢介面：resize 等 feature 只能經由這裡取得 crop 輸出尺寸。
         api: {
+            ratios: geometry.ratios,
+            frameForBounds: geometry.frameForBounds,
+            previewLayout: geometry.previewLayout,
+            backgroundColor: background.backgroundColor,
+            normalize: applyNormalizedCrop,
+            adjustZoom: function adjustZoom(controller, delta) {
+                var crop = controller.state.settings.crop;
+                controller.updateSetting('crop', 'zoom', Number(crop.zoom || 1) + delta);
+            },
             // crop 設定的輸出尺寸；尚無有效設定時回 null，呼叫端退回自己的 fallback。
             getOutputSize: function getOutputSize(state) {
                 var crop = state && state.settings && state.settings.crop;

@@ -8,7 +8,7 @@
     document.body.appendChild(tooltip); document.body.appendChild(helpLink);
     assert(getComputedStyle(tooltip, '::after').bottom === '22px', 'production tooltip calc');
     assert(getComputedStyle(helpLink).paddingLeft === '38px', 'production Help var/calc');
-    var demo = await app.core.imageLoader.loadDemoImage(800);
+    var demo = await app.core.imageLoader.loadDemoImage(800, app.app.scriptLoader.load);
     assert(demo.imageData.width > 0 && demo.imageData.height > 0, 'HTTP demo decode');
     var input = new ImageData(800, 480);
     for (var i = 0; i < input.data.length; i += 4) {

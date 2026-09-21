@@ -136,6 +136,7 @@ Arduino loop <──────────────────────
 - CRC32 使用 immutable 256-entry lookup table，palette 驗證維持六色 code contract。Cached `EpaperTimingDiagnostics` 記錄 upload inflate/validation、stored validation、frame read（含 flip 重解壓）、SPI transfer phase（含 source read）及 upload/action 至 cleanup 的 total ms 與本次 operation 的 download failure count；由既有有 USB backpressure 保護的 heartbeat 印出，不在 I/O hot path 寫 Serial。目標預算以未翻轉 production profile 為基準：160 MHz validation <250 ms、80 MHz transfer 解壓增量 <400 ms、stored refresh 增量 <700 ms；需要實板比較，不能由 host 時間推斷。
 - `EpaperService` 使用短 mutex 保存完整 cached status，mutex 內不得操作 filesystem、SPI、NVS、JSON 或 Serial。Queue depth 固定 1；實體 draw 在低優先序 dedicated FreeRTOS worker 執行，BUSY wait sleep/yield，frame 每 4 KiB yield。
 - Worker 必須在 panel wake 前持久化 `stage: active` 並 read-back，再取得全晶片 frequency guard、設定並 read-back 80 MHz。80 MHz 涵蓋 prewake、initialize、transfer、refresh、Power OFF／Deep Sleep cleanup；全部 exit path 經 shutdown coordinator 後才恢復 160 MHz。
+- `markActive()` 失敗可發生在寫入前、寫入後讀回失敗或值不符；prewake 分支不呼叫 shutdown coordinator，而是對已知未上電面板清除並讀回 marker。清除成功仍維持本次 service `unavailable`、禁止重畫，但不設 recoveryRequired，允許既有 restart admission；清除未確認時設 recoveryRequired，保留 restart 拒絕。真正 wake 後的 shutdown、boot active marker 與 unknown panel 仍走原本 fail-closed 路徑。
 - 成功或 wake 後失敗都依序嘗試 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5`。只有 protocol shutdown 與 `stage: shutdown_confirmed` read-back 成功才開始 180 秒 cooldown；timeout、SPI failure 或 shutdown failure 設 `panel_state: unknown` 並永久 fail closed 到完整 power cycle。
 - `main.cpp` 在任何依賴 reset reason 的 subsystem 前 capture `BootDiagnostics`，後續 Device API、e-paper status 與 marker recovery 都只使用同一份 normalized snapshot，不再次讀 SDK，也不允許 runtime event 改寫。`epaper_meta` namespace 位於 default `nvs`，不屬於 settings/data/factory reset 會清除的 `user_nvs` 或 `userdata`。Confirmed marker 重啟 180 秒 cooldown；active marker 只有 snapshot 為 `PowerOn` 才透過 `EpaperSafetyStore` clear/read-back 恢復，因本專案規定 MCU 與 HAT 共用板上 3.3 V；其他 reset reason 記錄 interrupted 並禁止自動 draw。一次性實板 recovery build 可在操作者已確認共同斷電後用 compile flag 提供同等證據，但 release 設定必須固定關閉。
 - Runtime status 只組合既有 service cached snapshot。`blocked_resources` 在 validation 是 `epaper,userdata`，transfer 是 `epaper,userdata,spi`，physical refresh 與 cooldown 只保留 `epaper`；不得由 `busy` 推導 Wi-Fi/HTTP 不可用或建立全域 mutex。
@@ -275,6 +276,8 @@ response sending, which may reenter disconnect. Session IDs still reject late
 cleanup after a newer session starts. Native tests exercise the bridge, real
 Router/endpoints and real UserDataStorage with an injected filesystem; they do
 not establish ESPAsyncWebServer request lifetime guarantees on a device.
+
+`UserFileHttpPreflight` 是 HTTP adapter 的授權與 transport shape 前置檢查；它先透過 Router catalogue 驗證 dynamic route 與 token，才檢查 query、body、Content-Length 與 Content-Type，不取得 storage gate。`ApiRouter` 持有單一 upload session 的 idle lease，接納與每次成功非空 write 更新 `millis()` 時戳。`ApiServer::poll()` 透過同一 bridge 每輪檢查 60 秒 wrap-safe idle 期限、abort matching session，脫離 bridge 後對仍有效的 paused weak request 回 408。Finish、disconnect、write failure 清除 matching lease；舊 session callback 不得清除新 lease。E-paper abort 同時釋放 decoder、temporary file 與 uploading state，status 記錄 `upload_timeout`。此 timeout 只涵蓋 callback 間閒置，不能 preempt 已阻塞的 filesystem 呼叫。
 
 PR and master-push verification uses independent host/browser jobs and isolated
 builtin/user/none firmware jobs. User source and production checks run through

@@ -41,5 +41,13 @@
         this.node.setAttribute('aria-label', this.message.textContent + ' ' + this.percent.textContent);
     };
 
-    app.ui.EpaperOperationOverlay = EpaperOperationOverlay;
+    EpaperOperationOverlay.prototype.destroy = function destroy() {
+        if (this.unsubscribe) {
+            this.unsubscribe();
+            this.unsubscribe = null;
+        }
+        this.node.remove();
+    };
+
+    app.app.EpaperOperationOverlay = EpaperOperationOverlay;
 })(window.DitherApp);

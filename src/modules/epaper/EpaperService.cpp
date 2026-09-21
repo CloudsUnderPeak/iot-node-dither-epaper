@@ -384,12 +384,12 @@ EpaperServiceResult EpaperService::finishUpload(uint32_t sessionId) {
   return {EpaperServiceStatusCode::Ok, "draw queued"};
 }
 
-void EpaperService::abortUpload(uint32_t sessionId) {
+void EpaperService::abortUpload(uint32_t sessionId, const char *reason) {
   if (sessionId == 0 || sessionId != uploadSessionId_) return;
   storage_->abortUpload(sessionId);
   uploadDecoder_.reset();
   uploadSessionId_ = 0;
-  setIdleAfterUploadFailure("upload_aborted");
+  setIdleAfterUploadFailure(reason);
 }
 
 EpaperServiceResult EpaperService::requestDraw(EpaperDrawAction action) {
@@ -671,7 +671,17 @@ bool EpaperService::runDraw(const EpaperFrameSource &source) {
                EpaperPanelState::Inactive);
   if (!safetyStore_->markActive()) {
     source.close();
-    finishDraw(false, false, true, EpdDriverError::None);
+    // No wake has occurred. Clear and verify even if the write reported
+    // failure: the marker may have persisted before read-back failed.
+    const bool markerCleared = safetyStore_->clear();
+    SemaphoreLock lock(mutex_);
+    phase_ = EpaperDrawPhase::None;
+    state_ = EpaperServiceState::Unavailable;
+    panelState_ = EpaperPanelState::Inactive;
+    recoveryRequired_ = !markerCleared;
+    lastResult_ = "failed";
+    lastErrorCode_ = "marker_active_failed";
+    timings_.totalOperationMs = millis() - operationStartedMs_;
     return false;
   }
   if (!driver_->begin(transport_)) {

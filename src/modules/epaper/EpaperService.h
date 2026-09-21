@@ -134,7 +134,7 @@ class EpaperService : public SystemRestartCoordinator {
                                   const uint8_t *data,
                                   size_t length);
   EpaperServiceResult finishUpload(uint32_t sessionId);
-  void abortUpload(uint32_t sessionId);
+  void abortUpload(uint32_t sessionId, const char *reason = "upload_aborted");
 
   EpaperServiceResult requestDraw(EpaperDrawAction action);
   EpaperServiceResult refreshMetadata();

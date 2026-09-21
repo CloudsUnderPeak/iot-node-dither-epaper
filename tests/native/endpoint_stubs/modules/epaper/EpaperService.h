@@ -71,7 +71,7 @@ class EpaperService {
   EpaperServiceResult finishUpload(uint32_t) {
     return {EpaperServiceStatusCode::Ok, "queued"};
   }
-  void abortUpload(uint32_t) {}
+  void abortUpload(uint32_t, const char * = "upload_aborted") {}
   UserDataDownloadBegin beginImageDownload(const char *) {
     return {{UserDataFileStatus::Ok, "ok"}, 52, EpaperImageFormat::kImageBytes,
             0, EpaperImageFormat::kImageBytes, false};

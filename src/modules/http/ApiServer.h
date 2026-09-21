@@ -29,6 +29,12 @@ class ApiServer {
   bool started_ = false;
   StreamingSessionBridge streams_;
   PendingResponseSlot<AsyncWebServerRequestPtr> pending_;
+  struct UploadRequest {
+    uint32_t sessionId = 0;
+    AsyncWebServerRequestPtr request;
+  };
+  UploadRequest fileUploadRequest_;
+  UploadRequest epaperUploadRequest_;
 
   Result registerRoutes();
   void dispatchNoBody(AsyncWebServerRequest *request, Api::Method method);

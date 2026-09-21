@@ -124,6 +124,7 @@
         errorProjectFeature: 'This image project uses editor features that are not supported.',
         errorProjectSettings: 'The image project settings are invalid.',
         errorGeneric: 'Something went wrong. Please try again.',
+        errorImageMemory: 'This image needs more free memory. Your project is still available; close other tabs or use a smaller image.',
         helpTitle: 'Help',
         aboutTitle: 'About',
         placeholderAbout: 'A static browser-based dither image editor MVP.',

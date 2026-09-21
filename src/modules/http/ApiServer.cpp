@@ -4,6 +4,7 @@
 
 #include "HttpJsonBody.h"
 #include "HttpResponse.h"
+#include "UserFileHttpPreflight.h"
 #include "api/shared/ApiResponse.h"
 #include "modules/storage/UserFilePolicy.h"
 
@@ -225,6 +226,24 @@ void ApiServer::dispatchNoBody(AsyncWebServerRequest *request, Api::Method metho
 
 void ApiServer::poll() {
   if (!started_) return;
+  AsyncWebServerRequestPtr expiredRequest;
+  const ApiRouter::ExpiredUpload expired = streams_.run([&]() {
+    const auto value = router_->expireIdleUpload(millis());
+    if (value.sessionId != 0) {
+      UploadRequest &slot = value.epaper ? epaperUploadRequest_ : fileUploadRequest_;
+      if (slot.sessionId == value.sessionId) {
+        expiredRequest = slot.request;
+        slot = {};
+      }
+    }
+    return value;
+  });
+  if (expired.sessionId != 0) {
+    if (auto request = expiredRequest.lock()) {
+      sendApiResponse(request.get(), Api::problem(
+          408, "upload_timeout", "upload stopped sending data"));
+    }
+  }
   const auto record = pending_.snapshot();
   if (record.pending.id == 0) return;
   PendingResponseSlot<AsyncWebServerRequestPtr>::Record detached;
@@ -284,47 +303,24 @@ void ApiServer::prepareFileUpload(AsyncWebServerRequest *request,
   if (state == nullptr || state->initialized) return;
   state->initialized = true;
 
+  bool hasQuery = false;
   for (size_t index = 0; index < request->params(); ++index) {
     const AsyncWebParameter *parameter = request->getParam(index);
-    if (parameter != nullptr && !parameter->isPost() && !parameter->isFile()) {
-      saveUploadError(*state, Api::problem(
-          400, "unsupported_field", "file upload does not accept query fields"));
-      return;
-    }
+    hasQuery |= parameter != nullptr && !parameter->isPost() && !parameter->isFile();
   }
-
-  if (request->hasHeader("Transfer-Encoding") ||
-      !request->hasHeader("Content-Length")) {
-    saveUploadError(*state, Api::problem(
-        411, "content_length_required", "file upload requires Content-Length"));
+  const String declaredHeader = request->hasHeader("Content-Length")
+      ? request->getHeader("Content-Length")->value() : String();
+  const Api::Response preflight = UserFileHttpPreflight::upload(
+      *router_, bearerTokenFromRequest(request), request->url().c_str(), hasQuery,
+      request->hasHeader("Transfer-Encoding"),
+      request->hasHeader("Content-Length") ? declaredHeader.c_str() : nullptr,
+      request->contentLength(), callbackTotal, request->contentType());
+  if (!preflight.success) {
+    saveUploadError(*state, preflight);
     return;
   }
   size_t declaredBytes = 0;
-  const String declaredHeader = request->getHeader("Content-Length")->value();
-  if (!UserFilePolicy::parseSize(declaredHeader.c_str(), declaredBytes) ||
-      declaredBytes != request->contentLength() ||
-      (callbackTotal != 0 && callbackTotal != declaredBytes)) {
-    saveUploadError(*state, Api::problem(
-        411, "content_length_required", "invalid Content-Length"));
-    return;
-  }
-
-  if (request->contentType().length() != 0) {
-    String contentType = request->contentType();
-    contentType.toLowerCase();
-    // ESPAsyncWebServer consumes form bodies, and may heuristically consume
-    // text/plain bodies that resemble key=value, before invoking our raw body
-    // callback. Reject those media types so byte delivery is deterministic.
-    if (contentType.startsWith("multipart/form-data") ||
-        contentType.startsWith("application/x-www-form-urlencoded") ||
-        contentType.startsWith("text/plain")) {
-      saveUploadError(*state, Api::problem(
-          415,
-          "unsupported_media_type",
-          "raw file upload requires application/octet-stream or no Content-Type"));
-      return;
-    }
-  }
+  UserFilePolicy::parseSize(declaredHeader.c_str(), declaredBytes);
 
   const ApiRouter::FileUploadStart start = streams_.run([&]() { return router_->prepareFileUpload(
       bearerTokenFromRequest(request), request->url().c_str(), declaredBytes); });
@@ -335,8 +331,14 @@ void ApiServer::prepareFileUpload(AsyncWebServerRequest *request,
   state->sessionId = start.sessionId;
   state->active = true;
   const uint32_t sessionId = state->sessionId;
+  streams_.run([&]() {
+    fileUploadRequest_ = {sessionId, request->pause()};
+  });
   request->onDisconnect([this, sessionId]() {
-    streams_.run([&]() { return router_->abortFileUpload(sessionId); });
+    streams_.run([&]() {
+      if (fileUploadRequest_.sessionId == sessionId) fileUploadRequest_ = {};
+      router_->abortFileUpload(sessionId);
+    });
   });
 }
 
@@ -367,23 +369,25 @@ void ApiServer::handleFileUpload(AsyncWebServerRequest *request) {
   }
   const uint32_t sessionId = state->sessionId;
   state->active = false;
-  sendApiResponse(request, streams_.run([&]() { return router_->finishFileUpload(
-      sessionId, request->url().c_str()); }));
+  const Api::Response response = streams_.run([&]() {
+    if (fileUploadRequest_.sessionId == sessionId) fileUploadRequest_ = {};
+    return router_->finishFileUpload(sessionId, request->url().c_str());
+  });
+  sendApiResponse(request, response);
 }
 
 void ApiServer::handleFileDownload(AsyncWebServerRequest *request) {
-  if (request->contentLength() != 0) {
-    sendApiResponse(request, Api::problem(
-        400, "unsupported_field", "file download does not accept a request body"));
-    return;
-  }
+  bool hasQuery = false;
   for (size_t index = 0; index < request->params(); ++index) {
     const AsyncWebParameter *parameter = request->getParam(index);
-    if (parameter != nullptr && !parameter->isPost() && !parameter->isFile()) {
-      sendApiResponse(request, Api::problem(
-          400, "unsupported_field", "file download does not accept query fields"));
-      return;
-    }
+    hasQuery |= parameter != nullptr && !parameter->isPost() && !parameter->isFile();
+  }
+  const Api::Response preflight = UserFileHttpPreflight::download(
+      *router_, bearerTokenFromRequest(request), request->url().c_str(),
+      request->contentLength() != 0, hasQuery);
+  if (!preflight.success) {
+    sendApiResponse(request, preflight);
+    return;
   }
   const String path = request->url();
   const String range = request->hasHeader("Range")
@@ -495,8 +499,14 @@ void ApiServer::prepareEpaperUpload(AsyncWebServerRequest *request,
   state->sessionId = start.sessionId;
   state->active = true;
   const uint32_t sessionId = state->sessionId;
+  streams_.run([&]() {
+    epaperUploadRequest_ = {sessionId, request->pause()};
+  });
   request->onDisconnect([this, sessionId]() {
-    streams_.run([&]() { return router_->abortEpaperUpload(sessionId); });
+    streams_.run([&]() {
+      if (epaperUploadRequest_.sessionId == sessionId) epaperUploadRequest_ = {};
+      router_->abortEpaperUpload(sessionId);
+    });
   });
 }
 
@@ -528,7 +538,11 @@ void ApiServer::handleEpaperUpload(AsyncWebServerRequest *request) {
   }
   const uint32_t sessionId = state->sessionId;
   state->active = false;
-  sendApiResponse(request, streams_.run([&]() { return router_->finishEpaperUpload(sessionId); }));
+  const Api::Response response = streams_.run([&]() {
+    if (epaperUploadRequest_.sessionId == sessionId) epaperUploadRequest_ = {};
+    return router_->finishEpaperUpload(sessionId);
+  });
+  sendApiResponse(request, response);
 }
 
 void ApiServer::handleEpaperDownload(AsyncWebServerRequest *request) {

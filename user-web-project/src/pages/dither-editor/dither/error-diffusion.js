@@ -19,90 +19,8 @@
     }
 
     function applyFloydSteinberg(imageData, paletteMapper, serpentine, strength) {
-        var width = imageData.width;
-        var height = imageData.height;
-        var data = new Float32Array(imageData.data);
-        var output = new Uint8ClampedArray(imageData.data.length);
-        var factor7 = (7 / 16) * strength;
-        var factor3 = (3 / 16) * strength;
-        var factor5 = (5 / 16) * strength;
-        var factor1 = (1 / 16) * strength;
-        var rowStride = width * 4;
-
-        for (var y = 0; y < height; y += 1) {
-            var reverse = serpentine && y % 2 === 1;
-            var rowOffset = y * rowStride;
-
-            if (!reverse) {
-                for (var x = 0; x < width; x += 1) {
-                    var index = rowOffset + x * 4;
-                    var r = data[index];
-                    var g = data[index + 1];
-                    var b = data[index + 2];
-                    var mapped = mappedColor(paletteMapper, r, g, b);
-                    var nr = mapped.r;
-                    var ng = mapped.g;
-                    var nb = mapped.b;
-                    var er = r - nr;
-                    var eg = g - ng;
-                    var eb = b - nb;
-
-                    output[index] = nr;
-                    output[index + 1] = ng;
-                    output[index + 2] = nb;
-                    output[index + 3] = 255;
-
-                    if (x + 1 < width) {
-                        diffuse(data, index + 4, er, eg, eb, factor7);
-                    }
-                    if (y + 1 < height) {
-                        var nextRow = index + rowStride;
-                        if (x > 0) {
-                            diffuse(data, nextRow - 4, er, eg, eb, factor3);
-                        }
-                        diffuse(data, nextRow, er, eg, eb, factor5);
-                        if (x + 1 < width) {
-                            diffuse(data, nextRow + 4, er, eg, eb, factor1);
-                        }
-                    }
-                }
-            } else {
-                for (var rx = width - 1; rx >= 0; rx -= 1) {
-                    var reverseIndex = rowOffset + rx * 4;
-                    var rr = data[reverseIndex];
-                    var rg = data[reverseIndex + 1];
-                    var rb = data[reverseIndex + 2];
-                    var reverseMapped = mappedColor(paletteMapper, rr, rg, rb);
-                    var rnr = reverseMapped.r;
-                    var rng = reverseMapped.g;
-                    var rnb = reverseMapped.b;
-                    var rer = rr - rnr;
-                    var reg = rg - rng;
-                    var reb = rb - rnb;
-
-                    output[reverseIndex] = rnr;
-                    output[reverseIndex + 1] = rng;
-                    output[reverseIndex + 2] = rnb;
-                    output[reverseIndex + 3] = 255;
-
-                    if (rx > 0) {
-                        diffuse(data, reverseIndex - 4, rer, reg, reb, factor7);
-                    }
-                    if (y + 1 < height) {
-                        var reverseNextRow = reverseIndex + rowStride;
-                        if (rx + 1 < width) {
-                            diffuse(data, reverseNextRow + 4, rer, reg, reb, factor3);
-                        }
-                        diffuse(data, reverseNextRow, rer, reg, reb, factor5);
-                        if (rx > 0) {
-                            diffuse(data, reverseNextRow - 4, rer, reg, reb, factor1);
-                        }
-                    }
-                }
-            }
-        }
-
-        return new ImageData(output, width, height);
+        return applyMatrix(imageData, { serpentine: serpentine },
+            app.pages.ditherEditor.ditherMatrices.floydSteinberg, paletteMapper, strength);
     }
 
     function diffuse(data, index, er, eg, eb, factor) {
@@ -181,117 +99,63 @@
     }
 
     function applyAdaptiveFloydSteinberg(imageData, options, radius) {
-        var width = imageData.width;
-        var height = imageData.height;
         var paletteMapper = app.pages.ditherEditor.paletteMapping.createMapper(options);
         if (!paletteMapper.length) {
             return imageData;
         }
-
-        var source = imageData.data;
-        var meanMap = computeMeanMap(source, width, height, radius);
-        var data = new Float32Array(source);
-        var output = new Uint8ClampedArray(source.length);
-        var strength = normalizeErrorStrength(options.errorStrength);
-        var factor7 = (7 / 16) * strength;
-        var factor3 = (3 / 16) * strength;
-        var factor5 = (5 / 16) * strength;
-        var factor1 = (1 / 16) * strength;
-        var rowStride = width * 4;
-        var adaptiveBiasScale = 0.35;
-
-        for (var y = 0; y < height; y += 1) {
-            var reverse = options.serpentine && y % 2 === 1;
-            var rowOffset = y * rowStride;
-            var start = reverse ? width - 1 : 0;
-            var end = reverse ? -1 : width;
-            var step = reverse ? -1 : 1;
-
-            for (var x = start; x !== end; x += step) {
-                var index = rowOffset + x * 4;
-                var r = data[index];
-                var g = data[index + 1];
-                var b = data[index + 2];
-                var localMean = meanMap[y * width + x];
-                var bias = (128 - localMean) * adaptiveBiasScale;
-                var mapped = mappedColor(
-                    paletteMapper,
-                    clampChannel(r + bias),
-                    clampChannel(g + bias),
-                    clampChannel(b + bias)
-                );
-                var nr = mapped.r;
-                var ng = mapped.g;
-                var nb = mapped.b;
-                var er = r - nr;
-                var eg = g - ng;
-                var eb = b - nb;
-
-                output[index] = nr;
-                output[index + 1] = ng;
-                output[index + 2] = nb;
-                output[index + 3] = 255;
-
-                if (!reverse) {
-                    if (x + 1 < width) {
-                        diffuse(data, index + 4, er, eg, eb, factor7);
-                    }
-                    if (y + 1 < height) {
-                        var nextRow = index + rowStride;
-                        if (x > 0) {
-                            diffuse(data, nextRow - 4, er, eg, eb, factor3);
-                        }
-                        diffuse(data, nextRow, er, eg, eb, factor5);
-                        if (x + 1 < width) {
-                            diffuse(data, nextRow + 4, er, eg, eb, factor1);
-                        }
-                    }
-                } else {
-                    if (x > 0) {
-                        diffuse(data, index - 4, er, eg, eb, factor7);
-                    }
-                    if (y + 1 < height) {
-                        var reverseNextRow = index + rowStride;
-                        if (x + 1 < width) {
-                            diffuse(data, reverseNextRow + 4, er, eg, eb, factor3);
-                        }
-                        diffuse(data, reverseNextRow, er, eg, eb, factor5);
-                        if (x > 0) {
-                            diffuse(data, reverseNextRow - 4, er, eg, eb, factor1);
-                        }
-                    }
-                }
-            }
-        }
-
-        return new ImageData(output, width, height);
+        var meanMap = computeMeanMap(imageData.data, imageData.width, imageData.height, radius);
+        return applyMatrix(imageData, options, app.pages.ditherEditor.ditherMatrices.floydSteinberg,
+            paletteMapper, normalizeErrorStrength(options.errorStrength), meanMap);
     }
 
-    function applyMatrix(imageData, options, matrix, paletteMapper, strength) {
+    function applyMatrix(imageData, options, matrix, paletteMapper, strength, meanMap) {
         var width = imageData.width;
         var height = imageData.height;
-        var data = new Float32Array(imageData.data);
-        var output = new Uint8ClampedArray(imageData.data.length);
+        var source = imageData.data;
+        var output = new Uint8ClampedArray(source.length);
         var matrixOffsets = matrixOffsetCache(matrix, width, strength);
-        var matrixLength = matrixOffsets.length;
         var offsetX = matrixOffsets.offsetX;
         var offsetY = matrixOffsets.offsetY;
-        var forwardOffset = matrixOffsets.forwardOffset;
-        var reverseOffset = matrixOffsets.reverseOffset;
         var factors = matrixOffsets.factors;
+        var rowStride = width * 4;
+        var rowCount = 1;
+        for (var offset = 0; offset < matrixOffsets.length; offset += 1) {
+            rowCount = Math.max(rowCount, offsetY[offset] + 1);
+        }
+        var rows = new Array(rowCount);
+        var loaded = new Int32Array(rowCount);
+        loaded.fill(-1);
+        function rowFor(y) {
+            var slot = y % rowCount;
+            if (loaded[slot] !== y) {
+                if (!rows[slot]) { rows[slot] = new Float32Array(rowStride); }
+                rows[slot].set(source.subarray(y * rowStride, (y + 1) * rowStride));
+                loaded[slot] = y;
+            }
+            return rows[slot];
+        }
 
         for (var y = 0; y < height; y += 1) {
             var reverse = options.serpentine && y % 2 === 1;
             var start = reverse ? width - 1 : 0;
             var end = reverse ? -1 : width;
             var step = reverse ? -1 : 1;
+            var row = rowFor(y);
 
             for (var x = start; x !== end; x += step) {
-                var index = (y * width + x) * 4;
-                var r = data[index];
-                var g = data[index + 1];
-                var b = data[index + 2];
-                var mapped = mappedColor(paletteMapper, r, g, b);
+                var localIndex = x * 4;
+                var index = y * rowStride + localIndex;
+                var r = row[localIndex];
+                var g = row[localIndex + 1];
+                var b = row[localIndex + 2];
+                var mapped;
+                if (meanMap) {
+                    var bias = (128 - meanMap[y * width + x]) * 0.35;
+                    mapped = mappedColor(paletteMapper,
+                        clampChannel(r + bias), clampChannel(g + bias), clampChannel(b + bias));
+                } else {
+                    mapped = mappedColor(paletteMapper, r, g, b);
+                }
                 var nr = mapped.r;
                 var ng = mapped.g;
                 var nb = mapped.b;
@@ -304,24 +168,14 @@
                 output[index + 2] = nb;
                 output[index + 3] = 255;
 
-                for (var entryIndex = 0; entryIndex < matrixLength; entryIndex += 1) {
+                for (var entryIndex = 0; entryIndex < matrixOffsets.length; entryIndex += 1) {
                     var nx = x + (reverse ? -offsetX[entryIndex] : offsetX[entryIndex]);
                     var ny = y + offsetY[entryIndex];
-                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-                        continue;
-                    }
-                    diffuse(
-                        data,
-                        index + (reverse ? reverseOffset[entryIndex] : forwardOffset[entryIndex]),
-                        er,
-                        eg,
-                        eb,
-                        factors[entryIndex]
-                    );
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) { continue; }
+                    diffuse(rowFor(ny), nx * 4, er, eg, eb, factors[entryIndex]);
                 }
             }
         }
-
         return new ImageData(output, width, height);
     }
 

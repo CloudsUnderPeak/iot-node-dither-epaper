@@ -38,9 +38,10 @@
                 pending = null;
                 try {
                     var response = event.data;
-                    if (!response.ok) { throw clientError('worker_failure', response.message || 'Worker failed.'); }
+                    if (!response.ok) { throw clientError(response.code || 'worker_failure', response.message || 'Worker failed.'); }
                     entry.resolve(new ImageData(new Uint8ClampedArray(response.buffer), response.width, response.height));
-                } catch (error) { entry.reject(error); }
+                } catch (error) { entry.reject(error instanceof RangeError
+                    ? clientError('image_memory_exhausted', error.message) : error); }
             };
             function failure() {
                 if (currentEpoch === epoch) { stop(clientError('worker_failure', 'Worker failed.'), true); }
@@ -64,7 +65,8 @@
                         var buffer = imageData.data.slice().buffer;
                         target.postMessage({ id: id, algorithm: algorithm, options: options,
                             width: imageData.width, height: imageData.height, buffer: buffer }, [buffer]);
-                    } catch (error) { stop(clientError('worker_failure', error.message), true); }
+                    } catch (error) { stop(clientError(error instanceof RangeError
+                        ? 'image_memory_exhausted' : 'worker_failure', error.message), true); }
                 });
             },
             terminate: function (reason) { stop(clientError('job_cancelled', reason || 'explicit'), false); },

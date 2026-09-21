@@ -112,6 +112,9 @@
     };
 
     function errorText(error) {
+        if (error && error.code === 'image_memory_exhausted') {
+            return app.i18n.t('errorImageMemory');
+        }
         if (error && (error.code || error.status) && app.device.errorText) {
             return app.device.errorText(error);
         }
@@ -198,7 +201,8 @@
     DitherEditorController.prototype.loadDemo = function loadDemo() {
         var self = this;
         return this.loadSource(function (generation) {
-            return app.core.imageLoader.loadDemoImage(app.pages.ditherEditor.constants.inputLongEdge())
+            return app.core.imageLoader.loadDemoImage(
+                app.pages.ditherEditor.constants.inputLongEdge(), app.app.scriptLoader.load)
                 .then(function (result) {
                     if (self.isCurrentLoad(generation)) { self.loadResult(result, result.fileName || 'Demo image'); }
                 });

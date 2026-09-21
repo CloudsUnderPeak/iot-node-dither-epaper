@@ -291,6 +291,7 @@
         iconPath: 'assets/icons/editor/palette.svg',
         labelKey: 'panelPalette',
         panelGroup: 'edit',
+        targetLocked: true,
         pipelineStage: 'effectsOrder',
         pipelineOrder: 20,
         // 預設顯示 Original 代表色，不先套用固定色盤。

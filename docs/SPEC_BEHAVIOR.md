@@ -49,6 +49,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - `user.capacity.available_bytes` 必須等於 `user.limits.max_upload_bytes`，代表以當下狀態可接受的單一新檔 payload 上限。計算先保留 64 KiB，再向下對齊 4 KiB allocation unit；前端直接把這個數字呈現為可用空間，不加入模糊化的免責文字。
 - `userdata` 提供受保護的 file list、raw HTTP upload、raw HTTP download／single-range download 與 delete；公開檔名限制為 1–64 bytes ASCII，第一字元必須為英數，後續只允許英數、`.`、`_`、`-`，且不允許連續 `..`。
 - 上傳開始前必須以新鮮 capacity snapshot 驗證完整 `Content-Length`，超過當下 `max_upload_bytes` 就在寫入前拒絕。Upload 使用單一 internal temporary file、4 KiB bounded chunk、verified close 與 atomic rename；新檔成功回 `201`，替換成功回 `200`，任何失敗都不得截斷原正式檔案或公開 temporary file。
+- Generic user-file HTTP item 先確認有效 Bearer token，再檢查 query、body、長度或媒體類型；未授權請求不開啟檔案 session。已接納的 generic 與 e-paper upload 若連續 60 秒沒有成功接收非空資料，會中止該 session 並釋放 temporary file 與 operation gate；仍連線的 HTTP request 回 `408 upload_timeout`。只要持續送入有效資料，就沒有一般上傳總時限。此機制不能強制中斷本身永久阻塞的 filesystem 呼叫。
 - 同一時間只允許一個 user-data 檔案操作；HTTP 與 console 共用 non-blocking gate，競爭時立即回 busy，不等待。操作期間 `/api/storage` 只回最後完成操作後的穩定容量 snapshot。
 - `GET /api/wifi` 可回傳 SSID、mode、IPv4 等非密碼資訊，但 hostname 由 `GET /api/device` 提供。
 - API 永遠不回傳 Wi-Fi password、admin password 或 token 以外的敏感認證資料。
@@ -163,6 +164,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - 對外狀態固定為 `idle`、`uploading`、`queued`、`drawing`、`cooldown`、`unavailable`；client 只依 `can_upload`、`can_draw` 與 `retry_after_seconds` 判斷，不解析 message。
 - 每次實體 draw 在 panel wake 前必須把 CPU 切到並 read-back 確認 80 MHz，直到 Power OFF／Deep Sleep cleanup 完成後才恢復 160 MHz；不得以 160 MHz fallback，也不得關閉 brownout detector。
 - 每次 draw 後只有 Power OFF `0x02`/`0x00`、BUSY wait、Deep Sleep `0x07`/`0xA5` 與 persistent marker read-back 全部成功，才開始完整 180 秒 cooldown。倒數使用 monotonic wrap-safe 時差，秒數向上取整，任何圖片或 action 都沒有例外。
+- 上電前寫入／驗證 active marker 失敗時不得 initialize、transfer 或 refresh；回報 `marker_active_failed`，面板仍為 `inactive`，不可再繪製。韌體會嘗試清除並讀回可能已寫入的 marker；確認清除後可安全軟體重啟，未確認時仍要求完整共同斷電。這種故障不得誤報為 wake 後的 `shutdown_failed` 或未知面板狀態。
 - Cooldown 到期後仍須成功清除並 read-back protection marker 才回 `idle`；marker 操作失敗時繼續禁止 draw，韌體以短暫 backoff 重試清除，不因一次暫時性儲存失敗永久失去恢復路徑。
 - 電子紙冷卻收尾不得依賴 serial reader 或主迴圈是否正被診斷輸出延遲；USB 連線但主機停止讀取時亦須自動恢復。
 - RST inactive-high、CS high、DC low 只代表 `logical_quiesce`，不能宣稱面板已 Power OFF／Deep Sleep。Waveshare HAT 的 RST low 會控制板上 power switch，因此只有 initialize 的短 reset pulse 可以拉低，閒置與 prewake 不得長時間保持 low。若 panel 已 wake 但 protocol shutdown 失敗，狀態固定為 `unavailable`／`panel_state: unknown`，要求 MCU 與 HAT 一起完整斷電，不得靠等待或 software restart 解鎖。

@@ -263,12 +263,13 @@
     }
 
     function renderTargetLocks(state) {
-        var locked = app.pages.ditherEditor.targetPolicy.isEpaper(state);
-        ['resize', 'palette'].forEach(function (id) {
+        app.pages.ditherEditor.featureRegistry.all().forEach(function (feature) {
+            var id = feature.id;
             var panel = refs.panelSectionsByTool && refs.panelSectionsByTool[id];
             if (!panel) {
                 return;
             }
+            var locked = app.pages.ditherEditor.targetPolicy.featureLocked(state, id);
             panel.classList.toggle('is-target-locked', locked);
             panel.querySelectorAll('button, input, select, textarea').forEach(function (control) {
                 control.disabled = locked;

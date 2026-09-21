@@ -75,7 +75,7 @@
             setStatus: this.setStatus.bind(this)
         });
         this.menu = new app.app.AppMenu(this.menuButton, this.router.navigate.bind(this.router));
-        this.epaperOverlay = new app.ui.EpaperOperationOverlay();
+        this.epaperOverlay = new app.app.EpaperOperationOverlay();
     }
 
     // 頁面切換時更新中央標題。

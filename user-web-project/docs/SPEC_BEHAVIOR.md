@@ -62,6 +62,7 @@ Split From: SPEC_INDEX.md
 3. 第一次進入且尚未載入圖片時，`source` group 的 Image Input 自動展開；只有來源輸入可操作，其餘工具與動作反灰停用。
 4. 使用者匯入本機圖片、選擇 demo，或建立新圖片。
 5. App 解碼圖片後自動進入 `prepare` group 並只展開 Crop；此時 Image Input、Crop 與 edit tools 可選。
+   若部署的 feature manifest 停用或移除 Crop，載圖後直接進入可用的 edit 流程；Crop 設定、控制項與 operation 不存在，其他效果、PNG／圖片專案匯出及 E-paper 的尺寸、六色 palette、encoder guards 仍可使用。
 6. 使用者按下右下角顯眼的 OK 或自行收合 Crop 時，App 進入 `edit` group 並展開 Resize、Adjust、Palette、Dither；若使用者改點單一 edit tool，則只展開該 edit panel。
 7. `edit` group 會依 Crop 範圍與 Resize、Adjust、Palette、Dither 等設定更新 Result。
 8. App 依固定 Effects order 更新圖片處理結果。
@@ -600,6 +601,7 @@ Dither Editor 有三個使用者可見流程 group，另有一個不顯示在工
 - 匯出必須使用完整輸出尺寸重新計算。
 - Export 只在 `edit` 可操作；`source` 與 `prepare` 時必須反灰停用。
 - 匯出失敗時要給出可理解的錯誤狀態。
+- 大圖運算或 Worker 配置記憶體失敗時，顯示雙語可理解的記憶體訊息並保留目前工作區，讓使用者可重試、關閉其他分頁或選擇較小圖片。合法輸出尺寸上限仍為 4096；不自動縮圖或降低正式輸出品質。瀏覽器直接終止分頁時無法保證由網頁捕捉或恢復。
 - Export 不應被當成效果順序的一部分拖曳。
 - E-paper Device Mode 以「繪製到電子紙」取代 Export PNG；它重新跑完整 pipeline、依實際尺寸正規化方向、編碼 EPDIMG，並只送一次 gzip upload。
 - E-paper Device Mode 在繪製按鈕下另提供同為主按鈕樣式的「下載圖片專案」；Standalone Mode 不顯示這個 action。

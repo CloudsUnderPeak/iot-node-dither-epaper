@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--modules-only', action='store_true')
     parser.add_argument('--production', action='store_true')
     parser.add_argument('--timeout', type=float, default=90)
+    parser.add_argument('--fail-case', choices=['legacy', 'wifi', 'epaper', 'history', 'styles', 'crop_disabled', 'crop_removed'])
     args = parser.parse_args()
     browser = helper.browser_path(args.chrome)
     if args.production:
@@ -59,20 +60,37 @@ def main():
             asset_css = [(ROOT / 'assets/styles/components.css').read_text(), gzip.decompress((output / 'assets/styles/components.css.gz').read_bytes()).decode()]
         scripts += 'var testAssetCss=' + json.dumps(asset_css) + ';'
         scripts += 'var testEntryPaths=' + json.dumps(entry_paths) + ';'
+        scripts += 'var testStyleCss=' + json.dumps({
+            'themes': (ROOT / 'assets/styles/themes.css').read_text(),
+            'components': (ROOT / 'assets/styles/components.css').read_text()
+        }).replace('</', '<\\/') + ';'
         scripts += (ROOT / 'tests/browser/harness.js').read_text()
-        scripts += '\n' + (ROOT / 'tests/browser/regression.js').read_text()
-        page.write_text('<!doctype html><meta charset="utf-8"><base href="../../"><pre id="result">WAIT</pre><script>var testSources='
-                        + json.dumps(sources).replace('</', '<\\/') + ';' + scripts + '</script>')
-        dom = helper.run_ready_browser(browser, helper.file_url(page, browser), args.timeout)
-        match = re.search(r'<pre id="result">(.*?)</pre>', dom, re.S)
-        if not match or html.unescape(match.group(1)) == 'WAIT':
-            raise SystemExit('Browser suite did not finish.')
-        report = json.loads(html.unescape(match.group(1)))
-        print(helper.sanitize_text(json.dumps(report, indent=2)))
-        if report.get('error') or not report.get('passed'):
+        results = []
+        cases = [('legacy', 'regression.js'), ('crop_disabled', 'crop-flow.js'),
+                 ('crop_removed', 'crop-flow.js'), ('wifi', 'wifi-flow.js'),
+                 ('epaper', 'epaper-flow.js'), ('history', 'history-flow.js'),
+                 ('styles', 'style-flow.js')]
+        for name, script_name in cases:
+            case_script = 'window.testCropMode = ' + json.dumps(name) + ';\n' + (ROOT / 'tests/browser' / script_name).read_text()
+            if args.fail_case == name:
+                case_script = "document.getElementById('result').textContent = JSON.stringify({error: 'injected failure'});"
+            page = directory / (name + '.html')
+            page.write_text('<!doctype html><meta charset="utf-8"><base href="../../"><pre id="result">WAIT</pre><script>var testSources='
+                            + json.dumps(sources).replace('</', '<\\/') + ';' + scripts + '\n' + case_script + '</script>')
+            try:
+                dom = helper.run_ready_browser(browser, helper.file_url(page, browser), args.timeout)
+                match = re.search(r'<pre id="result">(.*?)</pre>', dom, re.S)
+                if not match or html.unescape(match.group(1)) == 'WAIT':
+                    raise RuntimeError('case did not finish')
+                report = json.loads(html.unescape(match.group(1)))
+                results.append({'name': name, 'status': 'failed' if report.get('error') or not report.get('passed') else 'passed',
+                                'passed': report.get('passed', []), 'error': report.get('error'),
+                                'memoryObservations': report.get('memoryObservations', [])})
+            except (RuntimeError, subprocess.TimeoutExpired, ValueError) as error:
+                results.append({'name': name, 'status': 'failed', 'passed': [], 'error': str(error)})
+        print(helper.sanitize_text(json.dumps({'cases': results}, indent=2)))
+        if any(case['status'] != 'passed' for case in results):
             raise SystemExit(1)
-    except subprocess.TimeoutExpired:
-        raise SystemExit('Browser suite exceeded wall-clock timeout.')
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 

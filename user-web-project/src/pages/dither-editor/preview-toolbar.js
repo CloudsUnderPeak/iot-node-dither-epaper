@@ -29,10 +29,11 @@
         }
 
         function adjustCropZoom(delta) {
-            if (controller.state.mode !== machine.groups.PREPARE) {
+            var crop = app.pages.ditherEditor.featureRegistry.api('crop');
+            if (controller.state.mode !== machine.groups.PREPARE || !crop) {
                 return;
             }
-            controller.updateSetting('crop', 'zoom', Number(controller.state.settings.crop.zoom || 1) + delta);
+            crop.adjustZoom(controller, delta);
         }
 
         var originalInput = viewModeInput('original');
@@ -84,16 +85,17 @@
         // 依 mode 決定顯示 crop 控制列或檢視切換列；非兩者時保留高度避免版面跳動。
         function render(state) {
             var isPrepareMode = state.mode === machine.groups.PREPARE;
+            var hasCrop = Boolean(app.pages.ditherEditor.featureRegistry.api('crop') && state.settings.crop);
             var isEditMode = state.mode === machine.groups.EDIT;
             var shouldReserveToolbar = Boolean(state.sourceImageData && !isPrepareMode && !isEditMode);
             element.hidden = !isPrepareMode && !isEditMode && !shouldReserveToolbar;
             element.classList.toggle('is-reserved', shouldReserveToolbar);
             element.setAttribute('aria-hidden', shouldReserveToolbar ? 'true' : 'false');
-            cropControlRow.hidden = !isPrepareMode;
+            cropControlRow.hidden = !isPrepareMode || !hasCrop;
             previewToggleRow.hidden = !isEditMode;
-            cropZoomInButton.disabled = !isPrepareMode;
-            cropZoomOutButton.disabled = !isPrepareMode;
-            cropOkButton.disabled = !isPrepareMode;
+            cropZoomInButton.disabled = !isPrepareMode || !hasCrop;
+            cropZoomOutButton.disabled = !isPrepareMode || !hasCrop;
+            cropOkButton.disabled = !isPrepareMode || !hasCrop;
             originalInput.checked = state.viewMode === 'original';
             resultInput.checked = state.viewMode === 'result';
             pixelInput.checked = state.viewMode === 'pixel';

@@ -99,7 +99,7 @@
             if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
                 continue;
             }
-            var recipientIndex = index + offsetY * rowStride + offsetX * 4;
+            var recipientIndex = index + offsetY * rowStride + offsetX * 3;
             source[recipientIndex] = clampChannel(source[recipientIndex] + shareR);
             source[recipientIndex + 1] = clampChannel(source[recipientIndex + 1] + shareG);
             source[recipientIndex + 2] = clampChannel(source[recipientIndex + 2] + shareB);
@@ -110,14 +110,21 @@
         apply: function apply(imageData, options) {
             var width = imageData.width;
             var height = imageData.height;
-            var source = new Float32Array(imageData.data);
-            var output = new Uint8ClampedArray(source.length);
             var paletteMapper = app.pages.ditherEditor.paletteMapping.createMapper(options);
-            var rowStride = width * 4;
             var errorStrength = normalizeErrorStrength(options.errorStrength);
             if (!paletteMapper.length) {
                 return imageData;
             }
+            // Dot classes revisit distant rows; retain RGB only because alpha is
+            // always written as opaque output and never receives error.
+            var source = new Float32Array(width * height * 3);
+            for (var pixel = 0; pixel < width * height; pixel += 1) {
+                source[pixel * 3] = imageData.data[pixel * 4];
+                source[pixel * 3 + 1] = imageData.data[pixel * 4 + 1];
+                source[pixel * 3 + 2] = imageData.data[pixel * 4 + 2];
+            }
+            var output = new Uint8ClampedArray(imageData.data.length);
+            var rowStride = width * 3;
 
             for (var currentClass = 0; currentClass < CLASS_COORDS.length; currentClass += 1) {
                 var coord = CLASS_COORDS[currentClass];
@@ -125,9 +132,10 @@
                 for (var y = coord.y; y < height; y += 8) {
                     for (var x = coord.x; x < width; x += 8) {
                         var index = (y * width + x) * 4;
-                        var oldR = source[index];
-                        var oldG = source[index + 1];
-                        var oldB = source[index + 2];
+                        var workIndex = (y * width + x) * 3;
+                        var oldR = source[workIndex];
+                        var oldG = source[workIndex + 1];
+                        var oldB = source[workIndex + 2];
                         var nearest = paletteMapper.mapColor(oldR, oldG, oldB);
                         var errorR = (oldR - nearest.r) * errorStrength;
                         var errorG = (oldG - nearest.g) * errorStrength;
@@ -144,7 +152,7 @@
                         }
                         diffuseRecipients(
                             source,
-                            index,
+                            workIndex,
                             x,
                             y,
                             width,
