@@ -120,6 +120,8 @@ config commit system token=<token>
 
 Secret value 不能由 `show`／`get` 讀取；`changes` 只顯示 `<updated>`。`config commit wifi` 使用完整 Wi-Fi replacement contract，可能回 accepted safe-transition 提示；依提示查詢 `api GET /api/wifi/connect token=<token>`。`config commit auth` 成功後目前 session 會失效，必須重新登入。
 
+- `status` 會顯示 sleep scheduler 的 enabled、mode、state 與 blockers 摘要；功能未編入時不顯示該摘要。
+
 ## API command 語法
 
 ```text
@@ -212,6 +214,11 @@ api POST /api/auth/logout token=<token> {}
 | `PUT /api/wifi` | 需要 | 完整 Wi-Fi config | 更新 desired configuration。 |
 | `POST /api/wifi/reconnect` | 需要 | 可省略或 `{}` | 重新套用已儲存 Wi-Fi 設定。 |
 | `PUT /api/system` | 需要 | hostname、`wifi_tx_dbm` 至少一個 | 原子更新 system configured 值；功率接受 2–20 整數，20 表示解除專案額外上限。 |
+| `PUT /api/system/time` | 需要 | `client_time` | 更新系統 epoch；sleep final entry 時拒絕。 |
+| `GET /api/sleep` | 不需要 | 無 | 查詢排程、最近 wake、request 與 blockers；僅 `SLEEP=1`。 |
+| `PUT /api/sleep` | 需要 | 完整 schedule 或 `enabled:false` | 設定或停用排程；僅 `SLEEP=1`。 |
+| `POST /api/sleep/keep-awake` | 不需要 | 可省略或 `{}` | 重設 idle 並取消可取消的 sleep intent；僅 `SLEEP=1`。 |
+| `POST /api/sleep/now` | 需要 | 可省略或 `{}` | 提出立即睡眠 request；僅 `SLEEP=1`。 |
 | `POST /api/system/reset` | 需要 | 可省略或 `{}` | 清除 settings 與 user data，並重新啟動。 |
 | `POST /api/system/reset/settings` | 需要 | 可省略或 `{}` | 只清除 settings，並重新啟動。 |
 | `POST /api/system/reset/data` | 需要 | 可省略或 `{}` | 只清除 user data，並重新啟動。 |
@@ -267,6 +274,18 @@ api PUT /api/auth/password token=<token> {"password":"<new-admin-password>"}
 ```text
 api POST /api/wifi/reconnect token=<token> {}
 ```
+
+時間與睡眠排程（`SLEEP=1` build）：
+
+```text
+api PUT /api/system/time token=<token> {"client_time":1790092800}
+api PUT /api/sleep token=<token> {"enabled":true,"period_hours":24,"first_wake_delay_minutes":60,"client_time":1790092800}
+api GET /api/sleep
+api POST /api/sleep/keep-awake {}
+api POST /api/sleep/now token=<token> {}
+```
+
+每個完整 console input line 都算活動；`api GET /api/sleep` 本身仍可執行，但不應在自動 status loop 中額外送 keep-awake。`sleep/now` 回 202 後只代表 pending，實際入睡與失敗狀態要再查 GET；deep sleep 後 serial／HTTP 均不可用直到喚醒。
 
 Reset commands 會持久化 reset intent，回應後排程重新啟動；這些操作會清除資料，執行前必須確認 scope：
 

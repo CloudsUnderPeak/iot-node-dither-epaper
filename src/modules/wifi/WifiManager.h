@@ -81,6 +81,7 @@ class WifiManager {
                MonotonicClock *clock);
   Result apply(const DeviceConfig &config, WifiStatus &status);
   Result applyTxPower(const DeviceConfig &config);
+  Result applyPowerSave(bool enabled);
   bool poll(const DeviceConfig &config);
   WifiStatus status() const;
   Result queueStaTest(const DeviceConfig &candidate,

@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include "modules/runtime/RuntimeActionScheduler.h"
+#include "support/WifiDoubles.h"
 
 class MemoryConfig final : public ConfigStore {
  public:
@@ -21,11 +22,25 @@ int main() {
   MemoryConfig persistence;
   ConfigService config(persistence);
   WifiManager wifi;
+  WifiRadio radio;
+  assert(radio.begin().ok());
+  FakeWifiDriver wifiDriver;
+  FakeClock clock;
+  assert(wifi.begin(&radio, &wifiDriver, &clock).ok());
   MdnsService mdns;
   CaptivePortalDnsService dns;
   Restart restart;
   RuntimeActionScheduler scheduler;
   assert(scheduler.begin(&config, &wifi, &mdns, &dns, &restart).ok());
+  nativeMillis = 0;
+  scheduler.scheduleWifiApply(10);
+  assert(scheduler.snapshot().runtimeActionPending);
+  nativeMillis = 9;
+  scheduler.poll();
+  assert(scheduler.snapshot().runtimeActionPending);
+  nativeMillis = 10;
+  scheduler.poll();
+  assert(!scheduler.snapshot().runtimeActionPending);
   nativeMillis = UINT32_MAX - 20;
   scheduler.scheduleSystemReset(30);
   scheduler.scheduleSystemReset(100);

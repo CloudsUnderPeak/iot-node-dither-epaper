@@ -11,6 +11,10 @@
 #include "../wifi/WifiManager.h"
 #include "../wifi/WifiScanner.h"
 #include "ConsoleConfigCommand.h"
+#include "modules/sleep/SleepFeatures.h"
+#if ENABLE_SLEEP_SCHEDULER
+class SleepCoordinator;
+#endif
 
 class ConsoleShell {
  public:
@@ -24,6 +28,9 @@ class ConsoleShell {
                AuthService *authService,
                ApiRouter *router);
   void poll();
+#if ENABLE_SLEEP_SCHEDULER
+  void setSleepCoordinator(SleepCoordinator *sleep) { sleep_ = sleep; }
+#endif
 
  private:
   ConfigService *configService_ = nullptr;
@@ -33,6 +40,9 @@ class ConsoleShell {
   UserDataStorage *userData_ = nullptr;
   AuthService *authService_ = nullptr;
   ApiRouter *router_ = nullptr;
+#if ENABLE_SLEEP_SCHEDULER
+  SleepCoordinator *sleep_ = nullptr;
+#endif
   ConsoleConfigCommand configCommand_;
   char line_[kInputCapacity] = "";
   size_t lineLength_ = 0;

@@ -46,7 +46,8 @@ Result EpaperService::begin(
     EpaperSafetyStore *safetyStore,
     CpuFrequencyDriver *frequencyDriver,
     EpaperShutdownCoordinator *shutdownCoordinator,
-    const BootDiagnosticsSnapshot &bootDiagnostics) {
+    const BootDiagnosticsSnapshot &bootDiagnostics,
+    const SleepWakeEvidence &sleepEvidence) {
   // Establish the restart boundary even when userdata could not mount.
   storage_ = storage;
   mutex_ = xSemaphoreCreateMutex();
@@ -89,7 +90,17 @@ Result EpaperService::begin(
              EpaperProtectionStage::ShutdownConfirmed) {
     state_ = EpaperServiceState::Cooldown;
     panelState_ = EpaperPanelState::Sleeping;
-    cooldown_.begin(millis());
+    // The immutable boot evidence is captured before any client/NTP clock
+    // update. A verified sleep interval can satisfy the physical cooldown.
+    const uint32_t nowMs = millis();
+    cooldown_.begin(sleepEvidence.valid && sleepEvidence.sleptSeconds >= 180
+                        ? nowMs - EpaperCooldown::kDurationMs
+                        : nowMs);
+    if (sleepEvidence.valid && sleepEvidence.sleptSeconds >= 180 &&
+        safetyStore_->clear()) {
+      cooldown_.releaseIfElapsed(nowMs, true);
+      state_ = EpaperServiceState::Idle;
+    }
   }
 
   const EpaperServiceResult metadata = validateStoredImage();
@@ -111,7 +122,7 @@ RestartRequest EpaperService::requestRestart(uint32_t nowMs) {
   if (!lock.locked()) return RestartRequest::Rejected;
   if (restartProgress_ == RestartProgress::Draining ||
       restartProgress_ == RestartProgress::Ready) return RestartRequest::AlreadyPending;
-  if (admissionClosed_ || storage_ == nullptr || driver_ == nullptr || safetyStore_ == nullptr ||
+  if (admissionClosed_ || sleepDraining_ || storage_ == nullptr || driver_ == nullptr || safetyStore_ == nullptr ||
       shutdownCoordinator_ == nullptr ||
       !shutdownCoordinator_->ready() || recoveryRequired_) return RestartRequest::Rejected;
   admissionClosed_ = true;
@@ -119,6 +130,32 @@ RestartRequest EpaperService::requestRestart(uint32_t nowMs) {
   restartStartedMs_ = nowMs;
   restartProgress_ = RestartProgress::Draining;
   return RestartRequest::Accepted;
+}
+
+bool EpaperService::requestSleep(uint32_t) {
+  SemaphoreLock lock(mutex_);
+  if (!lock.locked() || !ready_ || admissionClosed_ ||
+      restartProgress_ != RestartProgress::Idle) return false;
+  admissionClosed_ = true;
+  sleepDraining_ = true;
+  sleepReady_ = false;
+  // A scheduled marker clear has not started and must not hold the worker in
+  // a permanent wait after admission closes. ShutdownConfirmed stays durable.
+  markerClearPending_ = false;
+  return true;
+}
+
+bool EpaperService::sleepReady() const {
+  SemaphoreLock lock(mutex_);
+  return lock.locked() && sleepReady_;
+}
+
+void EpaperService::cancelSleep() {
+  SemaphoreLock lock(mutex_);
+  if (!lock.locked() || !sleepDraining_) return;
+  sleepDraining_ = false;
+  sleepReady_ = false;
+  if (restartProgress_ == RestartProgress::Idle) admissionClosed_ = false;
 }
 
 RestartProgress EpaperService::restartProgress() const {
@@ -169,6 +206,16 @@ void EpaperService::processControl(uint32_t nowMs) {
                       state_ == EpaperServiceState::Queued ||
                       state_ == EpaperServiceState::Drawing || markerClearRunning_;
     if (busy) return;
+    if (sleepDraining_) {
+      sleepReady_ = safetyStore_ != nullptr && shutdownCoordinator_ != nullptr &&
+                    !shutdownCoordinator_->unavailable() &&
+                    safetyStore_->stage() != EpaperProtectionStage::Active &&
+                    driver_ != nullptr && !driver_->panelMayBeActive() &&
+                    (panelState_ != EpaperPanelState::Unknown ||
+                     safetyStore_->stage() == EpaperProtectionStage::ShutdownConfirmed) &&
+                    !markerClearPending_;
+      if (sleepReady_) return;
+    }
     if (restartProgress_ == RestartProgress::Draining) {
       if (nowMs - restartStartedMs_ >= kRestartDrainMs || recoveryRequired_ ||
           shutdownCoordinator_->unavailable() || driver_->panelMayBeActive() ||
@@ -264,6 +311,8 @@ EpaperServiceSnapshot EpaperService::snapshot(uint32_t nowMs) const {
   snapshot.stored = stored_;
   snapshot.lastSource = lastSource_;
   snapshot.lastResult = lastResult_;
+  snapshot.operationId = operationGeneration_;
+  snapshot.completedOperationId = completedOperationId_;
   snapshot.lastErrorCode = lastErrorCode_;
   snapshot.lastResetReason = lastResetReason_;
   snapshot.transferredBytes = transferredBytes_;
@@ -381,7 +430,9 @@ EpaperServiceResult EpaperService::finishUpload(uint32_t sessionId) {
       return {EpaperServiceStatusCode::Busy, "e-paper queue is full"};
     }
   }
-  return {EpaperServiceStatusCode::Ok, "draw queued"};
+  EpaperServiceResult queued{EpaperServiceStatusCode::Ok, "draw queued"};
+  queued.operationId = operationGeneration_;
+  return queued;
 }
 
 void EpaperService::abortUpload(uint32_t sessionId, const char *reason) {
@@ -431,7 +482,9 @@ EpaperServiceResult EpaperService::queueDraw(EpaperDrawAction action,
     queuedSource_ = "none";
     return {EpaperServiceStatusCode::Busy, "e-paper queue is full"};
   }
-  return {EpaperServiceStatusCode::Ok, "draw queued"};
+  EpaperServiceResult queued{EpaperServiceStatusCode::Ok, "draw queued"};
+  queued.operationId = operationGeneration_;
+  return queued;
 }
 
 EpaperServiceResult EpaperService::refreshMetadata() {
@@ -634,6 +687,7 @@ void EpaperService::executeDraw(EpaperDrawAction action) {
   if (!validation.ok()) {
     SemaphoreLock lock(mutex_);
     state_ = EpaperServiceState::Idle;
+    completedOperationId_ = operationGeneration_;
     lastResult_ = "failed";
     lastErrorCode_ = validation.reason;
     return;
@@ -643,6 +697,7 @@ void EpaperService::executeDraw(EpaperDrawAction action) {
       !reader->skip(EpaperImageFormat::kHeaderBytes)) {
     SemaphoreLock lock(mutex_);
     state_ = EpaperServiceState::Idle;
+    completedOperationId_ = operationGeneration_;
     lastResult_ = "failed";
     lastErrorCode_ = "storage_error";
     return;
@@ -662,6 +717,7 @@ bool EpaperService::runDraw(const EpaperFrameSource &source) {
       source.close();
       SemaphoreLock lock(mutex_);
       state_ = EpaperServiceState::Idle;
+      completedOperationId_ = operationGeneration_;
       lastResult_ = "failed";
       lastErrorCode_ = "orientation_allocation_failed";
       return false;
@@ -677,6 +733,7 @@ bool EpaperService::runDraw(const EpaperFrameSource &source) {
     SemaphoreLock lock(mutex_);
     phase_ = EpaperDrawPhase::None;
     state_ = EpaperServiceState::Unavailable;
+    completedOperationId_ = operationGeneration_;
     panelState_ = EpaperPanelState::Inactive;
     recoveryRequired_ = !markerCleared;
     lastResult_ = "failed";
@@ -745,6 +802,7 @@ void EpaperService::finishDraw(bool drawSucceeded,
                                EpdDriverError driverError) {
   SemaphoreLock lock(mutex_);
   phase_ = EpaperDrawPhase::None;
+  completedOperationId_ = operationGeneration_;
   timings_.totalOperationMs = millis() - operationStartedMs_;
   if (!shutdownSafe) {
     state_ = EpaperServiceState::Unavailable;

@@ -1,6 +1,6 @@
 # API Reference
 
-日期：2026-07-26
+日期：2026-09-26
 
 本文件是提供整合開發者使用的 REST／serial API contract。產品行為與待決需求記錄於 [SPEC_BEHAVIOR.md](SPEC_BEHAVIOR.md)；內部 dispatcher 組織不屬於本文件。
 
@@ -89,6 +89,10 @@ upload_incomplete
 upload_timeout
 insufficient_storage
 runtime_unavailable
+time_error
+sleep_entering
+sleep_blocked
+no_wake_source
 wifi_scan_failed
 wifi_scan_busy
 wifi_connect_busy
@@ -123,6 +127,8 @@ Dynamic user-file item route 會先驗證 token，才檢查 HTTP upload/download
 - `POST /api/epaper/image/white`
 - `POST /api/epaper/image/palette`
 - `GET /api/runtime/status`
+- `GET /api/sleep`
+- `POST /api/sleep/keep-awake`
 
 token 放在 HTTP header：
 
@@ -163,6 +169,11 @@ curl -H 'Authorization: Bearer <token>' \
 | `PUT` | `/api/wifi` | 是 | 更新並持久化 Wi-Fi 設定。 |
 | `POST` | `/api/wifi/reconnect` | 是 | 重新套用目前 Wi-Fi 設定。 |
 | `PUT` | `/api/system` | 是 | 更新 hostname 等系統設定。 |
+| `PUT` | `/api/system/time` | 是 | 以 client epoch 更新系統時鐘。 |
+| `GET` | `/api/sleep` | 否 | 查詢排程、時鐘、最近 wake、request 與 blockers。僅 `SLEEP=1`。 |
+| `PUT` | `/api/sleep` | 是 | 原子設定或停用排程。僅 `SLEEP=1`。 |
+| `POST` | `/api/sleep/keep-awake` | 否 | 記錄活動並取消尚可取消的 sleep intent。僅 `SLEEP=1`。 |
+| `POST` | `/api/sleep/now` | 是 | 提出立即睡眠 request，成功回 202。僅 `SLEEP=1`。 |
 | `POST` | `/api/system/reset` | 是 | 清空全部使用者設定與檔案並重啟。 |
 | `POST` | `/api/system/reset/settings` | 是 | 只清空使用者設定並重啟。 |
 | `POST` | `/api/system/reset/data` | 是 | 只清空使用者檔案並重啟。 |
@@ -283,6 +294,14 @@ Captive portal detection endpoints 皆為 `GET`、不需登入，在 AP active �
     "wifi_tx_dbm": 15,
     "config_state": "persisted",
     "config_recovery_reason": "none",
+    "features": {
+      "sleep_scheduler": true
+    },
+    "time": {
+      "epoch": 1790092800,
+      "synced": true,
+      "source": "client"
+    },
     "diagnostics": {
       "reset_reason": "brownout"
     },
@@ -295,6 +314,8 @@ Captive portal detection endpoints 皆為 `GET`、不需登入，在 AP active �
   "message": "ok"
 }
 ```
+
+`features.sleep_scheduler` 表示此 firmware 是否以 `SLEEP=1` 編入排程器；false 時不註冊 `/api/sleep` routes。`time` 固定存在：未同步時 `epoch` 為 null、`synced` 為 false、`source` 為 `none`；來源另可為 `client`、`carried` 或 `ntp`。
 
 `config_state` 可能為 `persisted`、`factory_defaults_created` 或 `recovery_defaults`。只有 recovery path 會讓 `config_recovery_reason` 不是 `none`；目前可能為 `unsupported_schema`、`storage_error` 或 `invalid_persisted_config`，且不包含設定值或其他敏感內容。
 
@@ -832,6 +853,9 @@ Request 只含功率也合法：
 
 只重設資料。持久化 `reset_pending=data` 並重啟；early boot 格式化 `userdata`，保留 `user_nvs` 內的 Wi-Fi、hostname 與管理員設定。
 
+
+Settings 與完整 reset 也會清除 `sleep_a`、`sleep_b`、`sleep_meta` 排程 namespaces；data-only reset 不清除 sleep schedule。
+
 三個 endpoint 都需要有效 Bearer token，且不接受 request body 欄位。持久化 reset intent 前會確認 restart scheduler ready；否則回 `503 runtime_unavailable` 且不改變 pending 狀態。Reset intent 寫入或 read-back 驗證失敗時回 `500 storage_error`，不排程 restart。成功 response 相同：
 
 成功：
@@ -843,6 +867,125 @@ Request 只含功率也合法：
   "message": "reset scheduled; restarting"
 }
 ```
+
+## Time and Sleep
+
+### `PUT /api/system/time`
+
+需要 Bearer token。Request 只接受一個整數 `client_time`，範圍為 `1704067200 <= epoch < 4102444800`。成功會透過 `TimeSource` set/read-back，並回傳：
+
+```json
+{
+  "success": true,
+  "data": {
+    "epoch": 1790092800,
+    "synced": true,
+    "source": "client"
+  },
+  "message": "ok"
+}
+```
+
+欄位或範圍錯誤回 `400`；clock set 失敗回 `500 time_error`。Sleep final entry 或另一筆 clock transaction 進行中時回 `409 sleep_entering`。
+
+以下四個 sleep routes 只在 release 以 `SLEEP=1` 建置時存在。編入不代表啟用；factory schedule 是 disabled。
+
+### `GET /api/sleep`
+
+公開唯讀。主要欄位如下：
+
+```json
+{
+  "success": true,
+  "data": {
+    "enabled": true,
+    "mode": "normal",
+    "state": "armed",
+    "storage_state": "ok",
+    "idle": {
+      "timeout_seconds": 1800,
+      "armed": true,
+      "remaining_seconds": 1432
+    },
+    "schedule": {
+      "period_hours": 24,
+      "anchor_epoch": 1790096400,
+      "clock_basis": "absolute",
+      "next_wake_epoch": 1790182800,
+      "next_wake_in_seconds": 86400
+    },
+    "time": {
+      "epoch": 1790092800,
+      "synced": true,
+      "source": "client"
+    },
+    "last_wake": {
+      "cause": "timer",
+      "mode": "wake_cycle",
+      "clock_basis": "absolute",
+      "epoch": 1790006404,
+      "planned_due_epoch": 1790006400,
+      "drift_seconds": 4,
+      "result": "success",
+      "consecutive_failures": 0,
+      "sta_attempts": 1,
+      "time_synced": true,
+      "last_error_code": null,
+      "tasks": [
+        {"name":"time_sync","status":"done","code":"success"},
+        {"name":"panel_refresh","status":"done","code":"success"}
+      ]
+    },
+    "sleep_request": {
+      "state": "none",
+      "error_code": null
+    },
+    "blockers": []
+  },
+  "message": "ok"
+}
+```
+
+`mode` 為 `normal|wake_cycle`；`state` 為 `disabled|armed|agenda_running|entering|failed`；`storage_state` 為 `ok|recovery|error`。Nullable clock／schedule／last wake 欄位在沒有可信資料時為 null。`sleep_request.state` 為 `none|pending|entering|cancelled|failed`。
+
+`blockers` 可包含 `epaper_busy`、`epaper_unsafe`、`epaper_marker_active`、`upload_active`、`restart_pending`、`wifi_transition`、`runtime_action_pending`、`no_wake_source`、`usb_host_connected`、`sleep_storage_error`。它是診斷 snapshot；真正入睡仍會重新取得 owner reservations 並再次驗證。
+
+### `PUT /api/sleep`
+
+需要 Bearer token。啟用時四個欄位全部必填：
+
+```json
+{
+  "enabled": true,
+  "period_hours": 24,
+  "first_wake_delay_minutes": 60,
+  "client_time": 1790092800
+}
+```
+
+`period_hours` 只接受 12、24、48；delay 為 1 到該 period 的總分鐘數；`client_time` 範圍與 system time 相同。交易先設定 clock、建立固定 UTC anchor，再以新的 schedule generation 持久化；save 失敗會回復先前 clock，回 `500 storage_error`。clock 回復也失敗時回 `500 time_error`。成功回與 GET 相同的完整 snapshot。
+
+停用使用 `{"enabled":false}`。若停用時仍提供 schedule 欄位，三個欄位必須完整且有效。停用不會移除最近一次診斷。
+
+### `POST /api/sleep/keep-awake`
+
+公開，body 可省略或為 `{}`。成功記錄活動、重設 idle，並取消 prepare 階段的 intent，回目前 `idle` object。final commit 已關閉活動 lease 時回 `409 sleep_entering`。Client status polling 不得自動呼叫此 route。
+
+### `POST /api/sleep/now`
+
+需要 Bearer token，body 可省略或為 `{}`。成功只代表 request 已排入：
+
+```json
+{
+  "success": true,
+  "data": {"sleep_request":{"state":"pending"}},
+  "message": "sleep scheduled"
+}
+```
+
+HTTP status 為 `202`；loop 至少保留 response grace，再完成 safety prepare。沒有有效 timer 計畫回 `409 no_wake_source`，其他 blocker 回 `409 sleep_blocked`，兩者的 `data.blockers` 都列出當下原因。若後續活動取消或 owner 收尾失敗，使用 GET 查詢 request state／error；裝置真正 deep sleep 後 API 不可達。
+
+Settings 或完整 factory reset 會清除 sleep schedule；data-only reset 保留。
 
 ## Storage
 

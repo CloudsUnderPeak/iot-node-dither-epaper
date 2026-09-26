@@ -66,6 +66,20 @@ bool ApiServer::started() const {
   return started_;
 }
 
+void ApiServer::stopForSleep() {
+  if (!started_) return;
+  server_.end();
+  started_ = false;
+}
+
+bool ApiServer::resumeAfterSleep() {
+  if (started_) return true;
+  if (router_ == nullptr) return false;
+  server_.begin();
+  started_ = true;
+  return true;
+}
+
 Result ApiServer::registerRoutes() {
   const ArBodyHandlerFunction jsonBody =
       [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
@@ -134,15 +148,19 @@ Result ApiServer::registerRoutes() {
             });
         break;
       case ApiRouter::HttpBinding::JsonBody:
+      case ApiRouter::HttpBinding::OptionalJsonBody: {
+        const bool allowEmpty =
+            route.httpBinding == ApiRouter::HttpBinding::OptionalJsonBody;
         server_.on(
             matcher,
             httpMethod,
-            [this, method](AsyncWebServerRequest *request) {
-              dispatchJson(request, method);
+            [this, method, allowEmpty](AsyncWebServerRequest *request) {
+              dispatchJson(request, method, allowEmpty);
             },
             nullptr,
             jsonBody);
         break;
+      }
       case ApiRouter::HttpBinding::Query:
         server_.on(
             matcher,
@@ -270,9 +288,20 @@ void ApiServer::dispatchQuery(AsyncWebServerRequest *request,
   sendApiResponse(request, router_->dispatch(apiRequest));
 }
 
-void ApiServer::dispatchJson(AsyncWebServerRequest *request, Api::Method method) {
+void ApiServer::dispatchJson(AsyncWebServerRequest *request, Api::Method method,
+                             bool allowEmpty) {
   const auto *buffer = static_cast<const BufferedJsonBody *>(request->_tempObject);
   size_t bodyLength = buffer == nullptr ? 0 : buffer->length;
+  if (allowEmpty && request->contentLength() == 0) {
+    const String path = request->url();
+    Api::Request apiRequest;
+    apiRequest.method = method;
+    apiRequest.path = path.c_str();
+    apiRequest.transport = Api::Transport::Http;
+    apiRequest.token = bearerTokenFromRequest(request);
+    sendApiResponse(request, router_->dispatch(apiRequest));
+    return;
+  }
   if (request->contentLength() > HttpJsonBody::kMaxBytes ||
       (buffer != nullptr && buffer->tooLarge)) {
     bodyLength = HttpJsonBody::kMaxBytes + 1;

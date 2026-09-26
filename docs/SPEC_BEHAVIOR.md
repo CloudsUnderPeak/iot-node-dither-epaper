@@ -175,6 +175,19 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - Draw 在低優先序 dedicated worker 執行，BUSY wait 必須 yield，frame 每 4 KiB yield；Wi-Fi、HTTP、console、heartbeat 與 runtime scheduler 在刷新期間仍須可排程。CPU 降頻造成的 latency 與供電穩定性需以實板驗證。
 - 全部 e-paper 專用 endpoint 與 `GET /api/runtime/status` 是明確 public exception；同網路 client 可上傳、下載及觸發 draw 是已接受的可信任網路風險，180 秒 cooldown 不是 authentication 或 abuse protection。Generic user-file API 權限不變。
 
+## 排程深度休眠
+
+- `ENABLE_SLEEP_SCHEDULER` 由 release build 的 `SLEEP=0|1` 控制；即使編入功能，factory runtime 預設仍為停用，必須由已認證的 `PUT /api/sleep` 明確啟用。
+- 排程週期只接受 12、24、48 小時，使用 client epoch 與首次喚醒延遲建立固定 UTC anchor。後續 due 從 anchor 計算，不以每次完成時間累加；沒有可信 absolute clock 時使用 RTC carried relative clock，成功 SNTP 後才回 absolute basis。
+- `normal` mode 的 idle timeout 預設 1800 秒。Protected API、公開 e-paper write、完整 serial input line 與 keep-awake 都是活動；公開 status、靜態資源、登入失敗與背景 polling 不延長 idle。HTTP streaming upload/download 持有 activity／storage lease，不能在傳輸中入睡。
+- timer 喚醒且 RTC intent、CRC、schedule generation 與 wake source 全部有效時才進 `wake_cycle`。該模式只使用 persisted STA 或 Off，不啟動 AP、fallback AP、mDNS 或 captive DNS；STA 使用 minimum modem power save。使用者活動會切回 normal 並恢復原本 persisted 網路政策。
+- wake agenda 依序執行最多三次 STA 嘗試、一次有界 NTP 同步與一次 stored-image refresh。沒有 STA、沒有圖片、panel 暫時不可接納或 NTP 失敗都有固定診斷；提早超過 60 秒的 absolute wake 保留同一 due 並重新入睡，不消耗該輪。
+- 入睡採 admission gate 與 owner ACK。E-paper 必須完成已接受工作的 protocol shutdown，userdata 必須取得 reservation 並卸載自己的 filesystem，restart／Wi-Fi transition／runtime action／USB host／active transfer／未知 marker 都會阻擋睡眠。`POST /api/sleep/now` 只回 202 pending；真正 deep sleep 後 HTTP 不可達。
+- agenda 診斷必須先成功保存才能準備入睡。final commit 關閉 keep-awake 後成功 arm timer、套用安全 GPIO hold，再停止 SNTP、mDNS、captive DNS、HTTP 與 Wi-Fi、卸載 userdata；接近 deep sleep 時 seal/write RTC intent，最後才呼叫 deep sleep。任何可回報的失敗依逆序恢復；不得用強制睡眠繞過 panel 或 storage 安全證明。
+- `POST /api/sleep/keep-awake` 可取消 prepare 階段的 intent；final commit 後回 `sleep_entering`。USB host 從 connected 轉 disconnected 時重新開始完整 idle timeout，避免拔線後立即睡眠。
+- `POST /api/system/reset` 與 `/settings` 會清除 sleep namespaces；`/data` 保留排程。`SLEEP=0` 時不註冊 sleep routes，但仍執行 boot GPIO hold hygiene。
+- 目前完成 host code、native tests、browser tests 與 release build 驗證；實際 timer wake、GPIO 波形、USB host presence、耗電、Wi-Fi reconnect 與實體 panel cooldown evidence 必須接上裝置後驗證，文件不宣稱硬體結果。
+
 ## Serial console 行為
 
 - Serial console 同時提供人類可讀 CLI 與 `api METHOD PATH [token=<token>] [json]` adapter。
@@ -219,3 +232,24 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - 是否需要把 Wi-Fi foundation 的 public C++ module API 文件化？
 
 - Controlled restart 核准前也會等待既有 userdata 檔案操作釋放同一 operation gate；不由 restart owner 關閉 callback 的檔案。若總等待超過 150 秒則取消本次 restart，原檔案操作仍由原 owner 收尾。取得最終核准後不再接受新檔案操作；進入 restart drain 即停止接受新的電子紙下載。
+
+
+## 選擇性編譯需求（待實作）
+
+本節記錄新增產品需求與待決事項，不表示現有 firmware 已支援下列所有開關。現有 `SLEEP=0|1` 與 `WEB` 選擇仍以目前 build／API 規格為準。
+
+已確認需求：
+
+- 功能是否編入應由獨立設定檔管理，透過條件編譯移除實作；sleep 與 e-paper 必須可選，不只在 runtime 停用或隱藏頁面。
+- 若提供檔案 storage 裁切，`EPAPER=1` 必須要求 `STORAGE=1`；未滿足時 build 明確失敗，不自動補開 storage。
+- 關閉檔案 storage 時，使用者要求回收上傳分區至 image 空間；具體分區配置與切換規則列於下方待決事項。設定持久化與檔案上傳須分開界定。
+- 若提供 auth 裁切，允許 API route table 保留原有 auth 宣告，但 auth 未編入時該宣告不要求登入／token；HTTP、serial 與非同步完成路徑語意必須一致。
+- Wi-Fi 進階設定、scan 及其他模組應評估獨立裁切；裁切邊界與支援組合不得僅由前端是否顯示推定。
+
+待決事項與研究建議：
+
+- 分區合併目前按「移除 `userdata`，空間歸入 firmware `app0`」研究；電子紙圖片原本也在 `userdata`，沒有另一個 image partition。建議保留 `user_nvs`、預設 NVS 與 coredump，並明訂切換 layout 時的檔案丟棄／重建規則，不將既有檔案保留保證套用到改分區。
+- Wi-Fi 進階裁切是只移除管理 API／UI、保留套用既有設定，還是連 static IP、自訂 AP 網段與功率分支一併移除？建議先採前者；scan 可獨立關閉並保留手動 SSID 連線。
+- `SLEEP=1`、`EPAPER=0` 是否合法？建議允許純定時睡眠／喚醒，不註冊面板刷新工作。
+- Auth 關閉後如何更新 SoftAP 密碼？目前 AP 與管理者共用密碼欄位，不能因移除 session 功能就改成公開 AP；建議保留 credential 並另定 Wi-Fi 更新入口。
+- E-paper 未編入但同一實體板仍接有面板時，是否保留板級安全 quiesce／hold cleanup？功能裁切不可假定外接硬體已移除。

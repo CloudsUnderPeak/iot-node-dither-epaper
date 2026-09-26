@@ -925,6 +925,7 @@ pipeline 順序也必須由 enabled features 的 `pipelineStage` 與 `pipelineOr
 src/device/
   device-api.js    REST client：envelope 解析、Bearer token store、AbortController timeout、resources 目錄
   device-live.js   alive 監看：GET /api/alive 輪詢、online/offline/standalone 狀態、subscribe
+  device-sleep.js sleep schedule：status cache、clock sync、polling 與 actions
   device-epaper.js e-paper capability、cached status、single operation、phase progress、cooldown
   device-epaper-calibration.js 六色 canonical snapshot、revision、公開 GET／PUT／reset 與 stale response suppression
   device-gate.js   離線反灰：banner、fieldset disable、恢復後自動刷新
@@ -974,6 +975,15 @@ src/device/
 - `pages/device-system/`：整頁需登入。hostname 走 `PUT /api/system`（前端套用相同 1–31 字元規則與 mDNS 預覽）；管理員密碼走 `PUT /api/auth/password`（allowlist 正則 + 兩次一致），成功後清 token 要求重新登入。完整重設走 `POST /api/system/reset`（API client 只保留這一支；settings/data 兩支未使用已移除），UI 必須先通過確認 dialog，送出期間 `setDismissible(false)` 並鎖住按鈕，成功後 `invalidateSession()` 並以 sticky notice 保留重新連線指示。
 - 表單皆採 `busy || !dirty || !valid` 三態儲存鈕與文字狀態列；一般成功 notice 約 2.2 秒自動消失，錯誤與需保留脈絡（重啟、斷線、rollback）的 notice 常駐。
 - 視覺語言與 Dither Editor 對齊：卡片一律使用 components.css 的 `panel-section`（h2 標題列）＋`panel-body device-card-body`；需要右側 badge／總空間的卡片改用 `device-card-header` 標題列變體。頁面不放 `h1`（頁名由 app header 顯示）。`device.css` 只保存裝置專屬樣式，顏色沿用 theme token，尺寸沿用編輯器的 34px 輸入框與 11–14px 字級階。
+
+### Sleep lifecycle（device-sleep）
+
+- `src/device/device-sleep.js` 是 sleep status 的唯一 client owner，透過 `device-api.resources` 呼叫 `GET/PUT /api/sleep`、keep-awake、sleep-now 與 system-time；它保存 frozen snapshot、poll timer、request generation、busy/error 與 clock-sync cooldown。
+- `GET /api/device` 的 `features.sleep_scheduler` 是 Menu／route capability。`app-shell` 只依 capability 註冊或移除入口；page 不以 route 404 猜測功能。
+- `pages/device-sleep/` 負責 view state、登入 gate、欄位驗證、confirm 與 snapshot render，不直接 fetch。mount subscribe，unmount 必須取消 subscription／timer，late response 由 generation 丟棄。
+- `device-sleep.accept()` 每次接受 snapshot 都可檢查 device epoch 與 browser epoch 的 drift；自動 `PUT /api/system/time` 只在已登入、online、clock 缺失或偏差超過 5 秒且 cooldown 到期時執行。校時不能綁在每次 render 或 status poll。
+- Status polling 固定 15 秒，不送 keep-awake。keep-awake 只由使用者 action 觸發；sleep-now 的 202 進入 pending，後續 online status 決定 cancelled／failed／entering，offline 僅呈現不確定的 sleep transition。
+- `device-mock.js` 模擬 feature=true 與完整 sleep snapshot。設定 schedule 後更新 anchor／next wake，keep-awake 重置 idle，sleep-now 經 pending 後讓 mock alive 離線；重新載入 source preview 會重設 in-memory schedule。
 
 ### E-paper Device Mode
 

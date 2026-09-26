@@ -28,9 +28,12 @@ class FakeWifiDriver : public WifiDriver {
   unsigned apStartCount = 0;
   unsigned apStopCount = 0;
   unsigned txPowerCount = 0;
+  unsigned powerSaveCount = 0;
   unsigned modeCount = 0;
   uint8_t lastTxDbm = 0;
+  bool lastPowerSave = false;
   bool txPowerResult = true;
+  bool powerSaveResult = true;
 
   void setPersistent(bool) override {}
 
@@ -45,6 +48,12 @@ class FakeWifiDriver : public WifiDriver {
     ++txPowerCount;
     lastTxDbm = configuredDbm;
     return txPowerResult;
+  }
+
+  bool setPowerSave(bool enabled) override {
+    ++powerSaveCount;
+    lastPowerSave = enabled;
+    return powerSaveResult;
   }
 
   bool setHostname(const char *) override { return true; }

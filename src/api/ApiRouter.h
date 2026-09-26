@@ -22,6 +22,11 @@
 #include "modules/storage/UserFilePolicy.h"
 #include "modules/wifi/WifiManager.h"
 #include "modules/wifi/WifiScanner.h"
+#include "modules/time/TimeSource.h"
+#include "modules/sleep/SleepFeatures.h"
+#if ENABLE_SLEEP_SCHEDULER
+#include "sleep/SleepEndpoints.h"
+#endif
 
 struct ApiRouterDeps {
   ConfigService &configService;
@@ -37,6 +42,10 @@ struct ApiRouterDeps {
   EpaperCalibrationService &epaperCalibrationService;
   BatteryMonitor &batteryMonitor;
   const BootDiagnostics &bootDiagnostics;
+  TimeSource *timeSource = nullptr;
+#if ENABLE_SLEEP_SCHEDULER
+  SleepCoordinator *sleepCoordinator = nullptr;
+#endif
 };
 
 // Lists every REST/serial URL and delegates directly to the matching endpoint.
@@ -51,6 +60,7 @@ class ApiRouter {
     NoBody,
     Deferred,
     JsonBody,
+    OptionalJsonBody,
     Query,
     RawUpload,
     RawDownload,
@@ -166,6 +176,10 @@ class ApiRouter {
   uint32_t uploadLastDataMs_ = 0;
   BatteryMonitor *batteryMonitor_ = nullptr;
   const BootDiagnostics *bootDiagnostics_ = nullptr;
+  TimeSource *timeSource_ = nullptr;
+#if ENABLE_SLEEP_SCHEDULER
+  SleepCoordinator *sleepCoordinator_ = nullptr;
+#endif
   AuthEndpoints authEndpoints_;
   WifiEndpoints wifiEndpoints_;
   SystemEndpoints systemEndpoints_;

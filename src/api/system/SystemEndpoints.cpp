@@ -2,6 +2,9 @@
 
 #include "api/shared/ApiResponse.h"
 #include "api/shared/JsonReader.h"
+#if ENABLE_SLEEP_SCHEDULER
+#include "modules/sleep/SleepCoordinator.h"
+#endif
 
 namespace {
 bool hasJsonKey(JsonObjectConst object, const char *key) {
@@ -10,18 +13,88 @@ bool hasJsonKey(JsonObjectConst object, const char *key) {
   }
   return false;
 }
+
+bool restoreClock(TimeSource &time, const TimeSnapshot &previous,
+                  uint32_t startedMs) {
+  if (!previous.synced()) {
+    time.clear();
+    return !time.snapshot().synced();
+  }
+  const int64_t restored = previous.epoch +
+      static_cast<uint32_t>(millis() - startedMs) / 1000U;
+  if (time.set(restored, previous.origin)) return true;
+  time.clear();
+  return false;
+}
 }  // namespace
 
 Result SystemEndpoints::begin(ConfigService *configService,
                               StorageLifecycle *storageLifecycle,
-                              RuntimeActionScheduler *runtime) {
+                              RuntimeActionScheduler *runtime,
+                              TimeSource *timeSource
+#if ENABLE_SLEEP_SCHEDULER
+                              , SleepCoordinator *sleepCoordinator
+#endif
+                              ) {
   if (configService == nullptr || storageLifecycle == nullptr || runtime == nullptr) {
     return invalidInput("missing system API dependencies");
   }
   configService_ = configService;
   storageLifecycle_ = storageLifecycle;
   runtime_ = runtime;
+  timeSource_ = timeSource;
+#if ENABLE_SLEEP_SCHEDULER
+  sleepCoordinator_ = sleepCoordinator;
+#endif
   return okResult();
+}
+
+Api::Response SystemEndpoints::updateTime(const Api::Request &request) {
+  JsonObjectConst root;
+  const Api::Response bodyResult = ApiRequest::requireObject(request, root);
+  if (!bodyResult.success) return bodyResult;
+  JsonDecodeError decodeError;
+  JsonReader reader(root, "", decodeError);
+  const uint32_t epoch = reader.requiredUint32("client_time", "client_time is required");
+  reader.finish({"client_time"});
+  if (!decodeError.ok()) return Api::decodeError(decodeError);
+  if (epoch < 1704067200UL || epoch >= 4102444800UL) {
+    return Api::problem(400, "invalid_field", "client_time is outside supported range",
+                        "client_time");
+  }
+  if (timeSource_ == nullptr) {
+    return Api::problem(503, "runtime_unavailable", "system clock unavailable");
+  }
+#if ENABLE_SLEEP_SCHEDULER
+  if (sleepCoordinator_ && !sleepCoordinator_->beginTimeUpdate()) {
+    return Api::problem(409, "sleep_entering", "sleep entry or clock update is in progress");
+  }
+  struct TimeUpdateLease {
+    SleepCoordinator *owner;
+    ~TimeUpdateLease() { if (owner) owner->endTimeUpdate(); }
+  } lease{sleepCoordinator_};
+#endif
+  const TimeSnapshot previous = timeSource_->snapshot();
+  const uint32_t startedMs = millis();
+  if (!timeSource_->set(epoch, TimeOrigin::Client)) {
+    const bool restored = restoreClock(*timeSource_, previous, startedMs);
+    return Api::problem(500, "time_error",
+                        restored ? "failed to set system clock"
+                                 : "clock update and rollback failed");
+  }
+  const TimeSnapshot snapshot = timeSource_->snapshot();
+  if (!snapshot.synced() || snapshot.epoch < epoch ||
+      snapshot.epoch > static_cast<int64_t>(epoch) + 1) {
+    const bool restored = restoreClock(*timeSource_, previous, startedMs);
+    return Api::problem(500, "time_error",
+                        restored ? "failed to verify system clock"
+                                 : "clock verification and rollback failed");
+  }
+  JsonDocument data;
+  data["epoch"] = snapshot.epoch;
+  data["synced"] = snapshot.synced();
+  data["source"] = timeOriginToString(snapshot.origin);
+  return Api::ok(Api::json(data));
 }
 
 Api::Response SystemEndpoints::update(const Api::Request &request) {

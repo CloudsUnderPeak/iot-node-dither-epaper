@@ -298,6 +298,16 @@ void testTxPowerPolicyUsesActiveModesAndDedicatedApply() {
   fixture.driver.txPowerResult = false;
   expect(!fixture.manager.applyTxPower(config).ok(),
          "dedicated TX apply should report driver failure");
+
+  expect(fixture.manager.applyPowerSave(true).ok() &&
+             fixture.driver.powerSaveCount == 1 &&
+             fixture.driver.lastPowerSave,
+         "wake-cycle power save should be applied without changing Wi-Fi mode");
+  fixture.driver.powerSaveResult = false;
+  expect(!fixture.manager.applyPowerSave(false).ok() &&
+             fixture.driver.powerSaveCount == 2 &&
+             !fixture.driver.lastPowerSave,
+         "normal-mode power-save restore should report driver failure");
 }
 }  // namespace
 

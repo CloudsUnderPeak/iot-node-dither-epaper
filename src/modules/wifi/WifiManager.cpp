@@ -284,6 +284,15 @@ Result WifiManager::applyTxPower(const DeviceConfig &config) {
              : networkError("failed to apply Wi-Fi TX power");
 }
 
+Result WifiManager::applyPowerSave(bool enabled) {
+  WifiRadioGuard radioGuard(radio_, portMAX_DELAY);
+  if (!radioGuard.locked()) return networkError("Wi-Fi radio unavailable");
+  if (status().mode == WifiMode::Off) return okResult();
+  return driver_->setPowerSave(enabled)
+             ? okResult()
+             : networkError("failed to apply Wi-Fi power save mode");
+}
+
 bool WifiManager::poll(const DeviceConfig &config) {
   WifiRadioGuard radioGuard(radio_, 0);
   if (!radioGuard.locked()) return false;

@@ -20,6 +20,8 @@ class ArduinoPreferencesBackend : public PreferencesBackend {
   bool putUShort(const char *key, uint16_t value) override;
   bool putBool(const char *key, bool value) override;
   bool putString(const char *key, const char *value) override;
+  bool getBytes(const char *key, void *target, size_t size) const override;
+  bool putBytes(const char *key, const void *value, size_t size) override;
 
  private:
   mutable Preferences preferences_;

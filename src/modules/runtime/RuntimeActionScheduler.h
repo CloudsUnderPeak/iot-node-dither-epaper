@@ -9,10 +9,15 @@
 #include "modules/mdns/MdnsService.h"
 #include "modules/runtime/SystemRestartCoordinator.h"
 #include "modules/wifi/WifiManager.h"
+#include "modules/sleep/SleepFeatures.h"
+#if ENABLE_SLEEP_SCHEDULER
+class SleepCoordinator;
+#endif
 
 struct RuntimeActionSnapshot {
   bool restartPending = false;
   bool restartFailed = false;
+  bool runtimeActionPending = false;
 };
 
 class RuntimeActionScheduler {
@@ -28,6 +33,9 @@ class RuntimeActionScheduler {
   void scheduleWifiTxPowerApply(uint32_t delayMs);
   void scheduleSystemReset(uint32_t delayMs);
   RuntimeActionSnapshot snapshot();
+#if ENABLE_SLEEP_SCHEDULER
+  void setSleepCoordinator(SleepCoordinator *sleep) { sleepCoordinator_ = sleep; }
+#endif
 
  private:
   ConfigService *configService_ = nullptr;
@@ -37,6 +45,9 @@ class RuntimeActionScheduler {
   SystemRestartCoordinator *restartCoordinator_ = nullptr;
   portMUX_TYPE pendingMux_ = portMUX_INITIALIZER_UNLOCKED;
   bool ready_ = false;
+#if ENABLE_SLEEP_SCHEDULER
+  SleepCoordinator *sleepCoordinator_ = nullptr;
+#endif
   bool wifiApplyPending_ = false;
   uint32_t wifiApplyDueMs_ = 0;
   bool wifiTxPowerApplyPending_ = false;

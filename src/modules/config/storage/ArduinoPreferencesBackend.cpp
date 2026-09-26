@@ -96,3 +96,16 @@ bool ArduinoPreferencesBackend::putString(
   preferences_.putString(key, value);
   return preferences_.isKey(key) && preferences_.getString(key, "") == value;
 }
+
+bool ArduinoPreferencesBackend::getBytes(const char *key,
+                                         void *target,
+                                         size_t size) const {
+  return preferences_.getBytesLength(key) == size &&
+         preferences_.getBytes(key, target, size) == size;
+}
+
+bool ArduinoPreferencesBackend::putBytes(const char *key,
+                                         const void *value,
+                                         size_t size) {
+  return preferences_.putBytes(key, value, size) == size;
+}

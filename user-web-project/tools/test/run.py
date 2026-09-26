@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--modules-only', action='store_true')
     parser.add_argument('--production', action='store_true')
     parser.add_argument('--timeout', type=float, default=90)
-    parser.add_argument('--fail-case', choices=['legacy', 'wifi', 'epaper', 'history', 'styles', 'crop_disabled', 'crop_removed'])
+    parser.add_argument('--fail-case', choices=['legacy', 'wifi', 'epaper', 'sleep', 'history', 'styles', 'crop_disabled', 'crop_removed'])
     args = parser.parse_args()
     browser = helper.browser_path(args.chrome)
     if args.production:
@@ -69,6 +69,7 @@ def main():
         cases = [('legacy', 'regression.js'), ('crop_disabled', 'crop-flow.js'),
                  ('crop_removed', 'crop-flow.js'), ('wifi', 'wifi-flow.js'),
                  ('epaper', 'epaper-flow.js'), ('history', 'history-flow.js'),
+                 ('sleep', 'sleep-flow.js'),
                  ('styles', 'style-flow.js')]
         for name, script_name in cases:
             case_script = 'window.testCropMode = ' + json.dumps(name) + ';\n' + (ROOT / 'tests/browser' / script_name).read_text()

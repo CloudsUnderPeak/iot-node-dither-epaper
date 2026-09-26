@@ -75,6 +75,7 @@
                 app.device.epaper.start();
                 app.device.epaperCalibration.start();
                 app.device.live.start();
+                app.device.sleep.start();
                 if (app.startupGate) {
                     app.startupGate.setProgress(82);
                 }

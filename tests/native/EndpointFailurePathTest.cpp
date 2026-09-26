@@ -187,6 +187,92 @@ void testSystemUpdatePreflightsRuntime() {
          "empty system patch must be rejected");
 }
 
+class EndpointTime final : public TimeSource {
+ public:
+  TimeSnapshot value{1799996400, TimeOrigin::Client, 1};
+  uint32_t setCalls = 0;
+  uint32_t clearCalls = 0;
+  uint32_t partialFailMask = 0;
+  uint32_t failSetMask = 0;
+
+  TimeSnapshot snapshot() const override { return value; }
+
+  bool set(int64_t epoch, TimeOrigin origin) override {
+    ++setCalls;
+    const uint32_t bit = setCalls < 32 ? (1U << setCalls) : 0;
+    if (partialFailMask & bit) {
+      value = {epoch, TimeOrigin::None, value.revision + 1};
+      return false;
+    }
+    if (failSetMask & bit) return false;
+    value = {epoch, origin, value.revision + 1};
+    return true;
+  }
+
+  void clear() override {
+    ++clearCalls;
+    value = {0, TimeOrigin::None, value.revision + 1};
+  }
+};
+
+void testSystemTimeValidationAndRollback() {
+  ConfigService config;
+  StorageLifecycle storage;
+  RuntimeActionScheduler runtime;
+  EndpointTime time;
+  SystemEndpoints endpoints;
+  expect(endpoints.begin(&config, &storage, &runtime, &time).ok(),
+         "system time endpoint should initialize");
+
+  JsonDocument document;
+  Api::Request request =
+      jsonRequest(document, R"({"client_time":1800000000})");
+  Api::Response response = endpoints.updateTime(request);
+  expect(response.statusCode == 200 && time.value.epoch == 1800000000 &&
+             time.value.origin == TimeOrigin::Client,
+         "valid client time must be set and read back");
+
+  for (const char *invalid : {
+           R"({})",
+           R"({"client_time":null})",
+           R"({"client_time":true})",
+           R"({"client_time":1.5})",
+           R"({"client_time":"1800000000"})",
+           R"({"client_time":1704067199})",
+           R"({"client_time":1800000000,"unexpected":1})",
+       }) {
+    document.clear();
+    request = jsonRequest(document, invalid);
+    response = endpoints.updateTime(request);
+    expect(response.statusCode == 400,
+           "invalid system time payload must be rejected");
+  }
+
+  EndpointTime partial;
+  partial.partialFailMask = 1U << 1;
+  SystemEndpoints partialEndpoints;
+  partialEndpoints.begin(&config, &storage, &runtime, &partial);
+  document.clear();
+  request = jsonRequest(document, R"({"client_time":1800000000})");
+  response = partialEndpoints.updateTime(request);
+  expect(response.statusCode == 500 && partial.setCalls == 2 &&
+             partial.value.epoch == 1799996400 &&
+             partial.value.origin == TimeOrigin::Client,
+         "partial clock failure must restore the previous clock");
+
+  EndpointTime rollbackFailure;
+  rollbackFailure.partialFailMask = 1U << 1;
+  rollbackFailure.failSetMask = 1U << 2;
+  SystemEndpoints failedEndpoints;
+  failedEndpoints.begin(&config, &storage, &runtime, &rollbackFailure);
+  document.clear();
+  request = jsonRequest(document, R"({"client_time":1800000000})");
+  response = failedEndpoints.updateTime(request);
+  expect(response.statusCode == 500 && rollbackFailure.clearCalls == 1 &&
+             !rollbackFailure.value.synced(),
+         "failed direct-time rollback must clear synchronization");
+}
+
 void testFactoryResetPreflightsRuntime() {
   ConfigService config;
   StorageLifecycle storage;
@@ -506,6 +592,7 @@ int main() {
   testStorageReportsFlashAppAndUploadCapacity();
   testUploadCapacityKeepsReserveAndAlignment();
   testSystemUpdatePreflightsRuntime();
+  testSystemTimeValidationAndRollback();
   testFactoryResetPreflightsRuntime();
   testPasswordUpdatePreflightsRequiredApRestart();
   testPasswordUpdateWithoutApProtectionDoesNotRestart();

@@ -19,6 +19,8 @@ class ApiServer {
                const EmbeddedWebAssets *assets,
                ApiRouter *router);
   bool started() const;
+  void stopForSleep();
+  bool resumeAfterSleep();
   void poll();
 
  private:
@@ -39,7 +41,8 @@ class ApiServer {
   Result registerRoutes();
   void dispatchNoBody(AsyncWebServerRequest *request, Api::Method method);
   void dispatchQuery(AsyncWebServerRequest *request, Api::Method method);
-  void dispatchJson(AsyncWebServerRequest *request, Api::Method method);
+  void dispatchJson(AsyncWebServerRequest *request, Api::Method method,
+                    bool allowEmpty = false);
   void bufferJsonBody(AsyncWebServerRequest *request,
                       uint8_t *data,
                       size_t len,

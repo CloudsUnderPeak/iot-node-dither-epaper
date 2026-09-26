@@ -27,6 +27,8 @@ from `contract_checks.py`.
 - Actual Auth/System/Wi-Fi endpoint failure paths with fake config, auth, Wi-Fi, and runtime dependencies
 - Static catalogue metadata and runtime authorization matrix for every exact and dynamic ApiRouter route
 - Metadata-driven HTTP registration, including exact parent routes and dynamic user-file matcher bindings
+- Sleep schedule fixed-anchor math, early-wake and seven-day oscillator simulations for 12/24/48-hour periods with and without NTP
+- RTC record CRC/classification, dual-slot SleepStore recovery and fault injection, e-paper operation identity/sleep ACK, Wi-Fi power-save policy, and sleep route authorization
 
 ## Requirements
 

@@ -39,7 +39,7 @@ SUPPORTED_UPLOAD_BAUD = 460800
 SUPPORTED_FLASH_MODE = "dio"
 SUPPORTED_FLASH_FREQUENCY = "80m"
 SUPPORTED_FLASH_SIZE = "detect"
-MANIFEST_SCHEMA = 5
+MANIFEST_SCHEMA = 6
 PRODUCT = "iot-node-bedrock"
 APP_OFFSET = 0x10000
 APP_SIZE = 0x1F0000
@@ -73,6 +73,7 @@ def main() -> int:
         help="Build firmware from existing production build/latest/web.",
     )
     add_pio_options(build_parser)
+    build_parser.add_argument("--sleep", choices=("0", "1"), default="1")
 
     verify_parser = subparsers.add_parser(
         "verify",
@@ -107,7 +108,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.command == "build":
-            build_release(args.pio, args.environment)
+            build_release(args.pio, args.environment, int(args.sleep))
         elif args.command == "verify":
             verify_release(args.image)
         elif args.command == "clean":
@@ -135,8 +136,43 @@ def add_pio_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_release(pio: str, environment: str) -> Path:
+def sleep_project_config(environment: str, sleep: int) -> tuple[Path, dict]:
+    parser = configparser.ConfigParser(interpolation=None)
+    if not parser.read(PLATFORMIO_CONFIG, encoding="utf-8"):
+        raise ReleaseError("platformio.ini is missing")
+    section = f"env:{environment}"
+    if not parser.has_section(section):
+        raise ReleaseError(f"PlatformIO environment is missing: {environment}")
+    flags = parser.get(section, "build_flags", fallback="")
+
+    def option(name: str, default: int) -> int:
+        matches = re.findall(rf"(?:^|\s)-D\s*{name}(?:\s*=\s*|\s+)(\d+)(?=\s|$)", flags)
+        if len(matches) > 1:
+            raise ReleaseError(f"duplicate {name} build flag")
+        return int(matches[0]) if matches else default
+
+    if re.search(r"(?:^|\s)-D\s*ENABLE_SLEEP_SCHEDULER(?:\s|=|$)", flags):
+        raise ReleaseError("ENABLE_SLEEP_SCHEDULER is controlled by --sleep")
+    idle = option("SLEEP_IDLE_TIMEOUT_SECONDS", 1800)
+    ignore_usb = option("SLEEP_IGNORE_USB_HOST", 0)
+    if not 1 <= idle <= 86400 or ignore_usb not in (0, 1):
+        raise ReleaseError("invalid sleep build flags")
+    parser.set(section, "build_flags", flags + f"\n-D ENABLE_SLEEP_SCHEDULER={sleep}")
+    GENERATED_OUTPUT.mkdir(parents=True, exist_ok=True)
+    output = GENERATED_OUTPUT / "platformio-sleep.ini"
+    with output.open("w", encoding="utf-8") as stream:
+        parser.write(stream)
+    return output, {
+        "sleep_scheduler": bool(sleep),
+        "sleep_idle_timeout_seconds": idle,
+        "sleep_ignore_usb_host": bool(ignore_usb),
+    }
+
+
+def build_release(pio: str, environment: str, sleep: int = 1) -> Path:
     require_supported_environment(environment)
+    if sleep not in (0, 1):
+        raise ReleaseError("sleep must be 0 or 1")
     web_manifest = require_web_input()
     dirty = git_dirty()
     if os.environ.get("CI") and dirty:
@@ -146,7 +182,9 @@ def build_release(pio: str, environment: str) -> Path:
     stage = Path(tempfile.mkdtemp(prefix=".release-stage-", dir=BUILD_ROOT))
     try:
         generate_embedded_web_header(web_manifest)
-        run_command([*pio_command(pio), "run", "-e", environment])
+        sleep_config, identity = sleep_project_config(environment, sleep)
+        run_command([*pio_command(pio), "run", "-d", str(ROOT),
+                     "-c", str(sleep_config), "-e", environment])
 
         shutil.copytree(WEB_OUTPUT, stage / "web", copy_function=shutil.copy2)
         shutil.copy2(WEB_MANIFEST_PATH, stage / "web-manifest.json")
@@ -158,6 +196,7 @@ def build_release(pio: str, environment: str) -> Path:
             web_manifest,
             build_id,
             dirty,
+            identity,
         )
         create_firmware_package(stage / "binary", stage / "firmware.img")
         verify_snapshot(stage, stage / "firmware.img")
@@ -356,6 +395,7 @@ def collect_images(
     web_manifest: dict,
     build_id: str,
     dirty: bool,
+    sleep_identity: dict | None = None,
 ) -> dict:
     core_dir = platformio_core_dir(pio)
     framework_dir = core_dir / "packages/framework-arduinoespressif32"
@@ -419,6 +459,9 @@ def collect_images(
         "created_at": datetime.now(TAIPEI).isoformat(),
         "git_commit": git_commit(),
         "git_dirty": dirty,
+        **(sleep_identity or {"sleep_scheduler": True,
+                              "sleep_idle_timeout_seconds": 1800,
+                              "sleep_ignore_usb_host": False}),
         "environment": environment,
         "board": config["board"],
         "chip": str(board["build"]["mcu"]).lower(),
@@ -573,6 +616,11 @@ def verify_manifest_metadata(
         raise ReleaseError("unsupported release manifest schema")
     if manifest.get("product") != PRODUCT:
         raise ReleaseError("release manifest has an invalid product")
+    if type(manifest.get("sleep_scheduler")) is not bool or \
+       type(manifest.get("sleep_ignore_usb_host")) is not bool or \
+       type(manifest.get("sleep_idle_timeout_seconds")) is not int or \
+       not 1 <= manifest["sleep_idle_timeout_seconds"] <= 86400:
+        raise ReleaseError("release manifest has invalid sleep build settings")
     if (
         manifest.get("environment") != SUPPORTED_ENVIRONMENT
         or manifest.get("board") != SUPPORTED_BOARD

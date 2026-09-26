@@ -4,6 +4,7 @@
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <driver/gpio.h>
+#include <soc/soc_caps.h>
 #endif
 
 namespace EpaperHardware {
@@ -51,6 +52,18 @@ Result claimAndQuiescePins(PinRegistry *pins) {
   // BUSY is active-low. Keep its fail-safe idle level high when the panel
   // controller is powered down or otherwise leaves the output high-impedance.
   pinMode(epaper.busy, INPUT_PULLUP);
+#if defined(ARDUINO_ARCH_ESP32)
+  // Keep the sleep-held levels until the new output latches and directions
+  // are ready. Releasing the hold earlier can pulse the HAT power gate.
+  if (gpio_hold_dis(static_cast<gpio_num_t>(epaper.cs)) != ESP_OK ||
+      gpio_hold_dis(static_cast<gpio_num_t>(epaper.dc)) != ESP_OK ||
+      gpio_hold_dis(static_cast<gpio_num_t>(epaper.reset)) != ESP_OK) {
+    return storageError("failed to release e-paper pin hold");
+  }
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
+  gpio_deep_sleep_hold_dis();
+#endif
+#endif
   return okResult();
 }
 

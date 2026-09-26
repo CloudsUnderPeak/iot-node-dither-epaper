@@ -72,5 +72,18 @@ int main() {
   nativefs::backend.fail.clear();
   assert(nativefs::backend.handles == 0);
   assert(storage.deleteFile("quota.bin").ok());
+
+  assert(storage.reserveSleep());
+  assert(storage.operationBusy());
+  assert(storage.unmountForSleep());
+  assert(!storage.mounted());
+  nativefs::backend.fail = "mount";
+  assert(!storage.cancelSleep());
+  assert(storage.operationBusy());
+  nativefs::backend.fail.clear();
+  assert(storage.cancelSleep());
+  assert(storage.mounted());
+  assert(!storage.operationBusy());
+
   std::cout << "Real UserDataStorage lifecycle and persistence failure tests passed\n";
 }

@@ -18,6 +18,7 @@
 #include "EpdTransport.h"
 #include "modules/storage/UserDataStorage.h"
 #include "modules/runtime/BootDiagnostics.h"
+#include "modules/sleep/SleepRtcRecord.h"
 
 enum class EpaperServiceState : uint8_t {
   Idle,
@@ -64,6 +65,7 @@ struct EpaperServiceResult {
   const char *message = "e-paper unavailable";
   const char *reason = "none";
   uint32_t sessionId = 0;
+  uint32_t operationId = 0;
 
   bool ok() const { return status == EpaperServiceStatusCode::Ok; }
 };
@@ -95,6 +97,8 @@ struct EpaperServiceSnapshot {
   const char *lastResult = "none";
   const char *lastErrorCode = "none";
   const char *lastResetReason = "unknown";
+  uint32_t operationId = 0;
+  uint32_t completedOperationId = 0;
   size_t transferredBytes = 0;
   EpaperTimingDiagnostics timings;
 };
@@ -118,11 +122,15 @@ class EpaperService : public SystemRestartCoordinator {
                EpaperSafetyStore *safetyStore,
                CpuFrequencyDriver *frequencyDriver,
                EpaperShutdownCoordinator *shutdownCoordinator,
-               const BootDiagnosticsSnapshot &bootDiagnostics);
+               const BootDiagnosticsSnapshot &bootDiagnostics,
+               const SleepWakeEvidence &sleepEvidence = {});
   bool ready() const { return ready_; }
   RestartRequest requestRestart(uint32_t nowMs) override;
   void pollRestart(uint32_t nowMs, bool allowRestart = true) override;
   RestartProgress restartProgress() const override;
+  bool requestSleep(uint32_t nowMs);
+  bool sleepReady() const;
+  void cancelSleep();
   bool ownsRuntime() const { return workerTask_ != nullptr; }
   void poll(uint32_t nowMs);
   EpaperServiceSnapshot snapshot(uint32_t nowMs) const;
@@ -171,6 +179,8 @@ class EpaperService : public SystemRestartCoordinator {
   TaskHandle_t workerTask_ = nullptr;
   bool ready_ = false;
   bool admissionClosed_ = false;
+  bool sleepDraining_ = false;
+  bool sleepReady_ = false;
   bool restartAllowed_ = false;
   bool markerClearPending_ = false;
   bool markerClearRunning_ = false;
@@ -179,6 +189,7 @@ class EpaperService : public SystemRestartCoordinator {
   RestartProgress restartProgress_ = RestartProgress::Idle;
   uint32_t restartStartedMs_ = 0;
   uint32_t operationGeneration_ = 0;
+  uint32_t completedOperationId_ = 0;
   uint32_t cpuMhz_ = 0;
   static constexpr uint32_t kUploadDrainMs = 30000;
   static constexpr uint32_t kRestartDrainMs = 150000;

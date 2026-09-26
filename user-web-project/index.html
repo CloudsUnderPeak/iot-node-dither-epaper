@@ -182,6 +182,7 @@
         <header class="app-header">
             <div class="app-title">Dither Image Editor</div>
             <div class="app-header-actions">
+                <button id="app-sleep-chip" class="app-sleep-chip" type="button" hidden aria-live="polite"></button>
                 <div id="app-status" class="app-status is-busy" title="Loading..." aria-label="Loading..."></div>
                 <button id="app-menu-button" class="icon-button app-menu-button button-with-icon" type="button" aria-label="Menu">
                     <span class="svg-icon app-menu-button-icon" data-svg-icon="assets/icons/editor/menu.svg"></span>
@@ -216,6 +217,7 @@
     <script defer src="src/app/epaper-operation-overlay.js"></script>
     <script defer src="src/device/device-api.js"></script>
     <script defer src="src/device/device-live.js"></script>
+    <script defer src="src/device/device-sleep.js"></script>
     <script defer src="src/core/encoders/epaper-target.js"></script>
     <script defer src="src/device/device-epaper.js"></script>
     <script defer src="src/device/device-epaper-calibration.js"></script>
@@ -235,6 +237,7 @@
     <script defer src="src/pages/device-info/entry.js"></script>
     <script defer src="src/pages/device-network/entry.js"></script>
     <script defer src="src/pages/device-system/entry.js"></script>
+    <script defer src="src/pages/device-sleep/entry.js"></script>
     <script defer src="src/pages/web-setting/entry.js"></script>
     <script defer src="src/pages/help/entry.js"></script>
     <script defer src="src/pages/about/entry.js"></script>

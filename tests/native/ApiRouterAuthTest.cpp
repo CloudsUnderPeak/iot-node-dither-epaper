@@ -4,6 +4,21 @@
 #include "api/ApiRouter.h"
 #include "modules/http/UserFileHttpPreflight.h"
 
+#if ENABLE_SLEEP_SCHEDULER
+class RouterTime final : public TimeSource {
+ public:
+  TimeSnapshot value{1799996400, TimeOrigin::Client, 1};
+  TimeSnapshot snapshot() const override { return value; }
+  bool set(int64_t epoch, TimeOrigin origin) override {
+    value.epoch = epoch;
+    value.origin = origin;
+    ++value.revision;
+    return true;
+  }
+  void clear() override { value = {}; }
+};
+#endif
+
 namespace {
 int failures = 0;
 
@@ -27,6 +42,10 @@ struct RouterFixture {
   EpaperCalibrationService calibration;
   BatteryMonitor battery;
   BootDiagnostics diagnostics;
+#if ENABLE_SLEEP_SCHEDULER
+  RouterTime time;
+  SleepCoordinator sleep;
+#endif
   ApiRouter router;
 
   explicit RouterFixture(
@@ -49,6 +68,10 @@ struct RouterFixture {
         calibration,
         battery,
         diagnostics,
+#if ENABLE_SLEEP_SCHEDULER
+        &time,
+        &sleep,
+#endif
     };
     expect(router.begin(deps).ok(),
            "router should initialize with complete dependencies");
@@ -108,6 +131,13 @@ void testExactRouteAuthorizationMatrix() {
       {Api::Method::Get, "/api/wifi/connect", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
       {Api::Method::Post, "/api/wifi/reconnect", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
       {Api::Method::Put, "/api/system", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
+      {Api::Method::Put, "/api/system/time", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
+#if ENABLE_SLEEP_SCHEDULER
+      {Api::Method::Get, "/api/sleep", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
+      {Api::Method::Put, "/api/sleep", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
+      {Api::Method::Post, "/api/sleep/keep-awake", ApiRouter::HttpBinding::OptionalJsonBody, ApiRouter::RouteMatch::Exact, false, 200},
+      {Api::Method::Post, "/api/sleep/now", ApiRouter::HttpBinding::OptionalJsonBody, ApiRouter::RouteMatch::Exact, true, 202},
+#endif
       {Api::Method::Post, "/api/system/reset", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
       {Api::Method::Post, "/api/system/reset/settings", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
       {Api::Method::Post, "/api/system/reset/data", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
@@ -166,6 +196,12 @@ void testExactRouteAuthorizationMatrix() {
   ApiRouter::RouteInfo missingInfo;
   expect(!ApiRouter::routeInfo(expectedRouteCount, missingInfo),
          "route metadata lookup must reject an out-of-range index");
+#if !ENABLE_SLEEP_SCHEDULER
+  RouterFixture noSleep;
+  expect(noSleep.router.dispatch(
+             requestFor(Api::Method::Get, "/api/sleep")).statusCode == 404,
+         "SLEEP=0 must not register the sleep resource");
+#endif
 }
 
 void testWebIdentityMatchesAcrossTransports() {

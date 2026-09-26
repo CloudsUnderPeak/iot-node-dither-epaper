@@ -21,7 +21,14 @@ g++ "${common[@]}" tests/native/EpaperServiceTest.cpp "${storage[@]}" \
   src/modules/epaper/EpaperShutdownCoordinator.cpp src/modules/epaper/CpuFrequencyGuard.cpp \
   src/modules/runtime/BootDiagnostics.cpp -lz -o "$build_dir/epaper-service-test"
 "$build_dir/epaper-service-test"
-g++ "${common[@]}" tests/native/RuntimeActionSchedulerTest.cpp \
+g++ -Itests/native/sleep_coordinator_stubs "${common[@]}" \
+  -include tests/native/stubs/freertos/task.h \
+  tests/native/SleepCoordinatorTest.cpp src/modules/sleep/SleepCoordinator.cpp \
+  src/modules/sleep/SleepSchedule.cpp src/modules/sleep/SleepStore.cpp \
+  src/modules/sleep/SleepRtcRecord.cpp src/modules/sleep/WakeClassifier.cpp \
+  -o "$build_dir/sleep-coordinator-test"
+"$build_dir/sleep-coordinator-test"
+g++ "${common[@]}" -DENABLE_SLEEP_SCHEDULER=0 tests/native/RuntimeActionSchedulerTest.cpp \
   src/modules/runtime/RuntimeActionScheduler.cpp src/modules/config/ConfigService.cpp \
   src/modules/config/model/DeviceConfig.cpp src/modules/config/model/DeviceConfigValidation.cpp \
   src/modules/config/model/StrictIpv4.cpp src/modules/wifi/WifiManager.cpp \

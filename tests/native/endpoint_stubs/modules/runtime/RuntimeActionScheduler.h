@@ -5,6 +5,7 @@
 struct RuntimeActionSnapshot {
   bool restartPending = false;
   bool restartFailed = false;
+  bool runtimeActionPending = false;
 };
 
 class RuntimeActionScheduler {

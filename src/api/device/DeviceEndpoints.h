@@ -4,12 +4,14 @@
 #include "modules/config/ConfigService.h"
 #include "modules/power/BatteryMonitor.h"
 #include "modules/runtime/BootDiagnostics.h"
+#include "modules/time/TimeSource.h"
 
 // Handles GET /api/device.
 namespace DeviceEndpoints {
 
 Api::Response get(const ConfigService &configService,
                   const BatteryMonitor &batteryMonitor,
-                  const BootDiagnostics &bootDiagnostics);
+                  const BootDiagnostics &bootDiagnostics,
+                  const TimeSource *timeSource = nullptr);
 
 }  // namespace DeviceEndpoints

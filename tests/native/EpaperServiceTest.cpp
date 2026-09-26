@@ -129,6 +129,29 @@ struct Fixture {
   }
 };
 
+
+void testSleepHandshakeAndOperationIdentity() {
+  {
+    Fixture fixture;
+    const EpaperServiceResult accepted =
+        fixture.service.requestDraw(EpaperDrawAction::White);
+    assert(accepted.ok() && accepted.operationId != 0);
+    nativeRunWorker();
+    const EpaperServiceSnapshot completed = fixture.service.snapshot();
+    assert(completed.completedOperationId == accepted.operationId);
+  }
+  {
+    Fixture fixture;
+    assert(fixture.service.requestSleep(millis()));
+    assert(!fixture.service.snapshot().canDraw);
+    nativeRunWorker();
+    assert(fixture.service.sleepReady());
+    fixture.service.cancelSleep();
+    assert(!fixture.service.sleepReady());
+    assert(fixture.service.snapshot().canDraw);
+  }
+}
+
 void testRestartPhases() {
   for (auto phase : {EpaperDrawPhase::Prewake, EpaperDrawPhase::Initializing,
                      EpaperDrawPhase::Transferring, EpaperDrawPhase::Refreshing,
@@ -662,6 +685,7 @@ void testGzipMountingOrientation() {
 }
 
 int main(int argc, char **) {
+  testSleepHandshakeAndOperationIdentity();
   testUploadIdleCleanup();
   testPrewakeMarkerFailures();
   testGzipStorageDownloadsAndFailures();

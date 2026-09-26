@@ -16,7 +16,8 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return DeviceEndpoints::get(*router.configService_,
                                    *router.batteryMonitor_,
-                                   *router.bootDiagnostics_);
+                                   *router.bootDiagnostics_,
+                                   router.timeSource_);
      },
      HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
     {Api::Method::Get, "/api/web",
@@ -165,6 +166,29 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
        return router.systemEndpoints_.update(request);
      },
      HttpBinding::JsonBody},
+    {Api::Method::Put, "/api/system/time",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return router.systemEndpoints_.updateTime(request);
+     },
+     HttpBinding::JsonBody},
+#if ENABLE_SLEEP_SCHEDULER
+    {Api::Method::Get, "/api/sleep",
+     +[](ApiRouter &router, const Api::Request &, const char *) {
+       return SleepEndpoints::get(*router.sleepCoordinator_);
+     }, HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Put, "/api/sleep",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return SleepEndpoints::update(request, *router.sleepCoordinator_, *router.timeSource_);
+     }, HttpBinding::JsonBody},
+    {Api::Method::Post, "/api/sleep/keep-awake",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return SleepEndpoints::keepAwake(request, *router.sleepCoordinator_);
+     }, HttpBinding::OptionalJsonBody, RouteMatch::Exact, RouteAccess::Public},
+    {Api::Method::Post, "/api/sleep/now",
+     +[](ApiRouter &router, const Api::Request &request, const char *) {
+       return SleepEndpoints::now(request, *router.sleepCoordinator_);
+     }, HttpBinding::OptionalJsonBody},
+#endif
     {Api::Method::Post, "/api/system/reset",
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return router.systemEndpoints_.reset(StorageResetScope::All);
@@ -211,6 +235,10 @@ Result ApiRouter::begin(const ApiRouterDeps &deps) {
   epaperCalibrationService_ = &deps.epaperCalibrationService;
   batteryMonitor_ = &deps.batteryMonitor;
   bootDiagnostics_ = &deps.bootDiagnostics;
+  timeSource_ = deps.timeSource;
+#if ENABLE_SLEEP_SCHEDULER
+  sleepCoordinator_ = deps.sleepCoordinator;
+#endif
 
   Result result = authEndpoints_.begin(
       &deps.configService, &deps.authService, &deps.runtime);
@@ -222,7 +250,12 @@ Result ApiRouter::begin(const ApiRouterDeps &deps) {
       &deps.runtime);
   if (!result.ok()) return result;
   return systemEndpoints_.begin(
-      &deps.configService, &deps.storageLifecycle, &deps.runtime);
+      &deps.configService, &deps.storageLifecycle, &deps.runtime,
+      deps.timeSource
+#if ENABLE_SLEEP_SCHEDULER
+      , deps.sleepCoordinator
+#endif
+      );
 }
 
 bool ApiRouter::pollPending(const Api::PendingRequest &pending, Api::Response &response) {
@@ -253,7 +286,21 @@ Api::Response ApiRouter::dispatch(const Api::Request &request) {
         return unauthorized();
       }
     }
+#if ENABLE_SLEEP_SCHEDULER
+    const bool keepAwake = request.matches(Api::Method::Post, "/api/sleep/keep-awake");
+    const bool statusRead = request.matches(Api::Method::Get, "/api/sleep");
+    const bool publicWrite = request.method != Api::Method::Get &&
+        (strncmp(request.path, "/api/epaper/", 12) == 0);
+    const bool activity = route.access == RouteAccess::Protected || publicWrite;
+    const bool lease = sleepCoordinator_ != nullptr && !keepAwake && !statusRead;
+    if (lease && !sleepCoordinator_->beginApiRequest(activity, millis())) {
+      return Api::problem(409, "sleep_entering", "sleep entry is in progress");
+    }
+#endif
     Api::Response response = route.handler(*this, request, parameter);
+#if ENABLE_SLEEP_SCHEDULER
+    if (lease) sleepCoordinator_->endApiRequest();
+#endif
     if (response.pending.id != 0) {
       response.pending.method = route.method;
       response.pending.path = route.path;
@@ -321,8 +368,19 @@ ApiRouter::FileUploadStart ApiRouter::prepareFileUpload(
         403, "reserved_file", "e-paper image is managed by /api/epaper/image");
     return start;
   }
+#if ENABLE_SLEEP_SCHEDULER
+  const bool sleepLease = sleepCoordinator_ != nullptr;
+  if (sleepLease && !sleepCoordinator_->beginApiRequest(true, millis())) {
+    start.response = Api::problem(
+        409, "sleep_entering", "sleep entry is in progress");
+    return start;
+  }
+#endif
   const UserDataUploadBegin storageStart =
       userData_->beginUpload(request.name, contentLength);
+#if ENABLE_SLEEP_SCHEDULER
+  if (sleepLease) sleepCoordinator_->endApiRequest();
+#endif
   start.maxUploadBytes = storageStart.maxUploadBytes;
   if (!storageStart.result.ok()) {
     start.response = fileStorageError(
@@ -378,9 +436,20 @@ ApiRouter::FileDownloadStart ApiRouter::prepareFileDownload(
     start.response = request.response;
     return start;
   }
+#if ENABLE_SLEEP_SCHEDULER
+  const bool sleepLease = sleepCoordinator_ != nullptr;
+  if (sleepLease && !sleepCoordinator_->beginApiRequest(true, millis())) {
+    start.response = Api::problem(
+        409, "sleep_entering", "sleep entry is in progress");
+    return start;
+  }
+#endif
   strlcpy(start.name, request.name, sizeof(start.name));
   const UserDataDownloadBegin storageStart =
       userData_->beginDownload(request.name, rangeHeader);
+#if ENABLE_SLEEP_SCHEDULER
+  if (sleepLease) sleepCoordinator_->endApiRequest();
+#endif
   start.fileSize = storageStart.fileSize;
   if (!storageStart.result.ok()) {
     start.response = fileStorageError(
@@ -413,7 +482,18 @@ ApiRouter::FileUploadStart ApiRouter::prepareEpaperUpload(
     start.response = Api::problem(415, "unsupported_content_encoding", "e-paper upload requires gzip");
     return start;
   }
+#if ENABLE_SLEEP_SCHEDULER
+  const bool sleepLease = sleepCoordinator_ != nullptr;
+  if (sleepLease && !sleepCoordinator_->beginApiRequest(true, millis())) {
+    start.response = Api::problem(
+        409, "sleep_entering", "sleep entry is in progress");
+    return start;
+  }
+#endif
   const EpaperServiceResult result = epaperService_->beginUpload(contentLength);
+#if ENABLE_SLEEP_SCHEDULER
+  if (sleepLease) sleepCoordinator_->endApiRequest();
+#endif
   if (!result.ok()) {
     start.response = EpaperEndpoints::fromServiceResult(
         result, epaperService_->snapshot().retryAfterSeconds);
@@ -467,10 +547,21 @@ ApiRouter::ExpiredUpload ApiRouter::expireIdleUpload(uint32_t nowMs) {
 ApiRouter::FileDownloadStart ApiRouter::prepareEpaperDownload(
     const char *rangeHeader) {
   FileDownloadStart start;
+#if ENABLE_SLEEP_SCHEDULER
+  const bool sleepLease = sleepCoordinator_ != nullptr;
+  if (sleepLease && !sleepCoordinator_->beginApiRequest(false, millis())) {
+    start.response = Api::problem(
+        409, "sleep_entering", "sleep entry is in progress");
+    return start;
+  }
+#endif
   const EpaperStoredImageMetadata stored = epaperService_->snapshot().stored;
   if (!stored.present) {
     start.response = Api::problem(404, "epaper_image_not_found",
                                   "stored e-paper image not found");
+#if ENABLE_SLEEP_SCHEDULER
+    if (sleepLease) sleepCoordinator_->endApiRequest();
+#endif
     return start;
   }
   if (!stored.valid) {
@@ -479,10 +570,16 @@ ApiRouter::FileDownloadStart ApiRouter::prepareEpaperDownload(
     data["reason"] = EpaperImageFormat::errorCode(stored.validationError);
     start.response = Api::error(
         422, Api::json(data), "stored EPDIMG is invalid");
+#if ENABLE_SLEEP_SCHEDULER
+    if (sleepLease) sleepCoordinator_->endApiRequest();
+#endif
     return start;
   }
   const UserDataDownloadBegin begin =
       epaperService_->beginImageDownload(rangeHeader);
+#if ENABLE_SLEEP_SCHEDULER
+  if (sleepLease) sleepCoordinator_->endApiRequest();
+#endif
   start.fileSize = begin.fileSize;
   if (!begin.result.ok()) {
     if (begin.result.status == UserDataFileStatus::NotFound) {

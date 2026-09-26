@@ -15,6 +15,32 @@ fi
 mkdir -p "$build_dir"
 
 g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/SleepScheduleTest.cpp" \
+  "$project_dir/src/modules/sleep/SleepSchedule.cpp" \
+  -o "$build_dir/sleep-schedule-test"
+
+"$build_dir/sleep-schedule-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/SleepRtcRecordTest.cpp" \
+  "$project_dir/src/modules/sleep/SleepRtcRecord.cpp" \
+  "$project_dir/src/modules/sleep/WakeClassifier.cpp" \
+  -o "$build_dir/sleep-rtc-record-test"
+
+"$build_dir/sleep-rtc-record-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/SleepStoreTest.cpp" \
+  "$project_dir/src/modules/sleep/SleepStore.cpp" \
+  "$project_dir/src/modules/sleep/SleepSchedule.cpp" \
+  -o "$build_dir/sleep-store-test"
+
+"$build_dir/sleep-store-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror \
   -I"$project_dir/tests/native/stubs" \
   -I"$project_dir/src" \
   "$project_dir/tests/native/BootDiagnosticsTest.cpp" \
@@ -206,7 +232,7 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 
 "$build_dir/user-file-endpoint-test"
 
-g++ -std=c++17 -Wall -Wextra -Werror \
+g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=0 \
   -I"$project_dir/tests/native/endpoint_stubs" \
   -I"$project_dir/tests/native/stubs" \
   -I"$arduinojson_include" \
@@ -228,7 +254,7 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 
 "$build_dir/endpoint-failure-path-test"
 
-g++ -std=c++17 -Wall -Wextra -Werror \
+g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=0 \
   -I"$project_dir/tests/native/endpoint_stubs" \
   -I"$project_dir/tests/native/stubs" \
   -I"$arduinojson_include" \
@@ -260,7 +286,56 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 
 "$build_dir/api-router-auth-test"
 
-g++ -std=c++17 -Wall -Wextra -Werror -pthread \
+g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=1 \
+  -I"$project_dir/tests/native/endpoint_stubs" \
+  -I"$project_dir/tests/native/stubs" \
+  -I"$arduinojson_include" \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/ApiRouterAuthTest.cpp" \
+  "$project_dir/src/api/ApiRouter.cpp" \
+  "$project_dir/src/api/alive/AliveEndpoints.cpp" \
+  "$project_dir/src/api/auth/AuthEndpoints.cpp" \
+  "$project_dir/src/api/device/DeviceEndpoints.cpp" \
+  "$project_dir/src/api/epaper/EpaperEndpoints.cpp" \
+  "$project_dir/src/api/runtime/RuntimeEndpoints.cpp" \
+  "$project_dir/src/api/sleep/SleepEndpoints.cpp" \
+  "$project_dir/src/api/storage/StorageEndpoints.cpp" \
+  "$project_dir/src/api/storage/UserFileEndpoints.cpp" \
+  "$project_dir/src/api/system/SystemEndpoints.cpp" \
+  "$project_dir/src/api/web/WebEndpoints.cpp" \
+  "$project_dir/src/api/wifi/WifiEndpoints.cpp" \
+  "$project_dir/src/api/wifi/WifiPayload.cpp" \
+  "$project_dir/src/api/shared/ApiTypes.cpp" \
+  "$project_dir/src/api/shared/ApiResponse.cpp" \
+  "$project_dir/src/api/shared/JsonReader.cpp" \
+  "$project_dir/src/modules/config/model/DeviceConfig.cpp" \
+  "$project_dir/src/modules/config/model/DeviceConfigValidation.cpp" \
+  "$project_dir/src/modules/config/model/StrictIpv4.cpp" \
+  "$project_dir/src/modules/sleep/SleepSchedule.cpp" \
+  "$project_dir/src/modules/storage/UserFilePolicy.cpp" \
+  "$project_dir/src/modules/epaper/EpaperImageFormat.cpp" \
+  "$project_dir/src/modules/epaper/calibration/EpaperCalibration.cpp" \
+  "$project_dir/src/modules/runtime/BootDiagnostics.cpp" \
+  -o "$build_dir/api-router-auth-sleep-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=1 \
+  -I"$project_dir/tests/native/endpoint_stubs" \
+  -I"$project_dir/tests/native/stubs" \
+  -I"$arduinojson_include" \
+  -I"$project_dir/src" \
+  "$project_dir/tests/native/SleepEndpointsTest.cpp" \
+  "$project_dir/src/api/sleep/SleepEndpoints.cpp" \
+  "$project_dir/src/api/shared/ApiTypes.cpp" \
+  "$project_dir/src/api/shared/ApiResponse.cpp" \
+  "$project_dir/src/api/shared/JsonReader.cpp" \
+  "$project_dir/src/modules/sleep/SleepSchedule.cpp" \
+  -o "$build_dir/sleep-endpoints-test"
+
+"$build_dir/sleep-endpoints-test"
+
+"$build_dir/api-router-auth-sleep-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror -pthread -DENABLE_SLEEP_SCHEDULER=0 \
   -I"$project_dir/tests/native/storage_router_stubs" \
   -I"$project_dir/tests/native/endpoint_stubs" \
   -I"$project_dir/tests/native/stubs" \

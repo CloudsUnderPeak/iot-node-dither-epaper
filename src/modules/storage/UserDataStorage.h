@@ -103,6 +103,10 @@ class UserDataStorage {
   // Final restart ACK: no I/O, never closes another session. On success the
   // gate remains held through reboot, including a returning test restart.
   bool reserveRestart();
+  bool reserveSleep();
+  bool unmountForSleep();
+  bool cancelSleep();
+  bool operationBusy() const;
 
   UserDataUploadBegin beginUpload(const char *name, size_t declaredBytes);
   UserDataFileResult writeUpload(uint32_t sessionId,
@@ -151,6 +155,7 @@ class UserDataStorage {
   mutable portMUX_TYPE capacityMux_ = portMUX_INITIALIZER_UNLOCKED;
   SemaphoreHandle_t operationGate_ = nullptr;
   bool mounted_ = false;
+  bool sleepReserved_ = false;
   UploadCapacity stableCapacity_{};
   ActiveOperation activeOperation_ = ActiveOperation::None;
   fs::File activeFile_;

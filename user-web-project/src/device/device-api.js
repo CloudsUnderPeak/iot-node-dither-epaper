@@ -231,6 +231,21 @@
             systemUpdate: function systemUpdate(payload) {
                 return request('PUT', 'api/system', { json: payload });
             },
+            systemTime: function systemTime(clientTime) {
+                return request('PUT', 'api/system/time', { json: { client_time: clientTime } });
+            },
+            sleepStatus: function sleepStatus() {
+                return request('GET', 'api/sleep', { auth: false, timeoutMs: 4000 });
+            },
+            sleepUpdate: function sleepUpdate(payload) {
+                return request('PUT', 'api/sleep', { json: payload });
+            },
+            sleepKeepAwake: function sleepKeepAwake() {
+                return request('POST', 'api/sleep/keep-awake', { auth: false, json: {} });
+            },
+            sleepNow: function sleepNow() {
+                return request('POST', 'api/sleep/now', { json: {} });
+            },
             // 完整重設；裝置在回應後立即重啟，呼叫端必須自行作廢本地 session。
             systemReset: function systemReset() {
                 return request('POST', 'api/system/reset', { json: {} });

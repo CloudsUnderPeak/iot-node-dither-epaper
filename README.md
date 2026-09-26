@@ -44,6 +44,7 @@ This e-paper edition builds on two projects, bringing device management and imag
 - **Projects you can revisit.** A `.dither.png` project opens as an image in ordinary viewers and restores your editing session when imported back into the editor. Project downloads remain available while the device is offline or cooling down.
 - **Wi-Fi setup is already included.** AP, STA, AP + STA, saved settings, and optional fallback AP give the display a reusable connectivity foundation.
 - **Device information within reach.** Check network, storage, and hardware status, including measured battery voltage and estimated battery percentage on the target board.
+- **Scheduled low-power operation.** An authenticated device page can enable a fixed 12, 24, or 48-hour wake schedule, show blockers and wake diagnostics, keep the device awake, or request sleep after the firmware completes safe panel, storage, network, and HTTP shutdown.
 - **Ready for your workflow.** Use the browser, REST API, serial console, or included Python image tool. The interface supports English and Traditional Chinese.
 
 ## Try it locally without hardware
@@ -76,6 +77,8 @@ Build the firmware with the e-paper product frontend:
 ```bash
 make build
 ```
+
+Sleep scheduler code is included by default while the saved schedule remains disabled until configured. Use `make build SLEEP=0` to omit its routes and implementation; release manifests record `sleep_scheduler` for the selected build.
 
 Find your board’s serial port, then build, verify, and flash:
 
@@ -118,3 +121,4 @@ Product frontend source lives in `user-web-project/`, maintained as a Git subtre
 - **Refreshes are deliberately paced.** Each completed physical draw is followed by a 180-second cooldown. The interface shows remaining time; local editing can continue during the cooldown.
 - **The panel target is specific.** Firmware accepts the fixed `EPDIMG` format, not raw PNG or JPEG uploads. The product editor and Python tool handle conversion for you.
 - **Use a trusted local network.** The initial AP is open and the default administrator password is `password`.
+- **Sleep behavior still needs device validation.** Host tests cover code, API, browser behavior, and release builds. Timer wake, GPIO levels, USB-host detection, reconnect behavior, current draw, and panel cooldown evidence require the target board and panel. An attached USB host blocks sleep by default, and a sleeping device cannot answer the web UI or keep-awake request until it wakes.

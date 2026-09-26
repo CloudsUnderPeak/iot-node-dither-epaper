@@ -29,4 +29,7 @@ class PreferencesBackend {
   virtual bool putUShort(const char *key, uint16_t value) = 0;
   virtual bool putBool(const char *key, bool value) = 0;
   virtual bool putString(const char *key, const char *value) = 0;
+  // Optional fixed-size blob operations for stores with a versioned record.
+  virtual bool getBytes(const char *, void *, size_t) const { return false; }
+  virtual bool putBytes(const char *, const void *, size_t) { return false; }
 };

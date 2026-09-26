@@ -6,6 +6,7 @@ PYTHON ?= python3
 PORT ?=
 IMAGE ?=
 WEB ?= user
+SLEEP ?= 1
 WEB_PROCESS ?= auto
 RELEASE_TOOL := tools/release-build/build_release.py
 WEB_TOOL := tools/web-build/build_web.py
@@ -20,6 +21,10 @@ ifneq ($(origin COMPONENT),undefined)
 $(error COMPONENT was removed; use direct targets: make web, make demo, or make esp)
 endif
 
+ifneq ($(filter $(SLEEP),0 1),$(SLEEP))
+$(error SLEEP must be 0 or 1)
+endif
+
 .PHONY: help build prepare-user-web user-web pull push web demo esp verify verify-web clean all test test-native test-tools test-web test-all deploy flash
 
 help:
@@ -28,6 +33,7 @@ help:
 		'make build WEB=builtin             Build builtin web plus firmware.' \
 		'make build WEB=user                Rebuild user web plus firmware.' \
 		'make build WEB=none                Build firmware without a frontend.' \
+		'make build SLEEP=0                 Build without scheduled sleep.' \
 		'make prepare-user-web              Rebuild and import user-web-project.' \
 		'make user-web pull                 Pull the configured user-web subtree branch.' \
 		'make user-web push                 Push committed user-web subtree changes.' \
@@ -46,6 +52,7 @@ help:
 		'' \
 		'WEB: user (default), auto, builtin, none' \
 		'WEB_PROCESS: auto (default), minify-gzip, none' \
+		'SLEEP: 1 (default), 0 disables the sleep scheduler' \
 		'auto processing: builtin=minify-gzip, user=none, none=none'
 
 build:
@@ -98,7 +105,7 @@ demo:
 
 esp:
 	$(PYTHON) $(WEB_TOOL) verify --target production
-	$(PYTHON) $(RELEASE_TOOL) build --pio "$(PIO)" --environment "$(PIO_ENV)"
+	$(PYTHON) $(RELEASE_TOOL) build --pio "$(PIO)" --environment "$(PIO_ENV)" --sleep "$(SLEEP)"
 
 verify:
 	@if [ -z "$(strip $(IMAGE))" ]; then \

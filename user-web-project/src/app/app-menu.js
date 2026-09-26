@@ -45,6 +45,9 @@
         addItem('device-info', app.i18n.t('menuDeviceInfo'));
         addItem('device-network', app.i18n.t('menuDeviceNetwork'));
         addItem('device-system', app.i18n.t('menuDeviceSystem'));
+        if (app.device.sleep && app.device.sleep.snapshot().supported) {
+            addItem('device-sleep', app.i18n.t('menuDeviceSleep'));
+        }
         if (app.device.epaper.isSupported()) {
             addItem('device-epaper-test', app.i18n.t('menuEpaperTest'));
         }

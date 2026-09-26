@@ -1,4 +1,7 @@
 #include "RuntimeActionScheduler.h"
+#if ENABLE_SLEEP_SCHEDULER
+#include "modules/sleep/SleepCoordinator.h"
+#endif
 
 Result RuntimeActionScheduler::begin(ConfigService *configService,
                                      WifiManager *wifiManager,
@@ -74,6 +77,7 @@ RuntimeActionSnapshot RuntimeActionScheduler::snapshot() {
   portENTER_CRITICAL(&pendingMux_);
   result.restartPending = systemResetPending_;
   result.restartFailed = systemResetFailed_;
+  result.runtimeActionPending = wifiApplyPending_ || wifiTxPowerApplyPending_;
   portEXIT_CRITICAL(&pendingMux_);
   return result;
 }
@@ -98,19 +102,37 @@ void RuntimeActionScheduler::applyPendingWifi() {
     return;
   }
 
-  const DeviceConfig config = configService_->snapshot();
+  const DeviceConfig persisted = configService_->snapshot();
+#if ENABLE_SLEEP_SCHEDULER
+  const DeviceConfig config = sleepCoordinator_ != nullptr
+      ? sleepCoordinator_->effectiveWifiConfig(persisted) : persisted;
+#else
+  const DeviceConfig &config = persisted;
+#endif
   WifiStatus status{};
   const Result applyResult = wifiManager_->apply(config, status);
   if (applyResult.code == ResultCode::Unsupported) {
     scheduleWifiApply(100);
     return;
   }
-  const Result mdnsResult = mdnsService_->restart(config, status);
-  const Result captiveDnsResult = captivePortalDnsService_->restart(status);
+#if ENABLE_SLEEP_SCHEDULER
+  const bool wakeCycle = sleepCoordinator_ != nullptr && sleepCoordinator_->wakeCycle();
+#else
+  constexpr bool wakeCycle = false;
+#endif
+  const Result powerSaveResult = wifiManager_->applyPowerSave(wakeCycle);
+  const Result mdnsResult = wakeCycle
+      ? (mdnsService_->stop(), okResult()) : mdnsService_->restart(config, status);
+  const Result captiveDnsResult = wakeCycle
+      ? (captivePortalDnsService_->stop(), okResult())
+      : captivePortalDnsService_->restart(status);
   Serial.printf("api wifi: apply %s: %s (%u)\n",
                 wifiModeToString(config.wifiMode),
                 applyResult.message,
                 static_cast<unsigned>(applyResult.code));
+  Serial.printf("api wifi power save: %s (%u)\n",
+                powerSaveResult.message,
+                static_cast<unsigned>(powerSaveResult.code));
   Serial.printf("api mdns: restart: %s (%u), host=%s.local\n",
                 mdnsResult.message,
                 static_cast<unsigned>(mdnsResult.code),

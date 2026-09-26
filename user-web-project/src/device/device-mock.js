@@ -64,8 +64,61 @@
         epaperCalibration: {
             source: 'default',
             colors: copyCalibration(DEFAULT_EPAPER_CALIBRATION)
-        }
+        },
+        clockEpoch: null,
+        clockSetAt: 0,
+        sleep: { enabled: false, period: 24, anchor: null, due: null,
+            idleAt: Date.now(), request: { state: 'none', error_code: null } }
     };
+
+    function mockEpoch() {
+        return state.clockEpoch === null ? null :
+            state.clockEpoch + Math.floor((Date.now() - state.clockSetAt) / 1000);
+    }
+
+    function mockTime() {
+        var epoch = mockEpoch();
+        return { epoch: epoch, synced: epoch !== null, source: epoch === null ? 'none' : 'client' };
+    }
+
+    function mockSleep() {
+        var value = state.sleep;
+        var elapsed = Math.floor((Date.now() - value.idleAt) / 1000);
+        var remaining = Math.max(0, 1800 - elapsed);
+        var current = mockEpoch();
+        var next = value.due;
+        var basis = current === null ? 'relative' : 'absolute';
+        if (value.enabled && basis === 'absolute' && next !== null) {
+            var period = value.period * 3600;
+            while (next < current) { next += period; }
+        }
+        if (value.request.state === 'pending' && Date.now() - value.requestAt > 3000) {
+            var failure = /[?&]sleep=fail(?:&|$)/.test(window.location.search);
+            value.request = failure ? { state: 'failed', error_code: 'mock_failure' }
+                : { state: 'cancelled', error_code: 'mock_cancelled' };
+        }
+        return {
+            enabled: value.enabled, mode: 'normal', state: value.enabled ? 'armed' : 'disabled',
+            storage_state: 'ok',
+            idle: { timeout_seconds: 1800, remaining_seconds: value.enabled ? remaining : null,
+                armed: value.enabled },
+            schedule: {
+                period_hours: value.enabled ? value.period : null,
+                anchor_epoch: value.enabled ? value.anchor : null,
+                clock_basis: value.enabled ? basis : null,
+                next_wake_epoch: value.enabled && basis === 'absolute' ? next : null,
+                next_wake_in_seconds: value.enabled ? (basis === 'absolute'
+                    ? Math.max(0, next - current) : value.period * 3600) : null
+            },
+            time: mockTime(),
+            last_wake: { cause: 'none', mode: null, clock_basis: null, epoch: null,
+                planned_due_epoch: null, drift_seconds: null, result: 'none',
+                consecutive_failures: 0, sta_attempts: 0, time_synced: false,
+                last_error_code: null, tasks: [] },
+            sleep_request: value.request,
+            blockers: value.enabled ? [] : ['no_wake_source']
+        };
+    }
 
     var SCAN_NETWORKS = [
         { ssid: 'HomeWiFi-5G', rssi: -52, channel: 6, encryption_type: 4, encryption: 'wpa2', hidden: false },
@@ -435,6 +488,8 @@
                 wifi_tx_dbm: 15,
                 config_state: 'persisted',
                 config_recovery_reason: 'none',
+                features: { sleep_scheduler: true },
+                time: mockTime(),
                 power: {
                     voltage_mv: 3980,
                     sample_age_ms: 42,
@@ -444,6 +499,19 @@
         }
         if (path === 'api/storage' && method === 'GET') {
             return ok(storageSnapshot());
+        }
+        if (path === 'api/sleep' && method === 'GET') {
+            return ok(mockSleep());
+        }
+        if (path === 'api/sleep/keep-awake' && method === 'POST') {
+            var keepBody = parseJson(init);
+            if (keepBody !== null && (typeof keepBody !== 'object' || Array.isArray(keepBody)
+                || Object.keys(keepBody).length)) {
+                return fail(400, 'unsupported_field', 'empty object expected');
+            }
+            state.sleep.idleAt = Date.now();
+            state.sleep.request = { state: 'cancelled', error_code: null };
+            return ok({ idle: mockSleep().idle });
         }
         if (path === 'api/wifi' && method === 'GET') {
             return ok(wifiSnapshot());
@@ -495,6 +563,58 @@
             }
             state.hostname = hostname;
             return ok({ hostname: hostname }, 'system updated');
+        }
+        if (path === 'api/system/time' && method === 'PUT') {
+            var timeBody = parseJson(init);
+            if (!timeBody || Object.keys(timeBody).length !== 1 ||
+                !Number.isInteger(timeBody.client_time) ||
+                timeBody.client_time < 1704067200 || timeBody.client_time >= 4102444800) {
+                return fail(400, 'invalid_field', 'invalid client_time', { fields: ['client_time'] });
+            }
+            state.clockEpoch = timeBody.client_time;
+            state.clockSetAt = Date.now();
+            return ok(mockTime());
+        }
+        if (path === 'api/sleep' && method === 'PUT') {
+            var sleepBody = parseJson(init);
+            if (!sleepBody || typeof sleepBody.enabled !== 'boolean') {
+                return fail(400, 'invalid_field', 'enabled is required', { fields: ['enabled'] });
+            }
+            var fields = ['enabled', 'period_hours', 'first_wake_delay_minutes', 'client_time'];
+            var unknown = Object.keys(sleepBody).filter(function (key) { return fields.indexOf(key) === -1; });
+            if (unknown.length) { return fail(400, 'unsupported_field', 'unsupported field', { fields: unknown }); }
+            var extras = fields.slice(1).filter(function (key) { return sleepBody[key] !== undefined; });
+            if (sleepBody.enabled || extras.length) {
+                var hours = sleepBody.period_hours;
+                var minutes = sleepBody.first_wake_delay_minutes;
+                var timestamp = sleepBody.client_time;
+                if ([12,24,48].indexOf(hours) === -1 || !Number.isInteger(minutes) ||
+                    minutes < 1 || minutes > hours * 60 || !Number.isInteger(timestamp) ||
+                    timestamp < 1704067200 || timestamp >= 4102444800) {
+                    return fail(400, 'invalid_field', 'invalid schedule');
+                }
+                state.clockEpoch = timestamp;
+                state.clockSetAt = Date.now();
+                state.sleep.period = hours;
+                state.sleep.anchor = timestamp + minutes * 60;
+                state.sleep.due = state.sleep.anchor;
+            }
+            state.sleep.enabled = sleepBody.enabled;
+            state.sleep.idleAt = Date.now();
+            state.sleep.request = { state: 'none', error_code: null };
+            return ok(mockSleep());
+        }
+        if (path === 'api/sleep/now' && method === 'POST') {
+            if (!state.sleep.enabled) { return fail(409, 'no_wake_source', 'sleep disabled', { blockers: ['no_wake_source'] }); }
+            var nowBody = parseJson(init);
+            if (nowBody !== null && (typeof nowBody !== 'object' || Array.isArray(nowBody)
+                || Object.keys(nowBody).length)) {
+                return fail(400, 'unsupported_field', 'empty object expected');
+            }
+            state.sleep.request = { state: 'pending', error_code: null };
+            state.sleep.requestAt = Date.now();
+            return jsonResponse(202, { success: true,
+                data: { sleep_request: state.sleep.request }, message: 'sleep scheduled' });
         }
         if (path === 'api/wifi/scan' && method === 'GET') {
             return ok({ networks: SCAN_NETWORKS });

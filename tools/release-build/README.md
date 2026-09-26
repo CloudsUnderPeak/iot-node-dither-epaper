@@ -45,6 +45,8 @@ add ZIP, Brotli, zstd, xz, bzip2, or another outer compressed package.
 ```bash
 make esp
 make build WEB=none
+make build WEB=user SLEEP=1
+make build WEB=builtin SLEEP=0
 make deploy WEB=none PORT=/dev/ttyACM0
 make verify
 make verify IMAGE=build/20260726_0428/firmware.img
@@ -52,7 +54,7 @@ make flash PORT=/dev/ttyACM0
 make flash PORT=/dev/ttyACM0 IMAGE=build/20260726_0428/firmware.img
 ```
 
-`make esp` rejects demo web. Verification is workspace-coupled: the selected
+`make esp` rejects demo web. `SLEEP` accepts only `0` or `1` and controls `ENABLE_SLEEP_SCHEDULER`; it must not be injected through extra PlatformIO flags. Manifest schema 6 records `sleep_scheduler` and verification checks it against the selected build. Verification is workspace-coupled: the selected
 `firmware.img` must remain beside its `binary/`, `web/`, and
 `web-manifest.json`. It verifies image hashes and offsets, protected user
 partition ranges, web/firmware metadata, flat archive contents, and package

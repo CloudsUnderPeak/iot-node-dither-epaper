@@ -57,6 +57,28 @@ class ReleaseBuildTest(unittest.TestCase):
         self.patch.stop()
         self.temporary.cleanup()
 
+    def test_sleep_project_config_keeps_existing_flags(self):
+        config = self.root / "platformio.ini"
+        config.write_text("[env:firebeetle2_esp32c6]\nboard = dfrobot_firebeetle2_esp32c6\n"
+                          "build_flags =\n    -D ARDUINO_USB_MODE=1\n"
+                          "    -D STATUS_LED_PIN=-1\n", encoding="utf-8")
+        with mock.patch.object(release, "PLATFORMIO_CONFIG", config):
+            path, identity = release.sleep_project_config("firebeetle2_esp32c6", 0)
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("-D ARDUINO_USB_MODE=1", content)
+            self.assertIn("-D STATUS_LED_PIN=-1", content)
+            self.assertIn("-D ENABLE_SLEEP_SCHEDULER=0", content)
+            self.assertEqual(content.count("ENABLE_SLEEP_SCHEDULER"), 1)
+            self.assertFalse(identity["sleep_scheduler"])
+
+    def test_sleep_project_config_rejects_duplicate_macro(self):
+        config = self.root / "platformio.ini"
+        config.write_text("[env:firebeetle2_esp32c6]\n"
+                          "build_flags = -D ENABLE_SLEEP_SCHEDULER=1\n", encoding="utf-8")
+        with mock.patch.object(release, "PLATFORMIO_CONFIG", config):
+            with self.assertRaises(release.ReleaseError):
+                release.sleep_project_config("firebeetle2_esp32c6", 0)
+
     def write_valid_snapshot(self, name: str = "20260726_0428") -> Path:
         snapshot = self.build / name
         web_root = snapshot / "web"
@@ -109,6 +131,9 @@ class ReleaseBuildTest(unittest.TestCase):
             "flash_mode": release.SUPPORTED_FLASH_MODE,
             "flash_frequency": release.SUPPORTED_FLASH_FREQUENCY,
             "flash_size": release.SUPPORTED_FLASH_SIZE,
+            "sleep_scheduler": True,
+            "sleep_idle_timeout_seconds": 1800,
+            "sleep_ignore_usb_host": False,
             "app_partition": "app0",
             "app_offset": release.APP_OFFSET,
             "app_size": release.APP_SIZE,

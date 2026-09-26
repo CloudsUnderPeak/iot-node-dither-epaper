@@ -101,6 +101,42 @@ bool UserDataStorage::reserveRestart() {
   return tryBeginOperation(ActiveOperation::Synchronous);
 }
 
+bool UserDataStorage::reserveSleep() {
+  if (sleepReserved_ || operationGate_ == nullptr ||
+      !tryBeginOperation(ActiveOperation::Synchronous)) return false;
+  sleepReserved_ = true;
+  return true;
+}
+
+bool UserDataStorage::unmountForSleep() {
+  if (!sleepReserved_) return false;
+  if (mounted_) {
+    filesystem_.end();
+    mounted_ = false;
+  }
+  return true;
+}
+
+bool UserDataStorage::cancelSleep() {
+  if (!sleepReserved_) return true;
+  if (!mounted_) {
+    mounted_ = mountVolume();
+    if (!mounted_) return false;
+  }
+  if (!prepareNamespace()) return false;
+  refreshStableCapacity();
+  sleepReserved_ = false;
+  endOperation();
+  return true;
+}
+
+bool UserDataStorage::operationBusy() const {
+  if (operationGate_ == nullptr) return false;
+  if (xSemaphoreTake(operationGate_, 0) != pdTRUE) return true;
+  xSemaphoreGive(operationGate_);
+  return false;
+}
+
 UserDataUploadBegin UserDataStorage::beginUpload(const char *name,
                                                  size_t declaredBytes) {
   UserDataUploadBegin begin;

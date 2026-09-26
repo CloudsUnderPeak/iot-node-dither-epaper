@@ -397,6 +397,17 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
 - 離線、載入或儲存中禁止操作；離線樣式不可改變六色預覽本身的 RGB。色準 API 公開，不顯示登入鎖定卡。
 - 三個測試 action 不送 request body，並和 editor upload 共用 single-operation admission、overlay、status polling、錯誤處理與 180 秒 cooldown。
 
+### 睡眠排程頁
+
+- 只有 `/api/device.features.sleep_scheduler === true` 時，Menu 才顯示「睡眠排程」並允許 `#/device-sleep`；capability 缺少或 false 時不顯示入口。
+- 頁面狀態由公開 `GET /api/sleep` 提供，掛載與 online 恢復時立即刷新，online 期間每 15 秒輪詢；輪詢只讀 status，不自動呼叫 keep-awake。
+- 狀態區顯示 enabled、mode、state、clock source／sync、下次喚醒、idle 剩餘、request failure 與 blockers。Nullable epoch／drift 顯示 unavailable，不自行推測。
+- 設定表單需登入；週期只提供 12／24／48 小時，首次延遲須在 1 到週期分鐘數內。啟用時以前端目前 epoch 作 `client_time`，送出 `PUT /api/sleep`；停用只送 `{"enabled":false}`。
+- 若 device clock 未同步或相對瀏覽器時間偏差超過 5 秒，已登入且頁面在線時可先用 `PUT /api/system/time` 校時；`device-sleep` 對同一頁面生命週期限制自動校時頻率，避免每次 polling 寫 clock。
+- 「保持喚醒」是公開 `POST /api/sleep/keep-awake`；「立即休眠」需登入並先確認，再呼叫 `POST /api/sleep/now`。202 只顯示 pending 並繼續查詢，不能立即宣稱裝置已睡著。
+- 裝置離線時停止輪詢、清除 sleep snapshot／倒數並由共用 gate 反灰。若 request 已進入 sleep 且 alive 轉 offline，頁面說明可能已睡眠；不能把一般 transport error 一律解讀為成功入睡。
+- Preview mock 提供 capability、clock、schedule、idle、blockers、keep-awake 與 pending/offline 模擬；Help 的裝置章節說明 schedule 預設停用、USB blocker 與睡眠後網頁不可達。
+
 ### 驗收重點
 
 - 裝置斷電後 10 秒內圓點轉紅、裝置頁反灰且無法送出設定；恢復供電後自動回綠並刷新資料，全程不需重新整理頁面，且裝置資訊頁在恢復後自行更新數值。

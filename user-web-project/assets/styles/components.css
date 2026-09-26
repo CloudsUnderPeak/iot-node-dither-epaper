@@ -1162,6 +1162,24 @@ body.is-sorting * {
     background: var(--color-accent);
 }
 
+.app-sleep-chip {
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    padding: 5px 9px;
+    background: var(--color-header-bg);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.app-sleep-chip.is-warning {
+    border-color: #d9963f;
+    color: #bd6b16;
+}
+
+.app-sleep-chip:disabled { cursor: default; }
+
 .app-status {
     width: 14px;
     height: 14px;

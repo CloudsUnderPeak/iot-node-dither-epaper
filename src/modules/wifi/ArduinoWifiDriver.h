@@ -8,6 +8,7 @@ class ArduinoWifiDriver : public WifiDriver {
   void setPersistent(bool enabled) override;
   bool setMode(WifiDriverMode mode) override;
   bool setTxPower(uint8_t configuredDbm) override;
+  bool setPowerSave(bool enabled) override;
   bool setHostname(const char *hostname) override;
   bool configureStation(const IPAddress &localIp,
                         const IPAddress &gateway,
@@ -29,6 +30,10 @@ class ArduinoWifiDriver : public WifiDriver {
   bool stopAp(bool turnOffRadio) override;
   IPAddress apIp() const override;
   bool enableDhcpCaptivePortal() override;
+
+ private:
+  uint8_t normalPowerSaveMode_ = 0;
+  bool normalPowerSaveCaptured_ = false;
 };
 
 class ArduinoMonotonicClock : public MonotonicClock {

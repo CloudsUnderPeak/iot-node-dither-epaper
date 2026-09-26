@@ -74,6 +74,18 @@ Arduino loop <──────────────────────
 | `modules/epaper/calibration/*` | 六色色準 model/service 與 `user_nvs` 雙 slot store；EPD code identity 固定，display RGB 可持久化調整。 |
 | `modules/console/*` | Human diagnostics、userdata inspection、typed config staging／commit 與 REST-equivalent `api ...` serial adapter。 |
 
+## Sleep、clock 與安全收尾
+
+- `modules/time/` 的 `TimeSource` 是 client clock、carried RTC clock 與 SNTP sample 的單一交易入口；`TimeSyncTask` 只由 main-loop owner poll。Sleep build 使用 SDK weak `sntp_sync_time(struct timeval*)` hook 把 bounded sample 與 generation 送回 loop，callback 不操作 JSON、NVS、Wi-Fi 或排程。
+- `modules/sleep/SleepSchedule` 計算固定 anchor slot、early window、checkpoint 與 checked timer duration；`SleepRtcRecord` 使用固定欄位、version、length、CRC 與實際 timer target，`WakeClassifier` 只接受可識別的 timer deep-sleep wake。
+- `SleepStore` 使用獨立 Preferences backend 與 `sleep_a`、`sleep_b`、`sleep_meta` namespaces。inactive slot write/read-back 成功後才切換帶 revision 的 selector；selector 結果不明時狀態為 error 並停止自動睡眠。record 固定 128 bytes，保存 schedule generation、cursor、完整 last wake 與最多四筆 task 結果。
+- `SleepCoordinator` 是 mode、agenda、idle 與 sleep transition 的唯一 owner；其內部原子狀態提供短 request lease、activity generation、keep-awake closure 與 final commit。API callback 只提出 request 或活動事件，不等待 worker、不關閉 radio，也不呼叫 deep sleep。
+- `EpaperService` 的 sleep handshake 由 worker ACK，並以 operation id 對應排程所接受的 draw。`UserDataStorage` 的 operation gate 涵蓋 generic file、console 與 e-paper I/O，sleep reservation 只由 owner 取得／釋放。`ApiServer` 提供 stop/resume；active request lease、stream session 與 storage reservation 共同完成 drain。取消路徑只回復 coordinator 自己取得的資源。
+- Agenda 診斷必須先成功提交 SleepStore 才進入 sleep prepare。final gate 關閉 keep-awake 後依序 arm timer、套用 GPIO hold、停止 SNTP/mDNS/captive DNS/HTTP 與 Wi-Fi、unmount userdata，接近 deep sleep 時才 seal/write RTC intent，最後做 50 ms bounded serial drain。任一步失敗會逆序復原；復原無法證明成功時 admission 保持關閉。production adapter 最後呼叫 `esp_deep_sleep_start()`；fake 返回時 coordinator 保持終態，不再提交工作。
+- wake-cycle effective Wi-Fi config 由 `SleepCoordinator::effectiveWifiConfig()` 統一產生，`main` 與 `RuntimeActionScheduler` 都使用它。wake cycle 不啟動 mDNS/captive；`ArduinoWifiDriver` 保存原 power-save mode，期間套用 `WIFI_PS_MIN_MODEM`，回 normal 時恢復。
+- Build script 將 `SLEEP=0|1` 轉成 `ENABLE_SLEEP_SCHEDULER`，release manifest schema 6 以頂層 `sleep_scheduler` 記錄選擇；device API 則使用 `features.sleep_scheduler`。`SLEEP=0` 必須同時排除 routes、SNTP hook 與 sleep implementation，並保留 boot hold cleanup。
+- 主迴圈先 poll scanner、HTTP/console、e-paper 與 runtime owner，再 poll sleep coordinator，最後推進 Wi-Fi 狀態機與 captive DNS。final deep-sleep call 在 production 不返回；所有 deadline 使用 wrap-safe monotonic subtraction。
+
 ## API 與 transport 邊界
 
 - HTTP 與 serial 對相同 method/path/body 共用 `ApiRouter`，不得各自實作 business rule。

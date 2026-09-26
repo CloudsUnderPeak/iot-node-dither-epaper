@@ -1,4 +1,7 @@
 #include "ConsoleShell.h"
+#if ENABLE_SLEEP_SCHEDULER
+#include "modules/sleep/SleepCoordinator.h"
+#endif
 
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -88,6 +91,9 @@ void ConsoleShell::poll() {
       continue;
     }
     if (incoming == '\n') {
+#if ENABLE_SLEEP_SCHEDULER
+      if (sleep_) sleep_->noteActivity(millis());
+#endif
       if (discardingLine_) {
         if (discardedApiLine_) {
           printApiResponse(Api::problem(413, "payload_too_large", "serial API input is too long"));
@@ -335,6 +341,18 @@ void ConsoleShell::printStatus() const {
   Serial.printf("  Flash layout: %s\n", flashStorage_->ready() ? "ready" : "not ready");
   Serial.printf("  Userdata: %s\n", userData_->mounted() ? "mounted" : "not mounted");
   Serial.printf("  Admin session: %s\n", authService_->hasActiveSession() ? "active" : "none");
+#if ENABLE_SLEEP_SCHEDULER
+  if (sleep_) {
+    const SleepSnapshot sleep = sleep_->snapshot(millis());
+    Serial.printf("  Sleep mode: %s, idle: %lu s, next wake: %lld, time synced: %s\n",
+                  sleep.mode == WakeMode::WakeCycle ? "wake_cycle" : "normal",
+                  static_cast<unsigned long>(sleep.idleRemainingSeconds),
+                  static_cast<long long>(sleep.nextWakeEpoch),
+                  sleep.time.synced() ? "yes" : "no");
+  }
+#else
+  Serial.println("  Sleep mode: unsupported, idle: null, next wake: null");
+#endif
 }
 
 void ConsoleShell::printDevice() const {

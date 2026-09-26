@@ -3,12 +3,14 @@
 #include <esp_mac.h>
 
 #include "api/shared/ApiResponse.h"
+#include "modules/sleep/SleepFeatures.h"
 
 namespace DeviceEndpoints {
 
 Api::Response get(const ConfigService &configService,
                   const BatteryMonitor &batteryMonitor,
-                  const BootDiagnostics &bootDiagnostics) {
+                  const BootDiagnostics &bootDiagnostics,
+                  const TimeSource *timeSource) {
   const DeviceConfig config = configService.snapshot();
   const BatterySnapshot batterySnapshot = batteryMonitor.snapshot(millis());
   const uint32_t heapTotal = ESP.getHeapSize();
@@ -33,6 +35,13 @@ Api::Response get(const ConfigService &configService,
   data["wifi_tx_dbm"] = config.wifiTxDbm;
   data["config_state"] = configStartupStateToString(configService.startupState());
   data["config_recovery_reason"] = configRecoveryReasonToString(configService.recoveryReason());
+  data["features"]["sleep_scheduler"] = ENABLE_SLEEP_SCHEDULER != 0;
+  const TimeSnapshot clock = timeSource == nullptr ? TimeSnapshot{} : timeSource->snapshot();
+  JsonObject time = data["time"].to<JsonObject>();
+  if (clock.synced()) time["epoch"] = clock.epoch;
+  else time["epoch"] = nullptr;
+  time["synced"] = clock.synced();
+  time["source"] = timeOriginToString(clock.origin);
   JsonObject diagnostics = data["diagnostics"].to<JsonObject>();
   diagnostics["reset_reason"] =
       deviceResetReasonToString(bootDiagnostics.snapshot().resetReason);

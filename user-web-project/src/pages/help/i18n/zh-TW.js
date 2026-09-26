@@ -144,6 +144,16 @@
                                 ['可設定的單邊輸出上限', { key: 'helpMaxResizeOutputSize', fact: 'maxResizeOutputSize' }]
                             ]
                         }
+                    },
+                    {
+                        id: 'scheduled-sleep',
+                        title: '已連線裝置的省電排程',
+                        bullets: [
+                            '可選的省電排程頁以 UTC 每 12、24 或 48 小時刷新已儲存圖片；日光節約時間不會移動週期。',
+                            '裝置時間未同步時，下一次刷新先使用相對倒數，直到時鐘校正。',
+                            '保持喚醒只能延長已醒著裝置的閒置倒數；睡著的裝置無法接收此請求。',
+                            'USB 主機連線可能阻擋入睡；若裝置顯示 usb_host_connected，設定後可拔除連線。'
+                        ]
                     }
                 ]
             },

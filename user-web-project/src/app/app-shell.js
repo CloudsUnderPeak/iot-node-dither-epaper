@@ -68,6 +68,7 @@
         this.host = document.getElementById('page-host');
         this.titleNode = document.querySelector('.app-title');
         this.statusNode = document.getElementById('app-status');
+        this.sleepChip = document.getElementById('app-sleep-chip');
         this.menuButton = document.getElementById('app-menu-button');
         this.router = new app.app.PageRouter(this.host, {
             statusNode: this.statusNode,
@@ -102,7 +103,50 @@
             self.menuButton.disabled = Boolean(app.app.state.blockingOperation);
             self.menu.render();
         });
+        app.device.sleep.subscribe(function () {
+            self.renderSleepChip();
+            self.menu.render();
+        });
+        this.sleepChip.addEventListener('click', function () {
+            var snapshot = app.device.sleep.snapshot();
+            if (!snapshot.status || snapshot.status.mode !== 'wake_cycle') { return; }
+            self.sleepChip.disabled = true;
+            app.device.sleep.keepAwake().catch(function (error) {
+                self.sleepChip.title = app.device.errorText(error);
+            }).finally(function () { self.renderSleepChip(); });
+        });
+        window.setInterval(function () { self.renderSleepChip(); }, 1000);
+        this.renderSleepChip();
         this.router.start('dither-editor');
+    };
+
+    AppShell.prototype.renderSleepChip = function renderSleepChip() {
+        var snapshot = app.device.sleep.snapshot();
+        var status = snapshot.status;
+        var show = snapshot.supported && status && status.enabled &&
+            app.device.live.state() === 'online';
+        this.sleepChip.hidden = !show;
+        if (!show) { return; }
+        var remaining = snapshot.remainingSeconds;
+        if (status.mode === 'wake_cycle') {
+            this.sleepChip.textContent = app.i18n.t('sleepChipWakeCycle');
+            this.sleepChip.disabled = snapshot.keepBusy;
+        } else if (remaining === 0) {
+            this.sleepChip.textContent = app.i18n.t('sleepChipWaiting');
+            this.sleepChip.disabled = true;
+        } else if (remaining !== null) {
+            var minutes = Math.floor(remaining / 60);
+            var seconds = remaining % 60;
+            this.sleepChip.textContent = app.i18n.t('sleepChipCountdown') + ' ' +
+                String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+            this.sleepChip.disabled = true;
+        } else {
+            this.sleepChip.textContent = app.i18n.t('sleepChipWaiting');
+            this.sleepChip.disabled = true;
+        }
+        this.sleepChip.classList.toggle('is-warning', remaining !== null && remaining < 300);
+        this.sleepChip.title = status.mode === 'wake_cycle'
+            ? app.i18n.t('sleepKeepAwake') : app.i18n.t('sleepChipHint');
     };
 
     // index.html 內的 header 文字只是 JS 啟動前的 placeholder；
@@ -115,6 +159,7 @@
     AppShell.prototype.refreshUi = function refreshUi() {
         this.applyShellText();
         this.menu.render();
+        this.renderSleepChip();
         this.router.refreshCurrentPage();
     };
 

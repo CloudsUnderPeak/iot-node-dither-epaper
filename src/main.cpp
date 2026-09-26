@@ -41,6 +41,14 @@
 #include "modules/wifi/WifiRadio.h"
 #include "modules/wifi/WifiScanner.h"
 #include "modules/wifi/ArduinoWifiScanDriver.h"
+#include "modules/time/SystemClockTimeSource.h"
+#include "modules/sleep/SleepFeatures.h"
+#if ENABLE_SLEEP_SCHEDULER
+#include "modules/sleep/ArduinoSleepDriver.h"
+#include "modules/sleep/SleepCoordinator.h"
+#include "modules/sleep/SleepStore.h"
+#include <sys/time.h>
+#endif
 #include "selftest/FirmwareSelfTest.h"
 
 #ifndef STATUS_LED_PIN
@@ -79,6 +87,16 @@ EpaperRefreshProbe epaperRefreshProbe;
 EpaperPaletteFrameSource epaperPaletteFrame;
 EpaperService epaperService;
 BootDiagnostics bootDiagnostics;
+SystemClockTimeSource systemClock;
+#if ENABLE_SLEEP_SCHEDULER
+ArduinoSleepDriver sleepDriver;
+ArduinoPreferencesBackend sleepBackend;
+SleepStore sleepStore(sleepBackend);
+SleepCoordinator sleepCoordinator;
+SleepRtcRecord bootSleepRecord;
+SleepWakeEvidence bootSleepEvidence;
+int64_t bootSleepClock = 0;
+#endif
 ArduinoPreferencesBackend epaperCalibrationBackend;
 PreferencesEpaperCalibrationStore epaperCalibrationStore(epaperCalibrationBackend);
 EpaperCalibrationService epaperCalibrationService(epaperCalibrationStore);
@@ -270,7 +288,11 @@ Result startEpaperService() {
   return epaperService.begin(
       &userDataStorage, &epdDriver, &epdTransport, &epaperSafetyStore,
       &epaperCpuFrequency, &epaperShutdownCoordinator,
-      bootDiagnostics.snapshot());
+      bootDiagnostics.snapshot()
+#if ENABLE_SLEEP_SCHEDULER
+      , bootSleepEvidence
+#endif
+      );
 }
 
 Result startEpaperCalibration() {
@@ -332,6 +354,16 @@ Result startConfig() {
 #endif
 }
 
+#if ENABLE_SLEEP_SCHEDULER
+Result startSleep() {
+  return sleepCoordinator.begin(
+      sleepStore, systemClock, sleepDriver, bootSleepRecord,
+      bootDiagnostics.snapshot().resetReason == DeviceResetReason::DeepSleep,
+      sleepDriver.wakeupCause(), bootSleepClock)
+             ? okResult() : storageError("sleep scheduler unavailable");
+}
+#endif
+
 bool configHealthy() {
   return configService.ready();
 }
@@ -353,16 +385,26 @@ Result startWifi() {
   result = wifiManager.begin(&wifiRadio, &wifiDriver, &monotonicClock);
   if (!result.ok()) return result;
 
-  const DeviceConfig config = configService.snapshot();
+  const DeviceConfig persisted = configService.snapshot();
+#if ENABLE_SLEEP_SCHEDULER
+  const DeviceConfig config = sleepCoordinator.effectiveWifiConfig(persisted);
+#else
+  const DeviceConfig &config = persisted;
+#endif
   WifiStatus status{};
 #if ENABLE_WIFI_MODE_SELF_TEST
   return FirmwareSelfTest::runWifiModes(config, wifiManager, status)
              ? okResult()
              : networkError("Wi-Fi mode self-test failed");
 #else
-  return configService.ready()
-             ? wifiManager.apply(config, status)
-             : invalidInput("config unavailable");
+  if (!configService.ready()) return invalidInput("config unavailable");
+  const Result applyResult = wifiManager.apply(config, status);
+  if (!applyResult.ok()) return applyResult;
+#if ENABLE_SLEEP_SCHEDULER
+  return wifiManager.applyPowerSave(sleepCoordinator.wakeCycle());
+#else
+  return wifiManager.applyPowerSave(false);
+#endif
 #endif
 }
 
@@ -402,6 +444,9 @@ void reportFlashLayout(const Result &) {
 }
 
 Result startMdns() {
+#if ENABLE_SLEEP_SCHEDULER
+  if (sleepCoordinator.wakeCycle()) return okResult();
+#endif
   return mdnsService.begin(configService.snapshot(), wifiManager.status());
 }
 
@@ -411,6 +456,9 @@ void reportMdns(const Result &) {
 }
 
 Result startCaptiveDns() {
+#if ENABLE_SLEEP_SCHEDULER
+  if (sleepCoordinator.wakeCycle()) return okResult();
+#endif
   return captiveDnsService.begin(wifiManager.status());
 }
 
@@ -433,9 +481,13 @@ Result startWifiScanner() {
 }
 
 Result startRuntime() {
-  return runtimeActions.begin(
+  const Result result = runtimeActions.begin(
       &configService, &wifiManager, &mdnsService, &captiveDnsService,
       &epaperService);
+#if ENABLE_SLEEP_SCHEDULER
+  runtimeActions.setSleepCoordinator(&sleepCoordinator);
+#endif
+  return result;
 }
 
 bool runtimeHealthy() {
@@ -457,12 +509,22 @@ Result startApiRouter() {
       epaperCalibrationService,
       batteryMonitor,
       bootDiagnostics,
+      &systemClock,
+#if ENABLE_SLEEP_SCHEDULER
+      &sleepCoordinator,
+#endif
   };
   return apiRouter.begin(deps);
 }
 
 Result startHttp() {
-  return apiServer.begin(&wifiManager, &embeddedWebAssets, &apiRouter);
+  const Result result = apiServer.begin(&wifiManager, &embeddedWebAssets, &apiRouter);
+#if ENABLE_SLEEP_SCHEDULER
+  sleepCoordinator.attach(configService, epaperService, userDataStorage,
+                          wifiManager, mdnsService, captiveDnsService,
+                          runtimeActions, apiServer);
+#endif
+  return result;
 }
 
 bool httpHealthy() {
@@ -470,6 +532,9 @@ bool httpHealthy() {
 }
 
 Result startConsole() {
+#if ENABLE_SLEEP_SCHEDULER
+  consoleShell.setSleepCoordinator(&sleepCoordinator);
+#endif
   return consoleShell.begin(
       &configService, &wifiManager, &wifiScanner,
       &flashStorage, &userDataStorage, &authService, &apiRouter);
@@ -486,6 +551,9 @@ enum SubsystemIndex : size_t {
   kEpaperCalibrationSubsystem,
   kBatterySubsystem,
   kConfigSubsystem,
+#if ENABLE_SLEEP_SCHEDULER
+  kSleepSubsystem,
+#endif
   kWifiSubsystem,
   kAssetsSubsystem,
   kFlashLayoutSubsystem,
@@ -510,6 +578,9 @@ Subsystem subsystems[] = {
     {"battery", startBatteryMonitor, batteryMonitorHealthy,
      reportBatteryMonitor},
     {"config", startConfig, configHealthy, reportConfig},
+#if ENABLE_SLEEP_SCHEDULER
+    {"sleep", startSleep},
+#endif
     {"wifi", startWifi, wifiSubsystemHealthy, reportWifi},
     {"assets", startAssets, nullptr, reportAssets},
     {"flash_layout", startFlashLayout, nullptr, reportFlashLayout},
@@ -593,6 +664,19 @@ void printHeartbeat() {
       "mdns",
       mdnsService.running() ? mdnsService.hostName() : "disabled");
   printHeartbeatField("wifi_mode", wifiModeToString(status.mode));
+#if ENABLE_SLEEP_SCHEDULER
+  const SleepSnapshot sleep = sleepCoordinator.snapshot(millis());
+  printHeartbeatField("sleep_mode", sleep.mode == WakeMode::WakeCycle ? "wake_cycle" : "normal");
+  printHeartbeatField("sleep_idle_s", sleep.idleRemainingSeconds);
+  Serial.printf(", sleep_next_wake=%lld, time_synced=%s",
+                static_cast<long long>(sleep.nextWakeEpoch),
+                sleep.time.synced() ? "yes" : "no");
+#else
+  printHeartbeatField("sleep_mode", "unsupported");
+  printHeartbeatField("sleep_idle_s", "null");
+  printHeartbeatField("sleep_next_wake", "null");
+  printHeartbeatField("time_synced", systemClock.snapshot().synced() ? "yes" : "no");
+#endif
   printHeartbeatField("sta_state", wifiLinkStateToString(status.staState));
   printHeartbeatField("sta_ip", staIp.c_str());
   printHeartbeatField("ap_ip", apIp.c_str());
@@ -602,6 +686,16 @@ void printHeartbeat() {
 
 void setup() {
   bootDiagnostics.capture();
+  systemClock.begin();
+#if ENABLE_SLEEP_SCHEDULER
+  bootSleepRecord = sleepDriver.bootRecord();
+  timeval bootTime{};
+  if (gettimeofday(&bootTime, nullptr) == 0) bootSleepClock = bootTime.tv_sec;
+  bootSleepEvidence = sleepWakeEvidence(
+      bootSleepRecord,
+      bootDiagnostics.snapshot().resetReason == DeviceResetReason::DeepSleep,
+      bootSleepClock, 48U * 3600U);
+#endif
   // Establish CS high, DC low, and inactive-high RST before Serial startup
   // delays or any network/storage subsystem. This is logical quiesce only; it
   // never sends a panel command and must not be reported as Power OFF or Deep
@@ -662,6 +756,9 @@ void loop() {
   const uint32_t now = millis();
   wifiScanner.poll(now, runtimeActions.snapshot().restartPending);
   apiServer.poll();
+  if (subsystemHealthy(subsystems[kConsoleSubsystem])) {
+    consoleShell.poll();
+  }
   if (epaperService.ready()) epaperService.poll(now);
   const bool epaperDrawing =
       epaperService.ready() &&
@@ -679,17 +776,30 @@ void loop() {
     runtimeActions.poll();
   }
 
-  const DeviceConfig config = configService.snapshot();
+#if ENABLE_SLEEP_SCHEDULER
+  sleepCoordinator.poll(now);
+#endif
+
+  const DeviceConfig persisted = configService.snapshot();
+#if ENABLE_SLEEP_SCHEDULER
+  const DeviceConfig config = sleepCoordinator.effectiveWifiConfig(persisted);
+#else
+  const DeviceConfig &config = persisted;
+#endif
   if (subsystemHealthy(subsystems[kConfigSubsystem]) &&
       wifiManager.poll(config)) {
     const WifiStatus status = wifiManager.status();
+#if ENABLE_SLEEP_SCHEDULER
+    if (!sleepCoordinator.wakeCycle()) {
+      mdnsService.restart(config, status);
+      captiveDnsService.restart(status);
+    }
+#else
     mdnsService.restart(config, status);
     captiveDnsService.restart(status);
+#endif
   }
   captiveDnsService.poll();
-  if (subsystemHealthy(subsystems[kConsoleSubsystem])) {
-    consoleShell.poll();
-  }
 
   if (Serial && now - lastHeartbeatMs >= 1000U) {
     lastHeartbeatMs = now;
