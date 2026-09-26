@@ -10,7 +10,7 @@
 #include "modules/runtime/SystemRestartCoordinator.h"
 #include "modules/wifi/WifiManager.h"
 #include "modules/sleep/SleepFeatures.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 class SleepCoordinator;
 #endif
 
@@ -33,7 +33,7 @@ class RuntimeActionScheduler {
   void scheduleWifiTxPowerApply(uint32_t delayMs);
   void scheduleSystemReset(uint32_t delayMs);
   RuntimeActionSnapshot snapshot();
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   void setSleepCoordinator(SleepCoordinator *sleep) { sleepCoordinator_ = sleep; }
 #endif
 
@@ -45,7 +45,7 @@ class RuntimeActionScheduler {
   SystemRestartCoordinator *restartCoordinator_ = nullptr;
   portMUX_TYPE pendingMux_ = portMUX_INITIALIZER_UNLOCKED;
   bool ready_ = false;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   SleepCoordinator *sleepCoordinator_ = nullptr;
 #endif
   bool wifiApplyPending_ = false;

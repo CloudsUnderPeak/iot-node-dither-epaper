@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import tarfile
+import struct
 import tempfile
 import unittest
 from datetime import datetime
@@ -60,6 +61,7 @@ class ReleaseBuildTest(unittest.TestCase):
     def test_sleep_project_config_keeps_existing_flags(self):
         config = self.root / "platformio.ini"
         config.write_text("[env:firebeetle2_esp32c6]\nboard = dfrobot_firebeetle2_esp32c6\n"
+                          "custom_sleep = 1\n"
                           "build_flags =\n    -D ARDUINO_USB_MODE=1\n"
                           "    -D STATUS_LED_PIN=-1\n", encoding="utf-8")
         with mock.patch.object(release, "PLATFORMIO_CONFIG", config):
@@ -67,19 +69,39 @@ class ReleaseBuildTest(unittest.TestCase):
             content = path.read_text(encoding="utf-8")
             self.assertIn("-D ARDUINO_USB_MODE=1", content)
             self.assertIn("-D STATUS_LED_PIN=-1", content)
-            self.assertIn("-D ENABLE_SLEEP_SCHEDULER=0", content)
-            self.assertEqual(content.count("ENABLE_SLEEP_SCHEDULER"), 1)
+            self.assertIn("custom_sleep = 0", content)
+            self.assertNotIn("-D IOT_FEATURE_SLEEP", content)
             self.assertFalse(identity["sleep_scheduler"])
+
+    def test_release_profile_overrides_platformio_custom_sleep(self):
+        config = self.root / "platformio.ini"
+        config.write_text("[env:firebeetle2_esp32c6]\ncustom_sleep = 0\n")
+        with mock.patch.object(release, "PLATFORMIO_CONFIG", config):
+            path, identity = release.sleep_project_config("firebeetle2_esp32c6", None)
+            self.assertTrue(identity["sleep_scheduler"])
+            self.assertIn("custom_sleep = 1", path.read_text())
+            effective = release.resolve_features(Path(
+                release.ROOT / ".pio/feature-config" / identity["feature_config_sha256"] / "effective-features.ini"))
+            self.assertEqual(release.config_hash(effective), identity["feature_config_sha256"])
 
     def test_sleep_project_config_rejects_duplicate_macro(self):
         config = self.root / "platformio.ini"
         config.write_text("[env:firebeetle2_esp32c6]\n"
-                          "build_flags = -D ENABLE_SLEEP_SCHEDULER=1\n", encoding="utf-8")
+                          "build_flags = -D IOT_FEATURE_SLEEP=1\n", encoding="utf-8")
         with mock.patch.object(release, "PLATFORMIO_CONFIG", config):
             with self.assertRaises(release.ReleaseError):
                 release.sleep_project_config("firebeetle2_esp32c6", 0)
 
-    def write_valid_snapshot(self, name: str = "20260726_0428") -> Path:
+    def partition_binary(self, storage=True):
+        entries = [(1,2,0x9000,0x5000,'nvs'),(1,0,0xE000,0x2000,'otadata'),
+                   (0,0x10,release.APP_OFFSET,release.APP_SIZE if storage else release.NO_STORAGE_APP_SIZE,'app0')]
+        if storage: entries.append((1,0x82,release.USER_DATA_OFFSET,release.USER_DATA_SIZE,'userdata'))
+        entries += [(1,2,release.USER_NVS_OFFSET,release.USER_NVS_SIZE,'user_nvs'),(1,3,0x3F0000,0x10000,'coredump')]
+        raw=b''.join(struct.pack('<HBBII16sI',0x50AA,k,st,o,size,name.encode(),0) for k,st,o,size,name in entries)
+        raw += b'\xeb\xeb'+b'\xff'*14+hashlib.md5(raw).digest()
+        return raw+b'\xff'*(0xC00-len(raw))
+
+    def write_valid_snapshot(self, name: str = "20260726_0428", storage: bool = True) -> Path:
         snapshot = self.build / name
         web_root = snapshot / "web"
         binary_root = snapshot / "binary"
@@ -102,7 +124,7 @@ class ReleaseBuildTest(unittest.TestCase):
 
         layout = (
             (0x0, "bootloader.bin", b"B" * 16),
-            (0x8000, "partitions.bin", b"P" * 16),
+            (0x8000, "partitions.bin", self.partition_binary(storage)),
             (0xE000, "boot_app0.bin", b"A" * 16),
             (release.APP_OFFSET, "firmware.bin", b"F" * 32),
         )
@@ -120,6 +142,7 @@ class ReleaseBuildTest(unittest.TestCase):
             )
         manifest = {
             "schema": release.MANIFEST_SCHEMA,
+            **release.feature_identity_defaults(),
             "product": release.PRODUCT,
             "version": "0.8.0",
             "release": "v0.8.0",
@@ -154,6 +177,16 @@ class ReleaseBuildTest(unittest.TestCase):
             "user_nvs_size": release.USER_NVS_SIZE,
             "images": images,
         }
+        if not storage:
+            manifest["features"].update(storage=False, epaper=False, user_files=False)
+            config = {"features": manifest["features"], "sleep": {
+                "idle_timeout_seconds": 1800, "ignore_usb_host": 0}}
+            manifest.update(feature_config_sha256=release.config_hash(config),
+                            partition_layout_id="app-only-v1",
+                            app_size=release.NO_STORAGE_APP_SIZE,
+                            app_available_size=release.NO_STORAGE_APP_SIZE - 32,
+                            user_data_partition=None, user_data_offset=None,
+                            user_data_size=None, user_data_reserve_bytes=0)
         release.write_json(binary_root / "manifest.json", manifest)
         release.create_firmware_package(
             binary_root,
@@ -199,6 +232,36 @@ class ReleaseBuildTest(unittest.TestCase):
         )
         manifest.pop("user_web_sha256", None)
         self.rewrite_manifest(snapshot, manifest)
+
+    def test_no_storage_snapshot_and_binary_layout(self):
+        snapshot = self.write_valid_snapshot(storage=False)
+        release.verify_snapshot(snapshot, snapshot / "firmware.img")
+        manifest = json.loads((snapshot / "binary/manifest.json").read_text())
+        (snapshot / "binary/partitions.bin").write_bytes(self.partition_binary(True))
+        with self.assertRaisesRegex(release.ReleaseError, "feature layout"):
+            release.verify_partition_binary(manifest, snapshot / "binary")
+
+    def test_partition_checksum_and_feature_identity(self):
+        snapshot = self.write_valid_snapshot()
+        manifest = json.loads((snapshot / "binary/manifest.json").read_text())
+        binary = snapshot / "binary/partitions.bin"
+        raw = bytearray(binary.read_bytes()); raw[8] ^= 1; binary.write_bytes(raw)
+        with self.assertRaisesRegex(release.ReleaseError, "checksum"):
+            release.verify_partition_binary(manifest, snapshot / "binary")
+        binary.write_bytes(self.partition_binary())
+        manifest["features"]["auth"] = False
+        self.rewrite_manifest(snapshot, manifest)
+        with self.assertRaisesRegex(release.ReleaseError, "identity mismatch"):
+            release.verify_snapshot(snapshot, snapshot / "firmware.img")
+
+    def test_previous_schema_six_snapshot_remains_verifiable(self):
+        snapshot = self.write_valid_snapshot()
+        manifest = json.loads((snapshot / "binary/manifest.json").read_text())
+        manifest["schema"] = 6
+        for field in ("features", "feature_config_sha256", "partition_layout_id"):
+            manifest.pop(field)
+        self.rewrite_manifest(snapshot, manifest)
+        release.verify_snapshot(snapshot, snapshot / "firmware.img")
 
     def test_partition_csv_parsing_and_alignment(self):
         path = self.root / "partitions.csv"

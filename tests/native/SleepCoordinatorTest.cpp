@@ -255,9 +255,17 @@ void testScheduleUpdatePersistsSupersededAgenda() {
   SleepRecord committed;
   assert(f.sleep.update(candidate, committed));
   assert(committed.lastWake.result == 9);
+#if IOT_FEATURE_EPAPER
   assert(committed.lastWake.taskCount == 2);
+#else
+  assert(committed.lastWake.taskCount == 1);
+#endif
   assert(committed.lastWake.tasks[0].code == 9);
+#if IOT_FEATURE_EPAPER
   assert(committed.lastWake.tasks[1].code == 9);
+#else
+  assert(committed.lastWake.tasks[1].name == 0);
+#endif
   assert(committed.lastWake.consecutiveFailures == 0);
 }
 
@@ -364,7 +372,62 @@ void testRuntimeBlockerAndStorageRecovery() {
   hardwareRecovery.sleep.endApiRequest();
 }
 
+#if !IOT_FEATURE_EPAPER
+void testWithoutOptionalOwners() {
+  Fixture f;
+  f.sleep.attach(f.config, nullptr,
+#if IOT_FEATURE_STORAGE
+                 &f.storage,
+#else
+                 nullptr,
+#endif
+                 f.wifi, nullptr, f.captive, f.runtime, f.http);
+  uint16_t reasons = 0;
+  f.storage.busy = true;
+#if IOT_FEATURE_STORAGE
+  assert(!f.sleep.requestNow(0, reasons));
+  assert(reasons & SleepBlockerUpload);
+#else
+  assert(f.sleep.requestNow(0, reasons));
+  assert(reasons == 0);
+#endif
+  f.storage.busy = false;
+  assert(f.sleep.requestNow(0, reasons));
+  f.sleep.poll(500);
+  f.sleep.poll(501);
+  assert(f.driver.deepSleepCalls == 1);
+  assert(f.epaper.requestSleepCalls == 0);
+#if IOT_FEATURE_STORAGE
+  assert(f.storage.reserveCalls == 1 && f.storage.unmountCalls == 1);
+#else
+  assert(f.storage.reserveCalls == 0 && f.storage.unmountCalls == 0);
+#endif
+  assert(!f.sleep.beginApiRequest(false, 502));
+
+  Fixture cancelled;
+  assert(cancelled.sleep.requestNow(0, reasons));
+  cancelled.sleep.poll(500);
+  assert(cancelled.sleep.keepAwake(501));
+  cancelled.sleep.poll(501);
+  assert(cancelled.sleep.beginApiRequest(false, 502));
+  cancelled.sleep.endApiRequest();
+  assert(cancelled.driver.deepSleepCalls == 0);
+
+  Fixture early(false, true);
+  early.sleep.poll(0);
+  const auto wake = early.sleep.snapshot(0).record.lastWake;
+  assert(wake.result == 2 && wake.taskCount == 1);
+  assert(wake.tasks[0].name == 1 && wake.tasks[1].name == 0);
+  assert(early.epaper.requestSleepCalls == 0);
+}
+#endif
+
 int main() {
+#if !IOT_FEATURE_EPAPER
+  testWithoutOptionalOwners();
+  testScheduleUpdatePersistsSupersededAgenda();
+  std::cout << "Timer-only sleep admission, optional owners and wake diagnostics passed\n";
+#else
   testSntpMailboxRejectsOldGeneration();
   testManualGraceAndTerminalReturn();
   testUsbDisconnectRestartsFullIdle();
@@ -374,4 +437,5 @@ int main() {
   testKeepAwakeUsesLoopOwnerAndFinalGate();
   testRuntimeBlockerAndStorageRecovery();
   std::cout << "Sleep coordinator grace, blockers, recovery, and terminal tests passed\n";
+#endif
 }

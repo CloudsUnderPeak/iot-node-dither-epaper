@@ -57,7 +57,7 @@
                 bindLiveGate: function () { return {banner: document.createElement('div'), unbind: function () {}}; },
                 api: {resources: {wifi: function () { return wifiReply.promise; },
                     device: function () { return Promise.resolve({hostname: 'test'}); }}},
-                auth: {hasToken: function () { return hasToken; },
+                auth: {canManage: function () { return hasToken; },
                     createLockedCard: function () { var node = document.createElement('div'); node.className = 'locked'; return node; },
                     ensureSession: function () { return Promise.resolve(true); },
                     subscribe: function (listener) { authListener = listener; return function () { unsubscribed = true; }; }}

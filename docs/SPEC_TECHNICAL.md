@@ -83,7 +83,7 @@ Arduino loop <──────────────────────
 - `EpaperService` 的 sleep handshake 由 worker ACK，並以 operation id 對應排程所接受的 draw。`UserDataStorage` 的 operation gate 涵蓋 generic file、console 與 e-paper I/O，sleep reservation 只由 owner 取得／釋放。`ApiServer` 提供 stop/resume；active request lease、stream session 與 storage reservation 共同完成 drain。取消路徑只回復 coordinator 自己取得的資源。
 - Agenda 診斷必須先成功提交 SleepStore 才進入 sleep prepare。final gate 關閉 keep-awake 後依序 arm timer、套用 GPIO hold、停止 SNTP/mDNS/captive DNS/HTTP 與 Wi-Fi、unmount userdata，接近 deep sleep 時才 seal/write RTC intent，最後做 50 ms bounded serial drain。任一步失敗會逆序復原；復原無法證明成功時 admission 保持關閉。production adapter 最後呼叫 `esp_deep_sleep_start()`；fake 返回時 coordinator 保持終態，不再提交工作。
 - wake-cycle effective Wi-Fi config 由 `SleepCoordinator::effectiveWifiConfig()` 統一產生，`main` 與 `RuntimeActionScheduler` 都使用它。wake cycle 不啟動 mDNS/captive；`ArduinoWifiDriver` 保存原 power-save mode，期間套用 `WIFI_PS_MIN_MODEM`，回 normal 時恢復。
-- Build script 將 `SLEEP=0|1` 轉成 `ENABLE_SLEEP_SCHEDULER`，release manifest schema 6 以頂層 `sleep_scheduler` 記錄選擇；device API 則使用 `features.sleep_scheduler`。`SLEEP=0` 必須同時排除 routes、SNTP hook 與 sleep implementation，並保留 boot hold cleanup。
+- Feature resolver 將 INI 的 `sleep` 與可選 `SLEEP=0|1` 覆寫轉成唯一的 `IOT_FEATURE_SLEEP`，原始碼、generated header 與 native test 都使用同一 macro。Release manifest schema 7 的 `features.sleep` 記錄能力，並保留頂層 `sleep_scheduler` 與 device API 的 `features.sleep_scheduler` 相容欄位。`IOT_FEATURE_SLEEP=0` 必須同時排除 routes、SNTP hook 與 sleep implementation，並保留 boot hold cleanup。
 - 主迴圈先 poll scanner、HTTP/console、e-paper 與 runtime owner，再 poll sleep coordinator，最後推進 Wi-Fi 狀態機與 captive DNS。final deep-sleep call 在 production 不返回；所有 deadline 使用 wrap-safe monotonic subtraction。
 
 ## API 與 transport 邊界
@@ -159,7 +159,7 @@ Arduino loop <──────────────────────
 
 - `ConfigService` 是唯一 active config owner；其他模組只保存 service pointer 並取得 value snapshot。
 - Production 由 `main.cpp` 將 `ArduinoPreferencesBackend` 注入 `PreferencesConfigStore`，再將 store 注入 `ConfigService`；兩個 interface 都是持久化故障注入與 host test 的窄邊界，不承載 business rule。雙 slot、schema/read-back 與 active marker commit 演算法仍由 `PreferencesConfigStore` 唯一實作。
-- 一般 endpoint 的設定更新使用 `updateWifi()`、`updateSystem()`、`updateHostname()`；密碼更新只委派 `AuthService::changePassword()`，由它呼叫 `ConfigService::updateAdminPassword()`：每個方法在同一個 service mutex 內從最新 active config 合併指定欄位群組、驗證、持久化並發布。`updateSystem()` 同時回報 hostname／TX power 的實際變動並略過 no-op NVS write；完整 `commit()` 只供 boot/self-test 等明確的完整替換流程。
+- 一般 endpoint 的設定更新使用 `updateWifi()`、`updateSystem()`、`updateHostname()`；`AUTH=1` 的密碼更新委派 `AuthService::changePassword()`，由它呼叫 `ConfigService::updateAdminPassword()`：每個方法在同一個 service mutex 內從最新 active config 合併指定欄位群組、驗證、持久化並發布。`updateSystem()` 同時回報 hostname／TX power 的實際變動並略過 no-op NVS write；完整 `commit()` 只供 boot/self-test 等明確的完整替換流程。
 - NVS 不保存整個 C++ struct/blob，也沒有 `kConfigBlobKey`。
 - Current schema 使用 `devcfg_a`、`devcfg_b` 兩個 per-key slot，以及 `devcfg_meta/active` marker。
 - Save 寫入 inactive slot，逐欄完成後最後寫 schema marker，再 read-back 驗證，最後切換 active marker；失敗時 active config 不更新。
@@ -242,7 +242,7 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 
 ## Runtime restart ownership
 
-- `SystemRestartCoordinator` 使用 request／poll／progress：request 回 Accepted／AlreadyPending／Rejected，progress 為 Idle／Draining／Ready／Failed。Scheduler 只持有 `EpaperService` 的 admission owner；`EpaperShutdownCoordinator` 是 worker 完成 cleanup 後的最終硬體核准邊界，不是 scheduler 的同步旁路。
+- `SystemRestartCoordinator` 使用 request／poll／progress：request 回 Accepted／AlreadyPending／Rejected，progress 為 Idle／Draining／Ready／Failed。`EPAPER=1` 時 scheduler 持有 `EpaperService` 的 admission owner；`EpaperShutdownCoordinator` 是 worker 完成 cleanup 後的最終硬體核准邊界，不是 scheduler 的同步旁路。
 - Boot probe 到 runtime worker 的 ownership 以成功建立 worker 為交接點。交接後 loop 不寫 protection marker；cooldown poll 僅設 bounded control flag，worker 在每次最長 10 ms queue wait 前自行檢查 cooldown 並處理 control，不依賴 main loop 排程。Draw queue depth 保持 1，control 不占 draw slot。
 - Snapshot mutex 只保護狀態與 admission。Cooldown clear／read-back 在 worker 鎖外執行，先保留 generation，完成後短鎖確認同代再發布；清除期間不開放 draw／upload。CPU snapshot 使用 owner 發布的 cached 值；marker stage 的唯讀跨 task snapshot 使用 atomic，持久化仍只有唯一 writer。
 - 已接受 upload 保持 reservation 到後續 draw 入列；callback 只清理自己的 session，restart 不旁路關閉檔案。已排隊 validation／draw 也屬 drain 範圍。所有 driver cleanup、CPU restoration、storage release 完成才可 ACK；Ready 是不可逆的本次核准，即使測試 restart driver 返回也不再接新工作。
@@ -253,7 +253,7 @@ Critical section 內不得執行 NVS、JSON、Wi-Fi、Serial 或其他長操作�
 
 - 固定鎖順序是 `AuthService credential/session mutex → ConfigService mutex`。Login 在取得 credential mutex 後才讀密碼、比較並發布 token；changePassword 在相同 mutex 內保存，成功才撤銷 session，不在持鎖方法內呼叫會重鎖的 public invalidation helper。
 - ConfigService 仍是設定與 NVS 的唯一 owner。密碼更新在 config lock 內依最新 committed AP password 開關確認 runtime readiness，僅接受 scheduler 可用性值，不反向呼叫 auth／scheduler。失敗保留 active credential 與 token，成功回傳是否需要 restart；同密碼成功更新仍撤銷 session。
-- REST、serial `api` 與 typed config staging 的密碼更新共用 AuthEndpoints／AuthService；完整 config commit 只用於 boot/self-test。不得新增 runtime credential 寫入旁路。
+- `AUTH=1` 時 REST、serial `api` 與 typed config staging 的密碼更新共用 AuthEndpoints／AuthService；`AUTH=0` 時共用 SystemEndpoints 的 AP credential handler，同樣經 `ConfigService::updateAdminPassword()` 鎖內驗證／持久化，保留既有 schema；完整 config commit 只用於 boot/self-test。不得新增 runtime credential 寫入旁路。
 
 ## Stored-image snapshot publication
 
@@ -305,3 +305,14 @@ so no new file session can enter between ACK and physical restart. The same
 unmounted storage service still participates without blocking recovery reset;
 its dependency is retained before runtime startup validation. New e-paper image
 downloads are denied once e-paper restart admission closes.
+
+## Compile-time feature ownership
+
+- `tools/build-config/features.py` 是 release 與直接 PlatformIO 的共同 resolver；讀取 `config/features.ini`／指定 profile，嚴格驗證 0/1、欄位、sleep settings 與 EPAPER／USER_FILES → STORAGE。指定設定檔省略的功能視為關閉；預設 `features.ini` 明確全開。有效 config canonical SHA-256 是編譯 header、partition CSV 與 release manifest 的共同 identity。
+- PlatformIO PRE hook forced-include 產生的 `IOT_FEATURE_*` header，source filter 移除未啟用模組 `.cpp`；`main.cpp` 的物件、subsystem registry、startup、loop 與 ApiRouter dependencies／routes 同步條件編譯。不接受 build_flags 再定義相同 macro。Native tests 預設全開，也測試明確 macro profile；核心 header 保留相依 `#error`。
+- Release 使用有效設定的 INI snapshot，避免讀取原檔時間差使編譯與 manifest 不一致。Manifest schema 7 新增 `features`、`feature_config_sha256`、`partition_layout_id`，保留舊 sleep 欄位；schema 6 的既有 full-storage snapshot 仍可驗證。Schema 7 同時驗證 feature identity、partition metadata、實際 partition binary records／MD5、image hash 與 package。
+- `STORAGE=0` 只裁切 userdata，`StorageLifecycle` 保留設定初始化與 reset marker；每次 early boot 撤銷 userdata 初始化標記，不呼叫 mount／format。`FlashStorage` 與 `EmbeddedWebAssets` 不屬於可裁切 filesystem。分區地址及切換規則見 [feature configuration](../config/README.md)。
+- `EPAPER=0` 的 `BasicRestartCoordinator` 是實際 restart owner：等 scheduler 提供 radio cleanup readiness，再取得存在的 `UserDataStorage::reserveRestart()`，才進入 Ready 與 restart；仍有固定 150 秒、wrap-safe deadline。無 storage 時不等不存在的 filesystem。Ready 不重新開放 admission。
+- SleepCoordinator 對 optional owner 使用明確 pointer；未編入的面板／storage／mDNS 步驟條件移除，仍保留 HTTP lease、timer、radio、取消與復原流程。無面板的 wake diagnostic 只列 `time_sync` task，superseded diagnostic 亦同。板級安全 pins/hold 仍由既有安全邊界處理。
+- `/api/features` 的 route 永遠公開，回報編譯旗標，不探測硬體。有效 auth 判斷由 ApiRouter 集中套用，包含 route catalogue、streaming preflight 與 deferred completion；adapter 不各自推定 auth。
+- `tools/feature-test/run.py --build` 編譯 13 組代表性配置，`--all` 編譯全部 160 組合法配置，檢查 disabled service 的 ELF symbol。所有 256 組輸入均驗證相依。驗證紀錄仍放 ignored `tmp/verification/`。

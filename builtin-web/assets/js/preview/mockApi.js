@@ -144,6 +144,11 @@
         return success({}, 'ok');
       case 'GET /api/device':
         return success(preview.device);
+      case 'GET /api/features':
+        return success({ features: {
+          sleep: true, epaper: true, storage: true, auth: true,
+          user_files: true, mdns: true, battery: true, console: true
+        } });
       case 'GET /api/storage':
         return success(preview.storage);
       case 'GET /api/wifi':

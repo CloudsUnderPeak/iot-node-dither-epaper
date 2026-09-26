@@ -9,6 +9,7 @@ const state = {
   wifi: null,
   storage: null,
   auth: null,
+  features: null,
   scanNetworks: [],
   scanDetectedCount: null,
   selectedSsid: ''

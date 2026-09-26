@@ -1,6 +1,6 @@
 #include "SleepFeatures.h"
 
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "SleepCoordinator.h"
 
 #include <cstring>
@@ -87,15 +87,15 @@ bool SleepCoordinator::begin(SleepStore &store, TimeSource &time,
   return true;
 }
 
-void SleepCoordinator::attach(ConfigService &config, EpaperService &epaper,
-                              UserDataStorage &storage, WifiManager &wifi,
-                              MdnsService &mdns, CaptivePortalDnsService &captive,
+void SleepCoordinator::attach(ConfigService &config, EpaperService *epaper,
+                              UserDataStorage *storage, WifiManager &wifi,
+                              MdnsService *mdns, CaptivePortalDnsService &captive,
                               RuntimeActionScheduler &runtime, ApiServer &http) {
   config_ = &config;
-  epaper_ = &epaper;
-  storage_ = &storage;
+  epaper_ = epaper;
+  storage_ = storage;
   wifi_ = &wifi;
-  mdns_ = &mdns;
+  mdns_ = mdns;
   captive_ = &captive;
   runtime_ = &runtime;
   http_ = &http;
@@ -201,9 +201,16 @@ bool SleepCoordinator::update(const SleepRecord &candidate,
     last.staAttempts = staAttempts_;
     last.timeSynced = currentTime.synced();
     memset(last.lastErrorCode, 0, sizeof(last.lastErrorCode));
+    for (auto &task : last.tasks) task = {};
+#if IOT_FEATURE_EPAPER
     last.taskCount = 2;
+#else
+    last.taskCount = 1;
+#endif
     last.tasks[0] = {1, 3, static_cast<uint8_t>(ResultSuperseded)};
+#if IOT_FEATURE_EPAPER
     last.tasks[1] = {2, 3, static_cast<uint8_t>(ResultSuperseded)};
+#endif
   }
   merged.enabled = candidate.enabled;
   merged.periodHours = candidate.periodHours;
@@ -255,6 +262,9 @@ bool SleepCoordinator::keepAwake(uint32_t nowMs) {
 }
 
 uint16_t SleepCoordinator::blockers(uint32_t nowMs, bool ignoreCurrentRequest) {
+#if !IOT_FEATURE_EPAPER
+  (void)nowMs;
+#endif
   uint16_t result = 0;
   if (!ready_ || storageState_ == SleepStoreState::Error ||
       storageState_ == SleepStoreState::Recovery) result |= SleepBlockerStorage;
@@ -266,6 +276,7 @@ uint16_t SleepCoordinator::blockers(uint32_t nowMs, bool ignoreCurrentRequest) {
 #if !SLEEP_IGNORE_USB_HOST
   if (driver_->usbHostConnected()) result |= SleepBlockerUsb;
 #endif
+#if IOT_FEATURE_EPAPER
   if (epaper_) {
     const EpaperServiceSnapshot panel = epaper_->snapshot(nowMs);
     if (panel.state == EpaperServiceState::Uploading ||
@@ -275,8 +286,11 @@ uint16_t SleepCoordinator::blockers(uint32_t nowMs, bool ignoreCurrentRequest) {
         panel.panelState == EpaperPanelState::Active) result |= SleepBlockerEpaperUnsafe;
     if (panel.recoveryRequired) result |= SleepBlockerMarkerActive;
   } else result |= SleepBlockerEpaperUnsafe;
+#endif
+#if IOT_FEATURE_STORAGE
   if (storage_ && storage_->operationBusy() && !storageReserved_)
     result |= SleepBlockerUpload;
+#endif
   if (runtime_) {
     const RuntimeActionSnapshot actions = runtime_->snapshot();
     if (actions.restartPending) result |= SleepBlockerRestart;
@@ -399,6 +413,7 @@ void SleepCoordinator::pollAgenda(uint32_t nowMs) {
     return;
   }
   if (agenda_ == AgendaStep::Draw) {
+#if IOT_FEATURE_EPAPER
     if (!epaper_ || !epaper_->ready()) {
       finishAgenda(nowMs, ResultEpaperUnavailable); return;
     }
@@ -427,6 +442,10 @@ void SleepCoordinator::pollAgenda(uint32_t nowMs) {
       finishAgenda(nowMs, ResultWatchdog);
     }
   }
+#else
+    finishAgenda(nowMs, ResultSuccess);
+  }
+#endif
 }
 
 void SleepCoordinator::finishAgenda(uint32_t nowMs, uint8_t result) {
@@ -487,12 +506,18 @@ void SleepCoordinator::finishAgenda(uint32_t nowMs, uint8_t result) {
     timeStatus = 4;
     timeCode = ResultNtpFailed;
   }
+#if IOT_FEATURE_EPAPER
   const uint8_t panelStatus =
       result == ResultSuccess ? 2 :
       (result == ResultEarly || result == ResultNoImage ? 3 : 4);
   last.taskCount = 2;
   last.tasks[0] = {1, timeStatus, timeCode};
   last.tasks[1] = {2, panelStatus, result};
+#else
+  last.taskCount = 1;
+  for (auto &task : last.tasks) task = {};
+  last.tasks[0] = {1, timeStatus, timeCode};
+#endif
 
   const bool failed = staFailed_ || ntpFailed_ || result == ResultDrawFailed ||
                       result == ResultEpaperUnavailable || result == ResultWatchdog;
@@ -542,6 +567,7 @@ void SleepCoordinator::beginPrepare(uint32_t nowMs) {
   keepAwakeAllowed_ = true;
   prepareGeneration_ = activityGeneration_;
   portEXIT_CRITICAL(&mux_);
+#if IOT_FEATURE_EPAPER
   if (!epaper_->requestSleep(nowMs)) {
     portENTER_CRITICAL(&mux_);
     admissionClosed_ = false;
@@ -549,6 +575,7 @@ void SleepCoordinator::beginPrepare(uint32_t nowMs) {
     portEXIT_CRITICAL(&mux_);
     return;
   }
+#endif
   prepare_ = PrepareStep::Epaper;
   requestStartedMs_ = nowMs;
   request_ = SleepRequestState::Entering;
@@ -568,6 +595,7 @@ void SleepCoordinator::cancelPrepare(const char *error, uint32_t nowMs) {
     else hardwareRestored = false;
   }
   hardwareRecoveryFailed_ = !hardwareRestored;
+#if IOT_FEATURE_STORAGE
   if (storageReserved_) {
     if (!storage_->cancelSleep()) {
       storageRecoveryFailed_ = true;
@@ -583,8 +611,11 @@ void SleepCoordinator::cancelPrepare(const char *error, uint32_t nowMs) {
     }
     storageReserved_ = false;
   }
+#endif
   storageRecoveryFailed_ = false;
+#if IOT_FEATURE_EPAPER
   if (epaper_) epaper_->cancelSleep();
+#endif
   bool servicesRestored = true;
   if (http_ && !http_->started() && !http_->resumeAfterSleep())
     servicesRestored = false;
@@ -595,8 +626,10 @@ void SleepCoordinator::cancelPrepare(const char *error, uint32_t nowMs) {
     if (!wifi_->applyPowerSave(mode_ == WakeMode::WakeCycle).ok())
       servicesRestored = false;
     if (mode_ == WakeMode::Normal) {
+#if IOT_FEATURE_MDNS
       if (mdns_ && !mdns_->restart(restored, status).ok())
         servicesRestored = false;
+#endif
       if (captive_ && !captive_->restart(status).ok())
         servicesRestored = false;
     }
@@ -641,12 +674,16 @@ void SleepCoordinator::pollPrepare(uint32_t nowMs) {
     return;
   }
   if (prepare_ == PrepareStep::Epaper) {
+#if IOT_FEATURE_EPAPER
     if (!epaper_->sleepReady()) return;
+#endif
     prepare_ = PrepareStep::Storage;
   }
   if (prepare_ == PrepareStep::Storage) {
+#if IOT_FEATURE_STORAGE
     if (!storage_->reserveSleep()) return;
     storageReserved_ = true;
+#endif
     prepare_ = PrepareStep::Teardown;
   }
   if (prepare_ != PrepareStep::Teardown) return;
@@ -690,7 +727,9 @@ void SleepCoordinator::pollPrepare(uint32_t nowMs) {
   rtc.timerTargetClock = now + duration;
   rtc.sleepEnteredClock = clockNow();
   sntp_.stop();
+#if IOT_FEATURE_MDNS
   if (mdns_) mdns_->stop();
+#endif
   if (captive_) captive_->stop();
   if (http_) http_->stopForSleep();
   WifiStatus status{};
@@ -699,9 +738,11 @@ void SleepCoordinator::pollPrepare(uint32_t nowMs) {
   if (!wifi_->apply(off, status).ok()) {
     cancelPrepare("wifi_stop_failed", nowMs); return;
   }
+#if IOT_FEATURE_STORAGE
   if (!storage_->unmountForSleep()) {
     cancelPrepare("storage_unmount_failed", nowMs); return;
   }
+#endif
   rtc.sleepEnteredClock = clockNow();
   driver_->writeRecord(rtc);
   driver_->drainSerial(50);
@@ -713,7 +754,13 @@ void SleepCoordinator::pollPrepare(uint32_t nowMs) {
 }
 
 void SleepCoordinator::poll(uint32_t nowMs) {
-  if (!ready_ || !config_ || !epaper_ || !storage_ ||
+  if (!ready_ || !config_ ||
+#if IOT_FEATURE_EPAPER
+      !epaper_ ||
+#endif
+#if IOT_FEATURE_STORAGE
+      !storage_ ||
+#endif
       !wifi_ || !runtime_ || !http_ || deepSleepReturned_) return;
   if (storageRecoveryFailed_ || serviceRecoveryFailed_ ||
       hardwareRecoveryFailed_) {

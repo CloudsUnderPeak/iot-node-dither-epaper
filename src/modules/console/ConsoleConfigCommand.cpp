@@ -229,10 +229,17 @@ void ConsoleConfigCommand::commit(char *arguments) {
   char *cursor = arguments;
   char *groupText = nextToken(cursor);
   char *tokenArgument = nextToken(cursor);
-  if (groupText == nullptr || tokenArgument == nullptr ||
-      strncmp(tokenArgument, "token=", 6) != 0 || tokenArgument[6] == '\0' ||
+  if (groupText == nullptr ||
+#if IOT_FEATURE_AUTH
+      tokenArgument == nullptr ||
+#endif
+      (tokenArgument != nullptr && (strncmp(tokenArgument, "token=", 6) != 0 || tokenArgument[6] == '\0')) ||
       !noMoreTokens(cursor)) {
+#if IOT_FEATURE_AUTH
     Serial.println("Usage: config commit <group> token=<token>");
+#else
+    Serial.println("Usage: config commit <group> [token=<token>]");
+#endif
     return;
   }
   const ConsoleConfigGroup group = ConfigStaging::groupFromString(groupText);
@@ -254,10 +261,14 @@ void ConsoleConfigCommand::commit(char *arguments) {
   request.hasBody = true;
   request.hasJsonBody = true;
   request.body = body.as<JsonVariantConst>();
-  request.token = tokenArgument + 6;
+  request.token = tokenArgument != nullptr ? tokenArgument + 6 : "";
   if (group == ConsoleConfigGroup::Wifi) request.path = "/api/wifi";
   else if (group == ConsoleConfigGroup::System) request.path = "/api/system";
+#if IOT_FEATURE_AUTH
   else request.path = "/api/auth/password";
+#else
+  else request.path = "/api/wifi/ap/password";
+#endif
 
   const Api::Response response = router_->dispatch(request);
   for (size_t index = 0; index < request.token.length(); ++index) {

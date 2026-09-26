@@ -23,6 +23,7 @@
     });
 
     function ensureSession() {
+        if (app.device.features.disabled('auth')) { return Promise.resolve(true); }
         if (!app.device.api.hasToken()) {
             return Promise.resolve(false);
         }
@@ -51,6 +52,10 @@
 
     // 開啟共用 login dialog；成功後原地呼叫 onSuccess，不跳頁。
     function openLoginDialog(options) {
+        if (app.device.features.disabled('auth')) {
+            if (options && options.onSuccess) { options.onSuccess(); }
+            return;
+        }
         options = options || {};
         var generation = ++loginGeneration;
         var closed = false;
@@ -163,6 +168,7 @@
     }
 
     function logout() {
+        if (app.device.features.disabled('auth')) { return Promise.resolve(); }
         var epoch = app.device.api.sessionEpoch();
         var cleanup = function () {
             if (epoch !== app.device.api.sessionEpoch()) { return; }
@@ -173,9 +179,17 @@
         return app.device.api.resources.logout().then(cleanup, cleanup);
     }
 
+    app.device.features.subscribe(function () {
+        if (app.device.features.disabled('auth')) { app.device.api.setToken(''); }
+        notify();
+    });
+
     app.device.auth = {
         hasToken: function hasToken() {
             return app.device.api.hasToken();
+        },
+        canManage: function canManage() {
+            return app.device.features.disabled('auth') || app.device.api.hasToken();
         },
         ensureSession: ensureSession,
         openLoginDialog: openLoginDialog,

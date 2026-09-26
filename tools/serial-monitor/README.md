@@ -23,4 +23,4 @@ Options:
 - `--seconds`: Monitoring duration in seconds; defaults to `8`
 - `--no-dtr`: Keep DTR low while monitoring
 
-The tool keeps RTS low by default to avoid an unexpected reset while monitoring.
+The tool configures DTR and RTS before opening the port and keeps RTS low by default. Some native USB or WSL USB passthrough paths can still reset the board when the port opens, even with `--no-dtr`. Use HTTP polling for uninterrupted sleep, wake, or panel cooldown measurements; opening a serial monitor can invalidate those measurements.

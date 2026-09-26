@@ -13,6 +13,7 @@
                     epaperStatus: function () { refreshCount++; return Promise.resolve(status); },
                     epaperUpload: function (blob) { uploadCount++; return Promise.resolve({state: 'queued'}); },
                     epaperRefresh: function () { throw new Error('upload must not append refresh'); }}}}};
+        app.device.features = harness.fullFeatures();
         var fakeWindow = {DitherApp: app, CompressionStream: window.CompressionStream,
             setTimeout: function (fn, delay) { timers.push({fn: fn, delay: delay}); return timers.length; },
             clearTimeout: function () {},

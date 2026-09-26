@@ -1,6 +1,6 @@
 # Serial Console Reference
 
-日期：2026-07-21
+日期：2026-09-27
 
 本文件說明如何透過 USB serial 操作裝置 console。REST endpoint 的 request／response 欄位與完整錯誤定義仍以 [SPEC_API_REFERENCE.md](SPEC_API_REFERENCE.md) 為準；firmware 內部責任與限制以 [SPEC_TECHNICAL.md](SPEC_TECHNICAL.md) 為準。
 
@@ -305,3 +305,11 @@ api POST /api/system/reset token=<token> {}
 ## Scan continuation
 
 `scan` 與 `api GET /api/wifi/scan token=<token>` 都將工作交給唯一非阻塞 scanner；等待時主 loop 繼續服務 Wi-Fi、HTTP 與 runtime。Serial 最後只輸出一次對應結果，請等待結果後再送下一條命令。API 仍使用原本 200 networks／錯誤 envelope，不新增 202 輪詢指令；完成前 token 失效時回 401。Scan request deadline 為 15 秒，driver stop ACK 另有 2 秒 cleanup 期限，未確認時不釋放 radio。輸入容量及 overflow 規則不變。
+
+## 選擇性編譯
+
+`console=0` 時不建立 serial API／human command adapter，Serial 啟動與診斷 log 仍可存在。`console=1` 時可用 `api GET /api/features` 查詢實際能力。
+
+`auth=0` 不提供 `session` command；原本受保護的 serial API 不要求 token，`config commit <group> [token=<token>]` 的 token 可省略。既有 `auth` staging group／`auth.password` key 保留共用 credential schema，commit 送至 `/api/wifi/ap/password`，只更新 AP 共用密碼。開啟 auth 時維持必須提供 token 與原 auth route。
+
+`user_files=0` 不註冊 `ls`／`stat`，help 亦不列出；`storage` command 仍顯示實際 Flash／app 分區資訊。裁切的 REST resource 在 serial dispatcher 同樣不存在，不以 console 繞過能力與 storage gate。設定方式見 [feature configuration](../config/README.md)。

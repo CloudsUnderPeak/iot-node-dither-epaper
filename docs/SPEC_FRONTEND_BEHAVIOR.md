@@ -283,3 +283,10 @@ Settings 只有有效 session 才可見，所有寫入或控制 request 都帶 B
 - 一般操作等待最多 10 秒、掃描最多 20 秒；Wi-Fi 切換確認每次請求最多 3 秒，整體仍最多 25 秒。逾時停止 busy feedback 並提供雙語重新連線／確認結果提示，保留尚未提交的 Wi-Fi 草稿。
 - Password、reset、Wi-Fi update 等寫入逾時代表結果未知，不自動重送；重新連線後先查狀態。逾時或離頁取消不當作認證失效，不清除 token；只有確認 unauthorized 才要求重新登入。
 - 切頁取消該頁自有請求，不顯示裝置故障，也不以晚到結果改寫已離開的畫面或較新的操作。共享的公開狀態查詢可繼續供其他 consumer 使用。
+
+## Feature capability adaptation
+
+- 內建管理頁先查公開 `/api/features`，再依有效能力顯示與操作。能力未知或讀取失敗不推定 auth 關閉；維持登入要求。Refresh 會重新讀能力再更新當前頁資源。
+- `auth=0` 設定頁直接可操作，不顯示登入／登出與 admin username；密碼頁與 AP 密碼提示改用 AP credential 文案，寫入 Wi-Fi AP password route。`auth=1` 保持原有 session 流程。
+- `mdns=0` 隱藏網路頁 `.local` 存取列；`storage=0` 隱藏 userdata 容量卡片，仍顯示 Flash／firmware app 空間。
+- 專案預設的 `user-web-project/` 亦讀同一能力 API：sleep／epaper 選單與操作依支援顯示，battery 與 userdata 卡片依支援顯示，mDNS 提示依支援顯示。離線後撤銷舊能力，重新連線再確認；不得沿用上一版韌體的 auth exemption 或功能狀態。支援只代表編入，操作還須符合原有 ready／busy／cooldown。

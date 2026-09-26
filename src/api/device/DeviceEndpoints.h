@@ -1,4 +1,5 @@
 #pragma once
+#include "core/ProjectFeatures.h"
 
 #include "api/shared/ApiTypes.h"
 #include "modules/config/ConfigService.h"
@@ -10,7 +11,9 @@
 namespace DeviceEndpoints {
 
 Api::Response get(const ConfigService &configService,
+                  #if IOT_FEATURE_BATTERY
                   const BatteryMonitor &batteryMonitor,
+#endif
                   const BootDiagnostics &bootDiagnostics,
                   const TimeSource *timeSource = nullptr);
 

@@ -345,6 +345,23 @@
   assert(state.scanNetworks === networksBeforeLeave, 'late abandoned scan changed shared state');
   window.fetch = originalFetch;
 
+  // A firmware with auth removed must expose AP credentials without a fake session.
+  state.features = { sleep: false, epaper: false, storage: false, auth: false,
+    user_files: false, mdns: false, battery: false, console: false };
+  setToken('');
+  DeviceConsole.app.router.navigate('settings', 'admin');
+  await waitFor(() => state.activePage === 'settings' && state.settingsPage === 'admin',
+    'auth-off settings remained behind the login dialog');
+  assert($('adminUsername').closest('label').hidden, 'auth-off settings exposed admin username');
+  assert($('passwordHeading').dataset.i18n === 'changeApPassword', 'auth-off password heading was not adapted');
+  assert($('apPasswordHint').dataset.i18n === 'useApPassword', 'auth-off AP credential hint was not adapted');
+  DeviceConsole.app.router.navigate('network');
+  await waitFor(() => state.activePage === 'network', 'feature-disabled network navigation failed');
+  assert($('networkMdns').closest('.endpoint-column').hidden, 'unsupported mDNS endpoint remained visible');
+  DeviceConsole.app.router.navigate('hardware');
+  await waitFor(() => state.activePage === 'hardware', 'feature-disabled hardware navigation failed');
+  assert($('hardwareStorageTotal').closest('article').hidden, 'unsupported userdata card remained visible');
+
   result.textContent = 'PASS';
 })().catch((error) => {
   document.getElementById('result').textContent = `FAIL: ${error.message}`;

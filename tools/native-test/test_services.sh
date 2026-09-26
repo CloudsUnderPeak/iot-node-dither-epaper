@@ -28,7 +28,7 @@ g++ -Itests/native/sleep_coordinator_stubs "${common[@]}" \
   src/modules/sleep/SleepRtcRecord.cpp src/modules/sleep/WakeClassifier.cpp \
   -o "$build_dir/sleep-coordinator-test"
 "$build_dir/sleep-coordinator-test"
-g++ "${common[@]}" -DENABLE_SLEEP_SCHEDULER=0 tests/native/RuntimeActionSchedulerTest.cpp \
+g++ "${common[@]}" -DIOT_FEATURE_SLEEP=0 tests/native/RuntimeActionSchedulerTest.cpp \
   src/modules/runtime/RuntimeActionScheduler.cpp src/modules/config/ConfigService.cpp \
   src/modules/config/model/DeviceConfig.cpp src/modules/config/model/DeviceConfigValidation.cpp \
   src/modules/config/model/StrictIpv4.cpp src/modules/wifi/WifiManager.cpp \

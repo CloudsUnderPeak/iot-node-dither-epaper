@@ -144,6 +144,7 @@
     setText('networkStaIp', sta.ip);
     setText('networkApName', ap.ssid || t('unavailable'));
     setText('networkApIp', ap.ip);
+    $('networkMdns').closest('.endpoint-column').hidden = featureDisabled('mdns');
     $('networkMdns').textContent = mdns;
     if (mdnsAvailable) $('networkMdns').href = mdns;
     else $('networkMdns').removeAttribute('href');

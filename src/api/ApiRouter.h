@@ -24,7 +24,7 @@
 #include "modules/wifi/WifiScanner.h"
 #include "modules/time/TimeSource.h"
 #include "modules/sleep/SleepFeatures.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "sleep/SleepEndpoints.h"
 #endif
 
@@ -34,16 +34,26 @@ struct ApiRouterDeps {
   WifiScanner &wifiScanner;
   const EmbeddedWebAssets &embeddedWebAssets;
   const FlashStorage &flashStorage;
+#if IOT_FEATURE_STORAGE
   UserDataStorage &userData;
+#endif
   StorageLifecycle &storageLifecycle;
+#if IOT_FEATURE_AUTH
   AuthService &authService;
+#endif
   RuntimeActionScheduler &runtime;
+#if IOT_FEATURE_EPAPER
   EpaperService &epaperService;
+#endif
+#if IOT_FEATURE_EPAPER
   EpaperCalibrationService &epaperCalibrationService;
+#endif
+#if IOT_FEATURE_BATTERY
   BatteryMonitor &batteryMonitor;
+#endif
   const BootDiagnostics &bootDiagnostics;
   TimeSource *timeSource = nullptr;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   SleepCoordinator *sleepCoordinator = nullptr;
 #endif
 };
@@ -177,10 +187,12 @@ class ApiRouter {
   BatteryMonitor *batteryMonitor_ = nullptr;
   const BootDiagnostics *bootDiagnostics_ = nullptr;
   TimeSource *timeSource_ = nullptr;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   SleepCoordinator *sleepCoordinator_ = nullptr;
 #endif
+#if IOT_FEATURE_AUTH
   AuthEndpoints authEndpoints_;
+#endif
   WifiEndpoints wifiEndpoints_;
   SystemEndpoints systemEndpoints_;
 

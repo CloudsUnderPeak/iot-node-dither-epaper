@@ -1,5 +1,5 @@
 #include "SleepFeatures.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "WakeClassifier.h"
 
 WakeMode classifyWake(bool deepSleepReset, WakeCause cause,

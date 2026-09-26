@@ -1,6 +1,6 @@
 #include "modules/sleep/SleepFeatures.h"
 
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "SleepEndpoints.h"
 
 #include <cstring>

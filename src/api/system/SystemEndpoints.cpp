@@ -2,7 +2,7 @@
 
 #include "api/shared/ApiResponse.h"
 #include "api/shared/JsonReader.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "modules/sleep/SleepCoordinator.h"
 #endif
 
@@ -32,7 +32,7 @@ Result SystemEndpoints::begin(ConfigService *configService,
                               StorageLifecycle *storageLifecycle,
                               RuntimeActionScheduler *runtime,
                               TimeSource *timeSource
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
                               , SleepCoordinator *sleepCoordinator
 #endif
                               ) {
@@ -43,7 +43,7 @@ Result SystemEndpoints::begin(ConfigService *configService,
   storageLifecycle_ = storageLifecycle;
   runtime_ = runtime;
   timeSource_ = timeSource;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   sleepCoordinator_ = sleepCoordinator;
 #endif
   return okResult();
@@ -65,7 +65,7 @@ Api::Response SystemEndpoints::updateTime(const Api::Request &request) {
   if (timeSource_ == nullptr) {
     return Api::problem(503, "runtime_unavailable", "system clock unavailable");
   }
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   if (sleepCoordinator_ && !sleepCoordinator_->beginTimeUpdate()) {
     return Api::problem(409, "sleep_entering", "sleep entry or clock update is in progress");
   }
@@ -159,6 +159,28 @@ Api::Response SystemEndpoints::update(const Api::Request &request) {
   data["wifi_tx_dbm"] = updated.wifiTxDbm;
   return Api::ok(Api::json(data), "system updated");
 }
+
+#if !IOT_FEATURE_AUTH
+Api::Response SystemEndpoints::updateApPassword(const Api::Request &request) {
+  JsonObjectConst root;
+  const Api::Response bodyResult = ApiRequest::requireObject(request, root);
+  if (!bodyResult.success) return bodyResult;
+  JsonDecodeError error;
+  JsonReader reader(root, "", error);
+  const char *password = reader.requiredString("password", "password is required");
+  reader.finish({"password"});
+  if (!error.ok()) return Api::decodeError(error);
+  const Result valid = validateAdminPasswordValue(password);
+  if (!valid.ok()) return Api::problem(400, "invalid_field", valid.message, "password");
+  DeviceConfig committed;
+  const Result saved = configService_->updateAdminPassword(password, &committed, runtime_->ready());
+  if (saved.code == ResultCode::Unsupported)
+    return Api::problem(503, "runtime_unavailable", saved.message);
+  if (!saved.ok()) return Api::problem(500, "storage_error", saved.message);
+  if (committed.apPasswordEnabled) runtime_->scheduleSystemReset(300);
+  return Api::ok("{}", "AP password updated");
+}
+#endif
 
 Api::Response SystemEndpoints::reset(StorageResetScope scope) {
   if (!runtime_->ready()) {

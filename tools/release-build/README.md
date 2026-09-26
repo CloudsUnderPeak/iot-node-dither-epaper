@@ -54,7 +54,7 @@ make flash PORT=/dev/ttyACM0
 make flash PORT=/dev/ttyACM0 IMAGE=build/20260726_0428/firmware.img
 ```
 
-`make esp` rejects demo web. `SLEEP` accepts only `0` or `1` and controls `ENABLE_SLEEP_SCHEDULER`; it must not be injected through extra PlatformIO flags. Manifest schema 6 records `sleep_scheduler` and verification checks it against the selected build. Verification is workspace-coupled: the selected
+`make esp` rejects demo web. `FEATURES` selects the INI feature profile; `SLEEP` accepts only `0` or `1` and overrides its sleep selection. The generated `IOT_FEATURE_SLEEP` is the sole C/C++ sleep compile switch; feature macros must not be injected through extra PlatformIO flags. Manifest schema 7 records all eight `features`, their configuration hash, and the compatible `sleep_scheduler` field; verification checks them against the selected build. Verification is workspace-coupled: the selected
 `firmware.img` must remain beside its `binary/`, `web/`, and
 `web-manifest.json`. It verifies image hashes and offsets, protected user
 partition ranges, web/firmware metadata, flat archive contents, and package
@@ -66,6 +66,6 @@ make clean      # remove latest/transient output, preserve timestamp snapshots
 make clean all  # also remove all timestamp snapshots
 ```
 
-The root `VERSION` contains `0.8.0`; manifests use that same firmware/web
-version and display releases as `v0.8.0`. Local dirty builds are allowed and
+The root `VERSION` contains `0.9.0`; manifests use that same firmware/web
+version and display releases as `v0.9.0`. Local dirty builds are allowed and
 recorded. CI builds reject a dirty worktree.

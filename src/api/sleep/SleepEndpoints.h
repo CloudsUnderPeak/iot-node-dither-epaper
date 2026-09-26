@@ -2,7 +2,7 @@
 
 #include "modules/sleep/SleepFeatures.h"
 
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "api/shared/ApiTypes.h"
 #include "modules/sleep/SleepCoordinator.h"
 

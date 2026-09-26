@@ -39,6 +39,7 @@
             var value = input.value.trim();
             var dirty = value !== baseline;
             var valid = HOSTNAME_PATTERN.test(value);
+            preview.hidden = !app.device.features.supports('mdns');
             preview.textContent = t('hostnamePreview', { hostname: valid ? value : baseline || '…' });
             saveButton.disabled = busy || !dirty || !valid;
         }
@@ -55,7 +56,7 @@
                     input.value = baseline;
                     updateAvailability();
                     // mDNS 重新套用期間連線可能短暫中斷；訊息需保留脈絡，不自動消失。
-                    notice.set(t('hostnameSaved'), { sticky: true });
+                    notice.set(t(app.device.features.disabled('mdns') ? 'hostnameSavedNoMdns' : 'hostnameSaved'), { sticky: true });
                 },
                 function (error) {
                     busy = false;
@@ -142,7 +143,7 @@
                     // 成功後 session 已被裝置作廢；訊息放在頁層 notice，
                     // 讓 auth 重新渲染鎖定卡後仍可見。
                     pageNotice.set(
-                        t(apPasswordEnabled ? 'passwordChangedRestarting' : 'passwordChanged'),
+                        t(app.device.features.disabled('auth') ? (apPasswordEnabled ? 'apPasswordChangedRestarting' : 'apPasswordChanged') : (apPasswordEnabled ? 'passwordChangedRestarting' : 'passwordChanged')),
                         { sticky: true }
                     );
                     app.device.auth.invalidateSession();
@@ -158,7 +159,7 @@
         return app.utils.dom.el('section', {
             className: 'panel-section device-gate',
             children: [
-                app.utils.dom.el('h2', { text: t('passwordCardTitle') }),
+                app.utils.dom.el('h2', { text: t(app.device.features.disabled('auth') ? 'apPasswordCardTitle' : 'passwordCardTitle') }),
                 app.utils.dom.el('div', {
                     className: 'panel-body device-card-body',
                     children: [
@@ -296,7 +297,7 @@
                 if (!self.mounted) {
                     return;
                 }
-                if (!app.device.auth.hasToken()) {
+                if (!app.device.auth.canManage()) {
                     renderLocked();
                     return;
                 }

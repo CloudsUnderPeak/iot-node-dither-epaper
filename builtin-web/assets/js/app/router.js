@@ -46,6 +46,9 @@
     const version = routeVersion + 1;
     routeVersion = version;
     const route = routeFromHash();
+    if (route.page === 'settings' && !state.features) {
+      try { await refreshFeatures(); } catch (error) { /* Keep authentication required. */ }
+    }
     if (route.page === 'settings' && !sessionKnown && !(await verifySession())) {
       if (version !== routeVersion) return;
       state.pendingHash = window.location.hash || '#/settings/wifi';

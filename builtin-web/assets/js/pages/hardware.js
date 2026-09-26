@@ -183,6 +183,7 @@
 
   function render() {
     if (!$('page-hardware') || !state.device || !state.storage) return;
+    $('hardwareStorageTotal').closest('article').hidden = featureDisabled('storage');
     const device = state.device;
     const flash = state.storage.flash || {};
     const fixedRegions = flash.fixed_regions || {};

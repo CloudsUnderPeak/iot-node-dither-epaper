@@ -14,12 +14,16 @@ import re
 import shlex
 import shutil
 import subprocess
+import struct
 import sys
 import tarfile
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build-config"))
+from features import resolve as resolve_features, materialize, config_hash, NAMES
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +43,8 @@ SUPPORTED_UPLOAD_BAUD = 460800
 SUPPORTED_FLASH_MODE = "dio"
 SUPPORTED_FLASH_FREQUENCY = "80m"
 SUPPORTED_FLASH_SIZE = "detect"
-MANIFEST_SCHEMA = 6
+MANIFEST_SCHEMA = 7
+NO_STORAGE_APP_SIZE = 0x3D8000
 PRODUCT = "iot-node-bedrock"
 APP_OFFSET = 0x10000
 APP_SIZE = 0x1F0000
@@ -73,7 +78,8 @@ def main() -> int:
         help="Build firmware from existing production build/latest/web.",
     )
     add_pio_options(build_parser)
-    build_parser.add_argument("--sleep", choices=("0", "1"), default="1")
+    build_parser.add_argument("--sleep", choices=("0", "1"), default=None)
+    build_parser.add_argument("--features", default="config/features.ini")
 
     verify_parser = subparsers.add_parser(
         "verify",
@@ -108,7 +114,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.command == "build":
-            build_release(args.pio, args.environment, int(args.sleep))
+            build_release(args.pio, args.environment, int(args.sleep) if args.sleep is not None else None, args.features)
         elif args.command == "verify":
             verify_release(args.image)
         elif args.command == "clean":
@@ -136,7 +142,15 @@ def add_pio_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def sleep_project_config(environment: str, sleep: int) -> tuple[Path, dict]:
+def feature_identity_defaults():
+    config = resolve_features()
+    return {"features": config["features"], "feature_config_sha256": config_hash(config),
+            "partition_layout_id": "userdata-v1", "sleep_scheduler": config["features"]["sleep"],
+            "sleep_idle_timeout_seconds": config["sleep"]["idle_timeout_seconds"],
+            "sleep_ignore_usb_host": bool(config["sleep"]["ignore_usb_host"])}
+
+
+def sleep_project_config(environment: str, sleep: int | None, features: str = "config/features.ini") -> tuple[Path, dict]:
     parser = configparser.ConfigParser(interpolation=None)
     if not parser.read(PLATFORMIO_CONFIG, encoding="utf-8"):
         raise ReleaseError("platformio.ini is missing")
@@ -144,34 +158,33 @@ def sleep_project_config(environment: str, sleep: int) -> tuple[Path, dict]:
     if not parser.has_section(section):
         raise ReleaseError(f"PlatformIO environment is missing: {environment}")
     flags = parser.get(section, "build_flags", fallback="")
-
-    def option(name: str, default: int) -> int:
-        matches = re.findall(rf"(?:^|\s)-D\s*{name}(?:\s*=\s*|\s+)(\d+)(?=\s|$)", flags)
-        if len(matches) > 1:
-            raise ReleaseError(f"duplicate {name} build flag")
-        return int(matches[0]) if matches else default
-
-    if re.search(r"(?:^|\s)-D\s*ENABLE_SLEEP_SCHEDULER(?:\s|=|$)", flags):
-        raise ReleaseError("ENABLE_SLEEP_SCHEDULER is controlled by --sleep")
-    idle = option("SLEEP_IDLE_TIMEOUT_SECONDS", 1800)
-    ignore_usb = option("SLEEP_IGNORE_USB_HOST", 0)
-    if not 1 <= idle <= 86400 or ignore_usb not in (0, 1):
-        raise ReleaseError("invalid sleep build flags")
-    parser.set(section, "build_flags", flags + f"\n-D ENABLE_SLEEP_SCHEDULER={sleep}")
+    if any(name in flags for name in ("IOT_FEATURE_", "SLEEP_IDLE_TIMEOUT_SECONDS", "SLEEP_IGNORE_USB_HOST")):
+        raise ReleaseError("feature macros are controlled by the feature configuration")
+    try:
+        config = resolve_features(ROOT / features, sleep)
+    except (ValueError, configparser.Error) as error:
+        raise ReleaseError(str(error)) from error
+    feature_dir = materialize(config, ROOT / ".pio/feature-config" / config_hash(config))
+    parser.set(section, "custom_features", str(feature_dir / "effective-features.ini"))
+    parser.set(section, "custom_sleep", str(int(config["features"]["sleep"])))
+    parser.set(section, "board_build.partitions", str(feature_dir / "partitions.csv"))
     GENERATED_OUTPUT.mkdir(parents=True, exist_ok=True)
-    output = GENERATED_OUTPUT / "platformio-sleep.ini"
+    output = GENERATED_OUTPUT / "platformio-features.ini"
     with output.open("w", encoding="utf-8") as stream:
         parser.write(stream)
     return output, {
-        "sleep_scheduler": bool(sleep),
-        "sleep_idle_timeout_seconds": idle,
-        "sleep_ignore_usb_host": bool(ignore_usb),
+        "features": config["features"],
+        "feature_config_sha256": config_hash(config),
+        "partition_layout_id": "userdata-v1" if config["features"]["storage"] else "app-only-v1",
+        "sleep_scheduler": config["features"]["sleep"],
+        "sleep_idle_timeout_seconds": config["sleep"]["idle_timeout_seconds"],
+        "sleep_ignore_usb_host": bool(config["sleep"]["ignore_usb_host"]),
     }
 
 
-def build_release(pio: str, environment: str, sleep: int = 1) -> Path:
+def build_release(pio: str, environment: str, sleep: int | None = None, features: str = "config/features.ini") -> Path:
     require_supported_environment(environment)
-    if sleep not in (0, 1):
+    if sleep is not None and sleep not in (0, 1):
         raise ReleaseError("sleep must be 0 or 1")
     web_manifest = require_web_input()
     dirty = git_dirty()
@@ -182,7 +195,7 @@ def build_release(pio: str, environment: str, sleep: int = 1) -> Path:
     stage = Path(tempfile.mkdtemp(prefix=".release-stage-", dir=BUILD_ROOT))
     try:
         generate_embedded_web_header(web_manifest)
-        sleep_config, identity = sleep_project_config(environment, sleep)
+        sleep_config, identity = sleep_project_config(environment, sleep, features)
         run_command([*pio_command(pio), "run", "-d", str(ROOT),
                      "-c", str(sleep_config), "-e", environment])
 
@@ -401,10 +414,13 @@ def collect_images(
     framework_dir = core_dir / "packages/framework-arduinoespressif32"
     pio_build_dir = ROOT / ".pio/build" / environment
     config = environment_config(environment)
-    partition_csv = resolve_partition_csv(framework_dir, config["partitions"])
+    identity = sleep_identity or feature_identity_defaults()
+    partition_csv = ROOT / ".pio/feature-config" / identity["feature_config_sha256"] / "partitions.csv"
+    if not partition_csv.is_file():
+        partition_csv = resolve_partition_csv(framework_dir, config["partitions"])
     partitions = parse_partitions(partition_csv)
     app_partition = find_partition(partitions, subtype="ota_0")
-    user_data_partition = find_named_partition(partitions, "userdata")
+    user_data_partition = find_named_partition(partitions, "userdata") if identity["features"]["storage"] else None
     user_nvs_partition = find_named_partition(partitions, "user_nvs")
     validate_partition_layout(
         app_partition,
@@ -459,9 +475,7 @@ def collect_images(
         "created_at": datetime.now(TAIPEI).isoformat(),
         "git_commit": git_commit(),
         "git_dirty": dirty,
-        **(sleep_identity or {"sleep_scheduler": True,
-                              "sleep_idle_timeout_seconds": 1800,
-                              "sleep_ignore_usb_host": False}),
+        **identity,
         "environment": environment,
         "board": config["board"],
         "chip": str(board["build"]["mcu"]).lower(),
@@ -484,10 +498,10 @@ def collect_images(
         "web": web_manifest["web"],
         "web_process": web_manifest["web_process"],
         "web_sha256": web_manifest["web_sha256"],
-        "user_data_partition": user_data_partition["name"],
-        "user_data_offset": user_data_partition["offset"],
-        "user_data_size": user_data_partition["size"],
-        "user_data_reserve_bytes": 64 * 1024,
+        "user_data_partition": user_data_partition["name"] if user_data_partition else None,
+        "user_data_offset": user_data_partition["offset"] if user_data_partition else None,
+        "user_data_size": user_data_partition["size"] if user_data_partition else None,
+        "user_data_reserve_bytes": 64 * 1024 if user_data_partition else 0,
         "user_nvs_partition": user_nvs_partition["name"],
         "user_nvs_offset": user_nvs_partition["offset"],
         "user_nvs_size": user_nvs_partition["size"],
@@ -501,24 +515,25 @@ def collect_images(
 
 def validate_partition_layout(
     app_partition: dict[str, int | str],
-    user_data_partition: dict[str, int | str],
+    user_data_partition: dict[str, int | str] | None,
     user_nvs_partition: dict[str, int | str],
 ) -> None:
     if (
         app_partition["name"] != "app0"
         or app_partition["offset"] != APP_OFFSET
-        or app_partition["size"] != APP_SIZE
+        or app_partition["size"] != (APP_SIZE if user_data_partition else NO_STORAGE_APP_SIZE)
     ):
-        raise ReleaseError("application partition must consume 0x10000-0x200000")
-    if user_data_partition["subtype"] != "spiffs":
-        raise ReleaseError(
-            "user-data partition must use the LittleFS-compatible spiffs subtype"
-        )
-    if (
-        user_data_partition["offset"] != USER_DATA_OFFSET
-        or user_data_partition["size"] != USER_DATA_SIZE
-    ):
-        raise ReleaseError("userdata partition must consume 0x200000-0x3e8000")
+        raise ReleaseError("application partition does not match the selected storage layout")
+    if user_data_partition is not None:
+        if user_data_partition["subtype"] != "spiffs":
+            raise ReleaseError(
+                "user-data partition must use the LittleFS-compatible spiffs subtype"
+            )
+        if (
+            user_data_partition["offset"] != USER_DATA_OFFSET
+            or user_data_partition["size"] != USER_DATA_SIZE
+        ):
+            raise ReleaseError("userdata partition must consume 0x200000-0x3e8000")
     if (
         user_nvs_partition["subtype"] != "nvs"
         or user_nvs_partition["offset"] != USER_NVS_OFFSET
@@ -603,6 +618,7 @@ def verify_snapshot(snapshot_root: Path, image_path: Path) -> dict:
     web_manifest = read_json(web_manifest_path, "web manifest")
     verify_manifest_metadata(manifest, web_manifest, web_root)
     verify_images(manifest, binary_root)
+    verify_partition_binary(manifest, binary_root)
     verify_package(image_path, binary_root)
     return manifest
 
@@ -612,8 +628,24 @@ def verify_manifest_metadata(
     web_manifest: dict,
     web_root: Path,
 ) -> None:
-    if manifest.get("schema") != MANIFEST_SCHEMA:
+    if manifest.get("schema") not in (6, MANIFEST_SCHEMA):
         raise ReleaseError("unsupported release manifest schema")
+    if manifest.get("schema") == MANIFEST_SCHEMA:
+        features = manifest.get("features")
+        if not isinstance(features, dict) or set(features) != set(NAMES) or any(type(value) is not bool for value in features.values()):
+            raise ReleaseError("invalid release features")
+        if (features["epaper"] or features["user_files"]) and not features["storage"]:
+            raise ReleaseError("invalid release feature dependencies")
+        config = {"features": features, "sleep": {
+            "idle_timeout_seconds": manifest.get("sleep_idle_timeout_seconds"),
+            "ignore_usb_host": int(bool(manifest.get("sleep_ignore_usb_host")))}}
+        if manifest.get("feature_config_sha256") != config_hash(config) or manifest.get("sleep_scheduler") != features["sleep"]:
+            raise ReleaseError("release feature identity mismatch")
+        expected_layout = "userdata-v1" if features["storage"] else "app-only-v1"
+        if manifest.get("partition_layout_id") != expected_layout:
+            raise ReleaseError("release partition layout identity mismatch")
+    else:
+        features = {"storage": True}
     if manifest.get("product") != PRODUCT:
         raise ReleaseError("release manifest has an invalid product")
     if type(manifest.get("sleep_scheduler")) is not bool or \
@@ -683,7 +715,7 @@ def verify_manifest_metadata(
     if (
         manifest.get("app_partition") != "app0"
         or app_start != APP_OFFSET
-        or app_size != APP_SIZE
+        or app_size != (APP_SIZE if features["storage"] else NO_STORAGE_APP_SIZE)
         or not isinstance(firmware_size, int)
         or firmware_size <= 0
         or firmware_size > app_size
@@ -692,10 +724,10 @@ def verify_manifest_metadata(
     ):
         raise ReleaseError("release manifest has an invalid application layout")
     if (
-        manifest.get("user_data_partition") != "userdata"
-        or manifest.get("user_data_offset") != USER_DATA_OFFSET
-        or manifest.get("user_data_size") != USER_DATA_SIZE
-        or manifest.get("user_data_reserve_bytes") != 64 * 1024
+        manifest.get("user_data_partition") != ("userdata" if features["storage"] else None)
+        or manifest.get("user_data_offset") != (USER_DATA_OFFSET if features["storage"] else None)
+        or manifest.get("user_data_size") != (USER_DATA_SIZE if features["storage"] else None)
+        or manifest.get("user_data_reserve_bytes") != (64 * 1024 if features["storage"] else 0)
     ):
         raise ReleaseError("release manifest has an invalid user-data layout")
     if (
@@ -704,6 +736,43 @@ def verify_manifest_metadata(
         or manifest.get("user_nvs_size") != USER_NVS_SIZE
     ):
         raise ReleaseError("release manifest has an invalid user NVS layout")
+
+
+def verify_partition_binary(manifest: dict, binary_root: Path) -> None:
+    if manifest.get("schema") < 7:
+        return
+    raw = (binary_root / "partitions.bin").read_bytes()
+    partitions = {}
+    md5_offset = None
+    for offset in range(0, len(raw) - 31, 32):
+        entry = raw[offset:offset + 32]
+        magic = struct.unpack_from("<H", entry)[0]
+        if magic == 0xEBEB:
+            md5_offset = offset
+            if entry[16:] != hashlib.md5(raw[:offset]).digest():
+                raise ReleaseError("partition table checksum mismatch")
+            break
+        if magic != 0x50AA:
+            raise ReleaseError("invalid partition table entry")
+        _, kind, subtype, start, size, label, flags = struct.unpack("<HBBII16sI", entry)
+        try:
+            name = label.split(b"\0", 1)[0].decode("ascii")
+        except UnicodeDecodeError as error:
+            raise ReleaseError("invalid partition label") from error
+        if name in partitions or flags:
+            raise ReleaseError("invalid partition table label or flags")
+        partitions[name] = (kind, subtype, start, size)
+    if md5_offset is None or any(value != 0xFF for value in raw[md5_offset + 32:]):
+        raise ReleaseError("partition table checksum or padding is missing")
+    storage = manifest["features"]["storage"]
+    expected = {"nvs": (1, 2, 0x9000, 0x5000), "otadata": (1, 0, 0xE000, 0x2000),
+                "app0": (0, 0x10, APP_OFFSET, APP_SIZE if storage else NO_STORAGE_APP_SIZE),
+                "user_nvs": (1, 2, USER_NVS_OFFSET, USER_NVS_SIZE),
+                "coredump": (1, 3, 0x3F0000, 0x10000)}
+    if storage:
+        expected["userdata"] = (1, 0x82, USER_DATA_OFFSET, USER_DATA_SIZE)
+    if partitions != expected:
+        raise ReleaseError("partition binary does not match release feature layout")
 
 
 def verify_images(manifest: dict, binary_root: Path) -> None:

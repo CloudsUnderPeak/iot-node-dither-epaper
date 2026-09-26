@@ -1,5 +1,5 @@
 #include "SleepFeatures.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "ArduinoSleepDriver.h"
 
 #include <Arduino.h>

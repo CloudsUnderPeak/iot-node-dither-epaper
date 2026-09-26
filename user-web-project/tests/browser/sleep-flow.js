@@ -16,7 +16,7 @@
             noteSuccess: function () {}, noteRequestFailure: function () {}
         };
         app.device.auth = {
-            hasToken: function () { return true; },
+            canManage: function () { return true; },
             subscribe: function (listener) { authListener = listener; },
             ensureSession: function () { return Promise.resolve(true); },
             createLockedCard: function () { return document.createElement('div'); }
@@ -29,6 +29,16 @@
             sleepNow: function () { return Promise.resolve({ sleep_request: { state: 'pending', error_code: null } }); },
             systemTime: function () { return Promise.resolve({ epoch: 1790067600, synced: true, source: 'client' }); }
         } };
+        var featureValues = null;
+        app.device.features = {
+            known: function () { return featureValues !== null; },
+            supports: function (name) { return !!(featureValues && featureValues[name]); },
+            subscribe: function () {},
+            refresh: function () {
+                var pending = harness.deferred(); deviceCalls.push(pending);
+                return pending.promise.then(function (data) { featureValues = data.features; });
+            }
+        };
         app.device.errorText = function (error) { return error.message; };
         var originalInterval = window.setInterval;
         var originalClear = window.clearInterval;
@@ -48,7 +58,7 @@
             app.device.sleep.start();
             harness.assert(deviceCalls.length === 1 && timerCalls.filter(function (x) { return x.ms === 15000; }).length === 1,
                 'one capability request and one polling timer');
-            deviceCalls.shift().resolve({ features: { sleep_scheduler: true }, time: sample.time });
+            deviceCalls.shift().resolve({ features: { sleep: true }, time: sample.time });
             await Promise.resolve(); await Promise.resolve();
             harness.assert(statusCalls.length === 1, 'supported capability starts sleep status');
             statusCalls.shift().resolve(sample);
@@ -75,7 +85,7 @@
             harness.assert(statusCalls.length === 1, 'status refresh uses one request');
             liveState = 'offline'; liveListener('offline');
             liveState = 'online'; liveListener('online');
-            deviceCalls.shift().resolve({ features: { sleep_scheduler: true }, time: sample.time });
+            deviceCalls.shift().resolve({ features: { sleep: true }, time: sample.time });
             await Promise.resolve(); await Promise.resolve();
             harness.assert(statusCalls.length === 2,
                 'reconnect starts a fresh status request while stale request is pending');
@@ -89,7 +99,7 @@
                 'fresh reconnect response becomes authoritative');
             liveState = 'offline'; liveListener('offline');
             liveState = 'online'; liveListener('online');
-            deviceCalls.shift().resolve({ features: { sleep_scheduler: false }, time: sample.time });
+            deviceCalls.shift().resolve({ features: { sleep: false }, time: sample.time });
             await Promise.resolve(); await Promise.resolve();
             harness.assert(!app.device.sleep.snapshot().supported, 'explicit false hides sleep feature');
             passed.push('Offline invalidates stale responses, reconnect refreshes, and false hides sleep');

@@ -5,10 +5,17 @@
 
 namespace StorageEndpoints {
 
-Api::Response get(const FlashStorage &flashStorage,
-                  const UserDataStorage &userData) {
+Api::Response get(const FlashStorage &flashStorage
+#if IOT_FEATURE_STORAGE
+                  , const UserDataStorage &userData
+#endif
+) {
   const FlashStorageSnapshot flash = flashStorage.snapshot();
+#if IOT_FEATURE_STORAGE
   const UploadCapacity userCapacity = userData.uploadCapacity();
+#else
+  const UploadCapacity userCapacity{};
+#endif
   JsonDocument data;
 
   JsonObject flashObject = data["flash"].to<JsonObject>();
@@ -37,15 +44,21 @@ Api::Response get(const FlashStorage &flashStorage,
   appCapacity["available_bytes"] = flash.app.availableBytes;
 
   JsonObject user = data["user"].to<JsonObject>();
+#if IOT_FEATURE_STORAGE
   user["partition_id"] = "userdata";
   user["filesystem"] = "littlefs";
   user["mounted"] = userData.mounted();
+#else
+  user["partition_id"] = nullptr;
+  user["filesystem"] = nullptr;
+  user["mounted"] = false;
+#endif
 
   JsonObject userCapabilities = user["capabilities"].to<JsonObject>();
-  userCapabilities["file_upload"] = true;
-  userCapabilities["file_list"] = true;
-  userCapabilities["file_download"] = true;
-  userCapabilities["file_delete"] = true;
+  userCapabilities["file_upload"] = IOT_FEATURE_USER_FILES != 0;
+  userCapabilities["file_list"] = IOT_FEATURE_USER_FILES != 0;
+  userCapabilities["file_download"] = IOT_FEATURE_USER_FILES != 0;
+  userCapabilities["file_delete"] = IOT_FEATURE_USER_FILES != 0;
 
   JsonObject uploadCapacity = user["capacity"].to<JsonObject>();
   uploadCapacity["total_bytes"] = userCapacity.totalBytes;

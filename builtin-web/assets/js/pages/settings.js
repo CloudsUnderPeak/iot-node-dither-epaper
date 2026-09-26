@@ -238,7 +238,7 @@
         translated('span', 'protectAp', 'Protect AP', { id: 'protectApLabel' }),
         el('span', {
           children: [
-            translated('small', 'useAdminPassword', 'Use admin password'),
+            translated('small', 'useAdminPassword', 'Use admin password', { id: 'apPasswordHint' }),
             el('input', {
               id: 'apPasswordEnabled',
               className: 'switch',
@@ -367,7 +367,7 @@
       children: [
         el('header', {
           className: 'panel-head',
-          children: [translated('h2', 'changePassword', 'Change password')]
+          children: [translated('h2', 'changePassword', 'Change password', { id: 'passwordHeading' })]
         }),
         field(
           translated('span', 'username', 'Username'),
@@ -495,6 +495,21 @@
     });
   }
 
+  function syncFeatureControls() {
+    const noAuth = featureDisabled('auth');
+    if ($('adminUsername')) $('adminUsername').closest('label').hidden = noAuth;
+    const changes = [
+      [$('apPasswordHint'), noAuth ? 'useApPassword' : 'useAdminPassword'],
+      [$('passwordHeading'), noAuth ? 'changeApPassword' : 'changePassword'],
+      [document.querySelector('[data-settings-page="admin"] span'), noAuth ? 'apPassword' : 'admin']
+    ];
+    changes.forEach(([node, key]) => {
+      if (!node) return;
+      node.dataset.i18n = key;
+      node.textContent = t(key);
+    });
+  }
+
   const page = {
     id: 'settings',
     titleKey: 'settings',
@@ -510,6 +525,7 @@
       if (state.wifi) fillWifiForm(state.wifi);
       if (state.device) fillSystemForm(state.device);
       syncAdminUsername();
+      syncFeatureControls();
       this.onRouteChange(context.route);
     },
 
@@ -522,6 +538,7 @@
       if (state.wifi && !wifiFormHasChanges()) fillWifiForm(state.wifi);
       if (state.device && !systemFormHasChanges()) fillSystemForm(state.device);
       syncAdminUsername();
+      syncFeatureControls();
     },
 
     unmount() {

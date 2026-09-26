@@ -304,6 +304,7 @@
     }
 
     function applyStatus(status) {
+        if (!app.device.features.supports('epaper')) { return null; }
         state.status = status || null;
         if (!status) {
             notify();
@@ -407,6 +408,21 @@
     }
 
     function probe() {
+        if (!app.device.features.known()) {
+            return app.device.features.refresh().then(function () {
+                return app.device.features.known() ? probe() : false;
+            });
+        }
+        if (app.device.features.disabled('epaper')) {
+            if (state.operation.active) { failOperation(state.operation.runId, makeError('feature_unsupported')); }
+            state.mode = 'standalone';
+            state.discovery = 'unsupported';
+            state.capabilities = null;
+            state.target = null;
+            state.status = null;
+            notify();
+            return Promise.resolve(false);
+        }
         if (app.device.live.state() !== 'online') {
             return Promise.resolve(false);
         }
@@ -417,6 +433,7 @@
         notify();
         discoveryRequest = app.device.api.resources.epaperCapabilities()
             .then(function (capabilities) {
+                if (!app.device.features.supports('epaper')) { return false; }
                 var target;
                 try { target = app.core.epaperTarget.fromCapabilities(capabilities); }
                 catch (error) { throw makeError('epaper_unsupported', app.i18n.t('epaperErrorUnsupported')); }
@@ -582,7 +599,8 @@
 
     function canDraw() {
         return Boolean(
-            isSupported()
+            app.device.features.supports('epaper')
+            && isSupported()
             && app.device.live.state() === 'online'
             && !state.operation.active
             && state.cooldownRemainingSeconds === 0
@@ -595,6 +613,7 @@
             return;
         }
         started = true;
+        app.device.features.subscribe(function () { probe(); });
         liveUnsubscribe = app.device.live.subscribe(function (liveState) {
             if (liveState === 'online') {
                 probe();

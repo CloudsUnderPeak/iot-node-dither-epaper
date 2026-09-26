@@ -216,3 +216,12 @@ builtin-web/
 - Router 每次 route generation 旋轉頁面自有 AbortController，取消頁面 mutation／scan／session verification；完成後仍檢查 signal／既有 generation，避免 stale DOM/state 更新。共享 ResourceStore 請求不附頁面 signal，仍由 resource version 控制提交。
 - Wi-Fi safe transition 保留 25 秒整體 deadline；每次 status timeout 為 `min(3 秒, remaining)`，poll sleep 也不超過 remaining 且可取消。到期不發新 request，草稿保留；cancel 不顯示裝置故障。
 - CSS minifier 只壓縮辨識安全的頂層空白，保留宣告 block、函式、字串、escape、URL、custom property 和 comment 內容。Production gzip 與來源 CSS 的 CSSOM／指定 computed style 必須以共用語意 fixture 驗證；不能只以 gzip/hash 成功代表語意正確。
+
+## Compile-time feature client
+
+- `builtin-web/assets/js/modules/features.js` 保存固定八個 boolean 與 single-flight discovery；bootstrap／settings admission／手動 Refresh 共用，能力未知仍沿用 auth 檢查。Settings render 依能力更新 username、密碼文案與登出狀態，Network／Hardware render 隱藏不支援的資訊。
+- `user-web-project/src/device/device-features.js` 是共用 registry：初次、online 與可見頁面的 30 秒背景刷新，驗證完整 boolean response，offline 清空值並增加 generation；舊 response 不能恢復已撤銷能力。依賴模組訂閱變更，unmount 解除頁面訂閱。
+- API client 對明確 disabled 的 sleep、epaper、user_files、auth resource 在送出前回本地 `feature_unsupported`，不發 transport。此碼是 client guard，不是新增 firmware error code。Feature unknown 不等於 disabled。
+- `device-auth.hasToken()` 只反映真實本地 token；`canManage()` 在確認 auth disabled 時允許管理操作，`ensureSession()` 不呼叫不存在的 session API，不產生假 token。Logout 隱藏；改密碼使用 `/api/wifi/ap/password`。AUTH enabled／未知維持原本驗證。
+- Epaper discovery 先確認 compile capability，再讀原本 panel/format/capabilities；不支援時取消舊 client operation、settle waiter 並關閉 draw admission。Sleep discovery 同樣使用 registry；Client time sync 與原有 operation readiness 仍維持。
+- 測試涵蓋 discovery single-flight、offline／late response、auth-off 無 token 操作、unsupported action 無 request、選單與卡片隱藏；source、production 與 demo 仍由各自原有 runner 驗證。

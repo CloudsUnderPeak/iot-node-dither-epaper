@@ -1,12 +1,21 @@
 #include "ApiRouter.h"
 
 #include "device/DeviceEndpoints.h"
+#include "features/FeaturesEndpoints.h"
 #include "shared/ApiResponse.h"
 #include "storage/StorageEndpoints.h"
 #include "web/WebEndpoints.h"
 #include <cstring>
 
 const ApiRouter::Route ApiRouter::kRoutes_[] = {
+    {Api::Method::Get, "/api/features",
+     +[](ApiRouter &, const Api::Request &request, const char *) { return FeaturesEndpoints::get(request); },
+     HttpBinding::Query, RouteMatch::Exact, RouteAccess::Public},
+#if !IOT_FEATURE_AUTH
+    {Api::Method::Put, "/api/wifi/ap/password",
+     +[](ApiRouter &router, const Api::Request &request, const char *) { return router.systemEndpoints_.updateApPassword(request); },
+     HttpBinding::JsonBody},
+#endif
     {Api::Method::Get, "/api/alive",
      +[](ApiRouter &, const Api::Request &, const char *) {
        return AliveEndpoints::get();
@@ -15,7 +24,9 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
     {Api::Method::Get, "/api/device",
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return DeviceEndpoints::get(*router.configService_,
+#if IOT_FEATURE_BATTERY
                                    *router.batteryMonitor_,
+#endif
                                    *router.bootDiagnostics_,
                                    router.timeSource_);
      },
@@ -27,14 +38,21 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
      HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
     {Api::Method::Get, "/api/storage",
      +[](ApiRouter &router, const Api::Request &, const char *) {
-       return StorageEndpoints::get(*router.flashStorage_, *router.userData_);
+       return StorageEndpoints::get(*router.flashStorage_
+#if IOT_FEATURE_STORAGE
+                                   , *router.userData_
+#endif
+                                   );
      },
      HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+#if IOT_FEATURE_USER_FILES
     {Api::Method::Get, "/api/storage/files",
      +[](ApiRouter &router, const Api::Request &request, const char *) {
        return UserFileEndpoints::list(request, *router.userData_);
      },
      HttpBinding::Query},
+#endif
+#if IOT_FEATURE_EPAPER
     {Api::Method::Get, "/api/epaper",
      +[](ApiRouter &, const Api::Request &request, const char *) {
        return EpaperEndpoints::capabilities(request);
@@ -100,12 +118,20 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
            request, *router.epaperService_, EpaperDrawAction::Palette);
      },
      HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+#endif
     {Api::Method::Get, "/api/runtime/status",
      +[](ApiRouter &router, const Api::Request &request, const char *) {
        return RuntimeEndpoints::status(
-           request, *router.epaperService_, *router.runtimeActions_);
+           request,
+#if IOT_FEATURE_EPAPER
+           *router.epaperService_,
+#else
+           *router.bootDiagnostics_,
+#endif
+           *router.runtimeActions_);
      },
      HttpBinding::NoBody, RouteMatch::Exact, RouteAccess::Public},
+#if IOT_FEATURE_AUTH
     {Api::Method::Get, "/api/auth",
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return router.authEndpoints_.info();
@@ -134,6 +160,7 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
        return router.authEndpoints_.updatePassword(request);
      },
      HttpBinding::JsonBody},
+#endif
     {Api::Method::Get, "/api/wifi",
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return router.wifiEndpoints_.get();
@@ -171,7 +198,7 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
        return router.systemEndpoints_.updateTime(request);
      },
      HttpBinding::JsonBody},
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
     {Api::Method::Get, "/api/sleep",
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return SleepEndpoints::get(*router.sleepCoordinator_);
@@ -197,10 +224,13 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return router.systemEndpoints_.reset(StorageResetScope::Settings);
      }},
+#if IOT_FEATURE_STORAGE
     {Api::Method::Post, "/api/system/reset/data",
      +[](ApiRouter &router, const Api::Request &, const char *) {
        return router.systemEndpoints_.reset(StorageResetScope::Data);
      }},
+#endif
+#if IOT_FEATURE_USER_FILES
     {Api::Method::Get, "/api/storage/files/{name}",
      +[](ApiRouter &, const Api::Request &request, const char *) {
        return request.transport == Api::Transport::Serial
@@ -222,27 +252,40 @@ const ApiRouter::Route ApiRouter::kRoutes_[] = {
        return UserFileEndpoints::remove(request, name, *router.userData_);
      },
      HttpBinding::Query, RouteMatch::UserFile},
+#endif
 };
 
 Result ApiRouter::begin(const ApiRouterDeps &deps) {
   configService_ = &deps.configService;
   embeddedWebAssets_ = &deps.embeddedWebAssets;
   flashStorage_ = &deps.flashStorage;
+#if IOT_FEATURE_STORAGE
   userData_ = &deps.userData;
+#endif
+#if IOT_FEATURE_AUTH
   authService_ = &deps.authService;
+#endif
   runtimeActions_ = &deps.runtime;
+#if IOT_FEATURE_EPAPER
   epaperService_ = &deps.epaperService;
   epaperCalibrationService_ = &deps.epaperCalibrationService;
+#endif
+#if IOT_FEATURE_BATTERY
   batteryMonitor_ = &deps.batteryMonitor;
+#endif
   bootDiagnostics_ = &deps.bootDiagnostics;
   timeSource_ = deps.timeSource;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   sleepCoordinator_ = deps.sleepCoordinator;
 #endif
 
+#if IOT_FEATURE_AUTH
   Result result = authEndpoints_.begin(
       &deps.configService, &deps.authService, &deps.runtime);
   if (!result.ok()) return result;
+#else
+  Result result;
+#endif
   result = wifiEndpoints_.begin(
       &deps.configService,
       &deps.wifiManager,
@@ -252,7 +295,7 @@ Result ApiRouter::begin(const ApiRouterDeps &deps) {
   return systemEndpoints_.begin(
       &deps.configService, &deps.storageLifecycle, &deps.runtime,
       deps.timeSource
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
       , deps.sleepCoordinator
 #endif
       );
@@ -263,7 +306,7 @@ bool ApiRouter::pollPending(const Api::PendingRequest &pending, Api::Response &r
     response = Api::problem(400, "invalid_field", "invalid pending request");
     return true;
   }
-  if (!authService_->tokenValid(pending.principal)) {
+  if (!authorized(pending.principal)) {
     wifiEndpoints_.cancelScan(pending.id);
     response = Api::unauthorized("session is no longer valid");
     return true;
@@ -286,7 +329,7 @@ Api::Response ApiRouter::dispatch(const Api::Request &request) {
         return unauthorized();
       }
     }
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
     const bool keepAwake = request.matches(Api::Method::Post, "/api/sleep/keep-awake");
     const bool statusRead = request.matches(Api::Method::Get, "/api/sleep");
     const bool publicWrite = request.method != Api::Method::Get &&
@@ -298,7 +341,7 @@ Api::Response ApiRouter::dispatch(const Api::Request &request) {
     }
 #endif
     Api::Response response = route.handler(*this, request, parameter);
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
     if (lease) sleepCoordinator_->endApiRequest();
 #endif
     if (response.pending.id != 0) {
@@ -323,7 +366,7 @@ bool ApiRouter::routeInfo(size_t index, RouteInfo &info) {
   info.path = route.path;
   info.httpBinding = route.httpBinding;
   info.routeMatch = route.routeMatch;
-  info.authRequired = route.access == RouteAccess::Protected;
+  info.authRequired = IOT_FEATURE_AUTH && route.access == RouteAccess::Protected;
   return true;
 }
 
@@ -344,7 +387,11 @@ bool ApiRouter::authorized(const Api::Request &request) const {
 }
 
 bool ApiRouter::authorized(const String &token) const {
+#if IOT_FEATURE_AUTH
   return token.length() > 0 && authService_->tokenValid(token);
+#else
+  return true;
+#endif
 }
 
 Api::Response ApiRouter::unauthorized() const {
@@ -355,6 +402,7 @@ ApiRouter::FileUploadStart ApiRouter::prepareFileUpload(
     const String &token,
     const char *path,
     size_t contentLength) {
+#if IOT_FEATURE_USER_FILES
   FileUploadStart start;
   const StreamingFileRequest request =
       prepareStreamingFileRequest(Api::Method::Put, token, path);
@@ -368,7 +416,7 @@ ApiRouter::FileUploadStart ApiRouter::prepareFileUpload(
         403, "reserved_file", "e-paper image is managed by /api/epaper/image");
     return start;
   }
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const bool sleepLease = sleepCoordinator_ != nullptr;
   if (sleepLease && !sleepCoordinator_->beginApiRequest(true, millis())) {
     start.response = Api::problem(
@@ -378,7 +426,7 @@ ApiRouter::FileUploadStart ApiRouter::prepareFileUpload(
 #endif
   const UserDataUploadBegin storageStart =
       userData_->beginUpload(request.name, contentLength);
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   if (sleepLease) sleepCoordinator_->endApiRequest();
 #endif
   start.maxUploadBytes = storageStart.maxUploadBytes;
@@ -393,12 +441,16 @@ ApiRouter::FileUploadStart ApiRouter::prepareFileUpload(
   uploadLastDataMs_ = millis();
   start.response = Api::ok("{}");
   return start;
+#else
+  return {};
+#endif
 }
 
 Api::Response ApiRouter::writeFileUpload(uint32_t sessionId,
                                          size_t index,
                                          const uint8_t *data,
                                          size_t length) {
+#if IOT_FEATURE_USER_FILES
   const UserDataFileResult result = userData_->writeUpload(
       sessionId, index, data, length);
   if (activeUpload_.sessionId == sessionId && !activeUpload_.epaper) {
@@ -406,10 +458,14 @@ Api::Response ApiRouter::writeFileUpload(uint32_t sessionId,
     if (!result.ok()) activeUpload_ = {};
   }
   return UserFileEndpoints::fromStorageResult(result);
+#else
+  return Api::problem(404, "not_found", "not found");
+#endif
 }
 
 Api::Response ApiRouter::finishFileUpload(uint32_t sessionId,
                                           const char *path) {
+#if IOT_FEATURE_USER_FILES
   if (activeUpload_.sessionId == sessionId && !activeUpload_.epaper) activeUpload_ = {};
   char name[UserFilePolicy::kMaxFilenameBytes + 1]{};
   if (!fileNameFromPath(path, name, sizeof(name))) {
@@ -418,17 +474,23 @@ Api::Response ApiRouter::finishFileUpload(uint32_t sessionId,
   }
   return UserFileEndpoints::uploadCommitted(
       name, userData_->finishUpload(sessionId));
+#else
+  return Api::problem(404, "not_found", "not found");
+#endif
 }
 
 void ApiRouter::abortFileUpload(uint32_t sessionId) {
+#if IOT_FEATURE_USER_FILES
   if (activeUpload_.sessionId == sessionId && !activeUpload_.epaper) activeUpload_ = {};
   userData_->abortUpload(sessionId);
+#endif
 }
 
 ApiRouter::FileDownloadStart ApiRouter::prepareFileDownload(
     const String &token,
     const char *path,
     const char *rangeHeader) {
+#if IOT_FEATURE_USER_FILES
   FileDownloadStart start;
   const StreamingFileRequest request =
       prepareStreamingFileRequest(Api::Method::Get, token, path);
@@ -436,7 +498,7 @@ ApiRouter::FileDownloadStart ApiRouter::prepareFileDownload(
     start.response = request.response;
     return start;
   }
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const bool sleepLease = sleepCoordinator_ != nullptr;
   if (sleepLease && !sleepCoordinator_->beginApiRequest(true, millis())) {
     start.response = Api::problem(
@@ -447,7 +509,7 @@ ApiRouter::FileDownloadStart ApiRouter::prepareFileDownload(
   strlcpy(start.name, request.name, sizeof(start.name));
   const UserDataDownloadBegin storageStart =
       userData_->beginDownload(request.name, rangeHeader);
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   if (sleepLease) sleepCoordinator_->endApiRequest();
 #endif
   start.fileSize = storageStart.fileSize;
@@ -463,26 +525,36 @@ ApiRouter::FileDownloadStart ApiRouter::prepareFileDownload(
   start.partial = storageStart.partial;
   start.response = Api::ok("{}");
   return start;
+#else
+  return {};
+#endif
 }
 
 UserDataReadResult ApiRouter::readFileDownload(uint32_t sessionId,
                                                uint8_t *buffer,
                                                size_t bufferLength) {
+#if IOT_FEATURE_USER_FILES
   return userData_->readDownload(sessionId, buffer, bufferLength);
+#else
+  return {};
+#endif
 }
 
 void ApiRouter::finishFileDownload(uint32_t sessionId) {
+#if IOT_FEATURE_USER_FILES
   userData_->finishDownload(sessionId);
+#endif
 }
 
 ApiRouter::FileUploadStart ApiRouter::prepareEpaperUpload(
     size_t contentLength, const char *encoding) {
+#if IOT_FEATURE_EPAPER
   FileUploadStart start;
   if (encoding == nullptr || strcmp(encoding, "gzip") != 0) {
     start.response = Api::problem(415, "unsupported_content_encoding", "e-paper upload requires gzip");
     return start;
   }
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const bool sleepLease = sleepCoordinator_ != nullptr;
   if (sleepLease && !sleepCoordinator_->beginApiRequest(true, millis())) {
     start.response = Api::problem(
@@ -491,7 +563,7 @@ ApiRouter::FileUploadStart ApiRouter::prepareEpaperUpload(
   }
 #endif
   const EpaperServiceResult result = epaperService_->beginUpload(contentLength);
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   if (sleepLease) sleepCoordinator_->endApiRequest();
 #endif
   if (!result.ok()) {
@@ -506,32 +578,45 @@ ApiRouter::FileUploadStart ApiRouter::prepareEpaperUpload(
   start.maxUploadBytes = EpaperService::kMaxCompressedBytes;
   start.response = Api::ok("{}");
   return start;
+#else
+  return {};
+#endif
 }
 
 Api::Response ApiRouter::writeEpaperUpload(uint32_t sessionId,
                                            size_t index,
                                            const uint8_t *data,
                                            size_t length) {
+#if IOT_FEATURE_EPAPER
   const EpaperServiceResult result = epaperService_->writeUpload(sessionId, index, data, length);
   if (activeUpload_.sessionId == sessionId && activeUpload_.epaper) {
     if (result.ok() && length != 0) uploadLastDataMs_ = millis();
     if (!result.ok()) activeUpload_ = {};
   }
   return EpaperEndpoints::fromServiceResult(result);
+#else
+  return Api::problem(404, "not_found", "not found");
+#endif
 }
 
 Api::Response ApiRouter::finishEpaperUpload(uint32_t sessionId) {
+#if IOT_FEATURE_EPAPER
   if (activeUpload_.sessionId == sessionId && activeUpload_.epaper) activeUpload_ = {};
   const EpaperServiceResult result = epaperService_->finishUpload(sessionId);
   if (!result.ok()) return EpaperEndpoints::fromServiceResult(result);
   JsonDocument data;
   data["state"] = "queued";
   return Api::accepted(Api::json(data), "e-paper image uploaded and draw queued");
+#else
+  return Api::problem(404, "not_found", "not found");
+#endif
 }
 
 void ApiRouter::abortEpaperUpload(uint32_t sessionId) {
+#if IOT_FEATURE_EPAPER
   if (activeUpload_.sessionId == sessionId && activeUpload_.epaper) activeUpload_ = {};
   epaperService_->abortUpload(sessionId);
+#endif
 }
 
 ApiRouter::ExpiredUpload ApiRouter::expireIdleUpload(uint32_t nowMs) {
@@ -539,15 +624,20 @@ ApiRouter::ExpiredUpload ApiRouter::expireIdleUpload(uint32_t nowMs) {
       nowMs - uploadLastDataMs_ < kUploadIdleTimeoutMs) return {};
   const ExpiredUpload expired = activeUpload_;
   activeUpload_ = {};
+#if IOT_FEATURE_EPAPER
   if (expired.epaper) epaperService_->abortUpload(expired.sessionId, "upload_timeout");
-  else userData_->abortUpload(expired.sessionId);
+#endif
+#if IOT_FEATURE_USER_FILES
+  if (!expired.epaper) userData_->abortUpload(expired.sessionId);
+#endif
   return expired;
 }
 
 ApiRouter::FileDownloadStart ApiRouter::prepareEpaperDownload(
     const char *rangeHeader) {
+#if IOT_FEATURE_EPAPER
   FileDownloadStart start;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const bool sleepLease = sleepCoordinator_ != nullptr;
   if (sleepLease && !sleepCoordinator_->beginApiRequest(false, millis())) {
     start.response = Api::problem(
@@ -559,7 +649,7 @@ ApiRouter::FileDownloadStart ApiRouter::prepareEpaperDownload(
   if (!stored.present) {
     start.response = Api::problem(404, "epaper_image_not_found",
                                   "stored e-paper image not found");
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
     if (sleepLease) sleepCoordinator_->endApiRequest();
 #endif
     return start;
@@ -570,14 +660,14 @@ ApiRouter::FileDownloadStart ApiRouter::prepareEpaperDownload(
     data["reason"] = EpaperImageFormat::errorCode(stored.validationError);
     start.response = Api::error(
         422, Api::json(data), "stored EPDIMG is invalid");
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
     if (sleepLease) sleepCoordinator_->endApiRequest();
 #endif
     return start;
   }
   const UserDataDownloadBegin begin =
       epaperService_->beginImageDownload(rangeHeader);
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   if (sleepLease) sleepCoordinator_->endApiRequest();
 #endif
   start.fileSize = begin.fileSize;
@@ -598,17 +688,26 @@ ApiRouter::FileDownloadStart ApiRouter::prepareEpaperDownload(
   start.partial = begin.partial;
   start.response = Api::ok("{}");
   return start;
+#else
+  return {};
+#endif
 }
 
 UserDataReadResult ApiRouter::readEpaperDownload(
     uint32_t sessionId,
     uint8_t *buffer,
     size_t bufferLength) {
+#if IOT_FEATURE_EPAPER
   return epaperService_->readImageDownload(sessionId, buffer, bufferLength);
+#else
+  return {};
+#endif
 }
 
 void ApiRouter::finishEpaperDownload(uint32_t sessionId) {
+#if IOT_FEATURE_EPAPER
   epaperService_->finishImageDownload(sessionId);
+#endif
 }
 
 ApiRouter::StreamingFileRequest ApiRouter::prepareStreamingFileRequest(
@@ -650,7 +749,11 @@ Api::Response ApiRouter::checkStreamingFileAccess(
 Api::Response ApiRouter::fileStorageError(
     const UserDataFileResult &result,
     size_t detailBytes) {
+#if IOT_FEATURE_STORAGE
   return UserFileEndpoints::fromStorageResult(result, detailBytes);
+#else
+  return Api::problem(404, "not_found", "not found");
+#endif
 }
 
 bool ApiRouter::fileNameFromPath(const char *path,

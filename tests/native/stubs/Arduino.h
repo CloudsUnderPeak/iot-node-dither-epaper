@@ -105,6 +105,8 @@ inline size_t strlcpy(char *target, const char *source, size_t targetSize) {
 
 class NativeEsp {
  public:
+  unsigned restartCalls = 0;
+  void restart() { ++restartCalls; }
   const char *getChipModel() const { return "native-test"; }
   uint32_t getChipRevision() const { return 1; }
   uint32_t getChipCores() const { return 1; }
@@ -126,3 +128,5 @@ struct NativeSerial {
   void println(const char *) {}
 };
 inline NativeSerial Serial;
+
+inline uint32_t getCpuFrequencyMhz() { return 160; }

@@ -151,7 +151,7 @@
                         attrs: { href: mdnsUrl }
                     })
                     : app.utils.dom.el('div', { className: 'network-status-value', text: mdnsUrl });
-                statusGrid.appendChild(statusColumn(
+                if (app.device.features.supports('mdns')) statusGrid.appendChild(statusColumn(
                     'assets/icons/device/globe.svg',
                     t('wifiMdnsLabel'),
                     null,
@@ -196,7 +196,7 @@
                 if (!self.mounted) {
                     return;
                 }
-                if (!app.device.auth.hasToken()) {
+                if (!app.device.auth.canManage()) {
                     form = null;
                     app.utils.dom.clear(settingsHost);
                     settingsHost.appendChild(app.device.auth.createLockedCard({
@@ -234,7 +234,7 @@
                 }
                 // 背景驗證 session；token 已失效時退回鎖定卡。
                 app.device.auth.ensureSession().then(function (valid) {
-                    if (self.mounted && !valid && !app.device.auth.hasToken()) {
+                    if (self.mounted && !valid && !app.device.auth.canManage()) {
                         renderSettings();
                     }
                 });

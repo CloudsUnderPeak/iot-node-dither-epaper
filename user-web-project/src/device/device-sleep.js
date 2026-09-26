@@ -81,7 +81,7 @@
     }
 
     function maybeSyncClock(device) {
-        if (!app.device.auth.hasToken() || !online()) { return; }
+        if (!app.device.auth.canManage() || !online()) { return; }
         var now = Date.now();
         if (now - lastClockAttempt < CLOCK_SYNC_MS) { return; }
         var clock = device && device.time;
@@ -98,19 +98,15 @@
     function discover() {
         if (!online()) { return Promise.resolve(false); }
         var epoch = ++generation;
-        return app.device.api.resources.device().then(function (device) {
+        return app.device.features.refresh().then(function () {
             if (epoch !== generation) { return false; }
-            known = true;
-            supported = Boolean(device && device.features && device.features.sleep_scheduler === true);
+            known = app.device.features.known();
+            supported = app.device.features.supports('sleep');
             status = null;
             error = null;
             notify();
-            maybeSyncClock(device);
             if (supported) { refresh().catch(function () {}); }
             return supported;
-        }, function (failure) {
-            if (epoch === generation) { error = failure; notify(); }
-            return false;
         });
     }
 
@@ -169,6 +165,13 @@
     function start() {
         if (started) { return; }
         started = true;
+        app.device.features.subscribe(function () {
+            known = app.device.features.known();
+            supported = app.device.features.supports('sleep');
+            if (!supported) { status = null; }
+            notify();
+            if (supported && online()) { refresh().catch(function () {}); }
+        });
         app.device.live.subscribe(function (state) {
             generation += 1;
             request = null;

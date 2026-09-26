@@ -1,5 +1,5 @@
 #include "ConsoleShell.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "modules/sleep/SleepCoordinator.h"
 #endif
 
@@ -52,7 +52,14 @@ Result ConsoleShell::begin(ConfigService *configService,
                            AuthService *authService,
                            ApiRouter *router) {
   if (configService == nullptr || wifiManager == nullptr || wifiScanner == nullptr ||
-      flashStorage == nullptr || userData == nullptr || authService == nullptr || router == nullptr) {
+      flashStorage == nullptr || router == nullptr
+#if IOT_FEATURE_STORAGE
+      || userData == nullptr
+#endif
+#if IOT_FEATURE_AUTH
+      || authService == nullptr
+#endif
+      ) {
     return invalidInput("missing console dependencies");
   }
 
@@ -91,7 +98,7 @@ void ConsoleShell::poll() {
       continue;
     }
     if (incoming == '\n') {
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
       if (sleep_) sleep_->noteActivity(millis());
 #endif
       if (discardingLine_) {
@@ -154,14 +161,18 @@ void ConsoleShell::handleHumanCommand(char *command) {
     printScan();
   } else if (strcmp(command, "storage") == 0) {
     printStorage();
+#if IOT_FEATURE_AUTH
   } else if (strcmp(command, "session") == 0) {
     printSession();
+#endif
+#if IOT_FEATURE_USER_FILES
   } else if (strncmp(command, "ls", 2) == 0 &&
              (command[2] == '\0' || command[2] == ' ' || command[2] == '\t')) {
     handleListCommand(command + 2);
   } else if (strncmp(command, "stat", 4) == 0 &&
              (command[4] == '\0' || command[4] == ' ' || command[4] == '\t')) {
     handleStatCommand(command + 4);
+#endif
   } else if (strncmp(command, "config", 6) == 0 &&
              (command[6] == '\0' || command[6] == ' ' || command[6] == '\t')) {
     configCommand_.handle(command + 6);
@@ -235,14 +246,19 @@ void ConsoleShell::printHelp() const {
   Serial.println("  wifi      Show Wi-Fi mode, addresses, and saved SSIDs");
   Serial.println("  scan      List nearby Wi-Fi networks");
   Serial.println("  storage   Show flash partitions and available space");
+#if IOT_FEATURE_AUTH
   Serial.println("  session   Show whether an admin session is active");
+#endif
+#if IOT_FEATURE_USER_FILES
   Serial.println("  ls [path] [offset]                 List userdata (32 entries per page)");
   Serial.println("  stat <path>                        Inspect a userdata path");
+#endif
   Serial.println("  config show|get|set|changes|revert|status|commit ...");
   Serial.println("  api METHOD PATH [token=<token>] [json]");
 }
 
 void ConsoleShell::handleListCommand(char *arguments) {
+#if IOT_FEATURE_USER_FILES
   char *cursor = arguments;
   char *pathArgument = nextToken(cursor);
   char *offsetArgument = nextToken(cursor);
@@ -291,9 +307,13 @@ void ConsoleShell::handleListCommand(char *arguments) {
     Serial.printf("More: ls %s %u\n",
                   normalized, static_cast<unsigned>(page.nextOffset));
   }
+#else
+  Serial.println("User files are not supported");
+#endif
 }
 
 void ConsoleShell::handleStatCommand(char *arguments) {
+#if IOT_FEATURE_USER_FILES
   char *cursor = arguments;
   char *pathArgument = nextToken(cursor);
   if (pathArgument == nullptr || nextToken(cursor) != nullptr) {
@@ -318,6 +338,9 @@ void ConsoleShell::handleStatCommand(char *arguments) {
   if (!entry.directory) {
     Serial.printf("  Size: %u bytes\n", static_cast<unsigned>(entry.sizeBytes));
   }
+#else
+  Serial.println("User files are not supported");
+#endif
 }
 
 void ConsoleShell::printFilesystemError(const UserDataFileResult &result) const {
@@ -339,9 +362,13 @@ void ConsoleShell::printStatus() const {
   Serial.printf("  STA: %s, %s\n", wifiLinkStateToString(status.staState), status.staIp.toString().c_str());
   Serial.printf("  AP: %s\n", status.apIp.toString().c_str());
   Serial.printf("  Flash layout: %s\n", flashStorage_->ready() ? "ready" : "not ready");
+#if IOT_FEATURE_STORAGE
   Serial.printf("  Userdata: %s\n", userData_->mounted() ? "mounted" : "not mounted");
+#endif
+#if IOT_FEATURE_AUTH
   Serial.printf("  Admin session: %s\n", authService_->hasActiveSession() ? "active" : "none");
-#if ENABLE_SLEEP_SCHEDULER
+#endif
+#if IOT_FEATURE_SLEEP
   if (sleep_) {
     const SleepSnapshot sleep = sleep_->snapshot(millis());
     Serial.printf("  Sleep mode: %s, idle: %lu s, next wake: %lld, time synced: %s\n",
@@ -437,7 +464,9 @@ void ConsoleShell::printScanResult(const WifiScanResult &scanResult) {
 
 void ConsoleShell::printStorage() const {
   const FlashStorageSnapshot flash = flashStorage_->snapshot();
+#if IOT_FEATURE_STORAGE
   const UploadCapacity user = userData_->uploadCapacity();
+#endif
   Serial.println("Storage");
   Serial.printf("  Flash: %s, total=%u bytes\n",
                 flashStorage_->ready() ? "ready" : "not ready",
@@ -457,17 +486,21 @@ void ConsoleShell::printStorage() const {
                 static_cast<unsigned>(flash.app.imageBytes),
                 static_cast<unsigned>(flash.app.frontendBytes),
                 static_cast<unsigned>(flash.app.availableBytes));
+#if IOT_FEATURE_STORAGE
   Serial.printf("  User: %s, capacity=%u, used=%u, available=%u, max_upload=%u bytes\n",
                 userData_->mounted() ? "mounted" : "not mounted",
                 static_cast<unsigned>(user.totalBytes),
                 static_cast<unsigned>(user.usedBytes),
                 static_cast<unsigned>(user.availableBytes),
                 static_cast<unsigned>(user.maxUploadBytes));
+#endif
 }
 
 void ConsoleShell::printSession() const {
   Serial.println("Admin Session");
+#if IOT_FEATURE_AUTH
   Serial.printf("  Active: %s\n", authService_->hasActiveSession() ? "yes" : "no");
+#endif
 }
 
 void ConsoleShell::printApiResponse(const Api::Response &response) const {

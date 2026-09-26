@@ -184,7 +184,7 @@
       $$('[data-page]').forEach((button) => {
         button.classList.toggle('active', button.dataset.page === pageId);
       });
-      const hideLogout = pageId !== 'settings' || !state.token;
+      const hideLogout = pageId !== 'settings' || !state.token || featureDisabled('auth');
       $('logoutButton').hidden = hideLogout;
       $('logoutSeparator').hidden = hideLogout;
     },

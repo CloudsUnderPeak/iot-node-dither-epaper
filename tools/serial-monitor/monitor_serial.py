@@ -14,9 +14,13 @@ def main() -> int:
     parser.add_argument("--no-dtr", action="store_true", help="Leave DTR low while monitoring.")
     args = parser.parse_args()
 
-    with serial.Serial(args.port, args.baud, timeout=0.2) as ser:
-        ser.dtr = not args.no_dtr
-        ser.rts = False
+    # Configure control lines before opening the device: applying defaults
+    # first can reset USB-Serial/JTAG boards even when --no-dtr is requested.
+    connection = serial.Serial(port=None, baudrate=args.baud, timeout=0.2)
+    connection.dtr = not args.no_dtr
+    connection.rts = False
+    connection.port = args.port
+    with connection as ser:
         end_at = time.time() + args.seconds
         print(f"--- {args.port} monitor {args.baud} baud ---")
         while time.time() < end_at:

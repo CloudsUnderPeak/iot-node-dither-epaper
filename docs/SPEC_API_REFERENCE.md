@@ -1,14 +1,16 @@
 # API Reference
 
-日期：2026-09-26
+日期：2026-09-27
 
 本文件是提供整合開發者使用的 REST／serial API contract。產品行為與待決需求記錄於 [SPEC_BEHAVIOR.md](SPEC_BEHAVIOR.md)；內部 dispatcher 組織不屬於本文件。
+
+本文件總表描述預設全功能版本；選擇性編譯的差異以 `/api/features` 及下節為準。
 
 Base URL：
 
 ```text
 http://<device-ip>
-http://<hostname>.local
+http://<hostname>.local  # 僅 mdns=1 且 STA 可用
 ```
 
 預設 factory 設定：
@@ -147,12 +149,53 @@ curl -H 'Authorization: Bearer <token>' \
   -d '{}'
 ```
 
+## 功能支援查詢與裁切
+
+`GET /api/features` 是公開的 JSON endpoint，HTTP／serial 使用相同 envelope；`console=0` 時沒有 serial adapter。回報編譯能力，與硬體接線、filesystem mount、服務 ready 無關。
+
+```json
+{
+  "success": true,
+  "data": {
+    "features": {
+      "sleep": true,
+      "epaper": true,
+      "storage": true,
+      "auth": true,
+      "user_files": true,
+      "mdns": true,
+      "battery": true,
+      "console": true
+    }
+  },
+  "message": "ok"
+}
+```
+
+`GET /api/features?name=epaper` 回 `data: {"feature":"epaper","supported":true}`；已知但未編入的功能仍回 HTTP 200 與 `supported:false`。名稱區分大小寫。未知名稱回 400／`invalid_field`（`fields:["name"]`）；額外 query、重複 query、query overflow 或 body 回 400／`unsupported_field`。八個欄位固定存在，使用 boolean。
+
+| 功能未編入 | Contract 差異 |
+| --- | --- |
+| `sleep` | 全部 `/api/sleep` 路由不存在。`/api/system/time` 仍存在。 |
+| `epaper` | 全部 `/api/epaper` 路由不存在；runtime status 不回報假面板活動。 |
+| `storage` | `/api/system/reset/data` 不存在；`/api/storage` 保留 Flash/app 資訊，`user.partition_id`／`filesystem` 為 null、`mounted:false`、容量與 byte quota 為 0。設定與全 reset／settings reset 仍存在。 |
+| `user_files` | 全部 `/api/storage/files` 路由不存在，`user.capabilities` 四個 generic file 能力均 false；epaper 專用圖片路由不受影響。 |
+| `auth` | 全部 `/api/auth` 路由不存在。總表中「Auth 是」的既有路由接受無 token 或任意 token，仍做原有驗證與 busy/admission 檢查；非同步 scan completion 及 raw streaming 相同。 |
+| `mdns` | 不宣告 `.local`／`_http._tcp`；IP URL 與 AP captive DNS 仍可用。 |
+| `battery` | `/api/device` 的 `power.voltage_mv`／`sample_age_ms`／`estimated_percent` 為 null。 |
+| `console` | 不提供 human commands／serial API；HTTP 與既有 Serial 診斷 log 不受影響。 |
+
+被裁切的路由回 404／`not_found`，不註冊假 handler。`epaper=1`／`user_files=1` 必須搭配 `storage=1`，所以不會有編入圖片或檔案 API 卻不存在 filesystem 的合法版本。
+
+`auth=0` 時公開的 `PUT /api/wifi/ap/password` 只接受 `{"password":"new-password"}`；長度與字元規則沿用原 admin/AP 共用密碼。成功回 200，`data:{}`，message 為 `AP password updated`。AP 密碼保護已啟用時會排程重啟，此情況 runtime 不可用回 503／`runtime_unavailable` 且不改密碼。`auth=1` 時此路由不存在，沿用 `/api/auth/password` 與 session invalidation。裁切 auth 不會把 protected AP 自動改成 open AP。
+
 ## Endpoint 總表
 
 | Method | Path | Auth | 用途 |
 | --- | --- | --- | --- |
 | `GET` | `/` | 否 | 韌體內嵌管理頁。 |
 | `GET` | `/index.html` | 否 | 韌體內嵌管理頁。 |
+| `GET` | `/api/features` | 否 | 回報全部功能或用 `?name=epaper` 查詢單一功能。 |
 | `GET` | `/api/alive` | 否 | 基本 API 存活檢查。 |
 | `GET` | `/api/device` | 否 | 裝置與 runtime 資訊。 |
 | `GET` | `/api/web` | 否 | 目前 Web bundle 的來源與 SHA-256，或無前端狀態。 |
@@ -166,6 +209,7 @@ curl -H 'Authorization: Bearer <token>' \
 | `GET` | `/api/auth/session` | 是 | 驗證 Bearer token 是否仍有效，不發新 token。 |
 | `POST` | `/api/auth/logout` | 是 | 撤銷目前 Bearer token。 |
 | `PUT` | `/api/auth/password` | 是 | 修改 admin password；成功後目前 session 失效。 |
+| `PUT` | `/api/wifi/ap/password` | 否 | 僅 `auth=0`，更新 AP 共用密碼；受保護 AP 會排程重啟。 |
 | `PUT` | `/api/wifi` | 是 | 更新並持久化 Wi-Fi 設定。 |
 | `POST` | `/api/wifi/reconnect` | 是 | 重新套用目前 Wi-Fi 設定。 |
 | `PUT` | `/api/system` | 是 | 更新 hostname 等系統設定。 |

@@ -2,7 +2,7 @@
 
 #include "SleepFeatures.h"
 
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
@@ -63,9 +63,14 @@ class SleepCoordinator {
   bool begin(SleepStore &store, TimeSource &time, SleepDriver &driver,
              const SleepRtcRecord &bootRecord, bool deepSleepReset,
              WakeCause cause, int64_t bootClock);
+  void attach(ConfigService &config, EpaperService *epaper, UserDataStorage *storage,
+              WifiManager &wifi, MdnsService *mdns, CaptivePortalDnsService &captive,
+              RuntimeActionScheduler &runtime, ApiServer &http);
   void attach(ConfigService &config, EpaperService &epaper, UserDataStorage &storage,
               WifiManager &wifi, MdnsService &mdns, CaptivePortalDnsService &captive,
-              RuntimeActionScheduler &runtime, ApiServer &http);
+              RuntimeActionScheduler &runtime, ApiServer &http) {
+    attach(config, &epaper, &storage, wifi, &mdns, captive, runtime, http);
+  }
   void poll(uint32_t nowMs);
   SleepSnapshot snapshot(uint32_t nowMs);
   bool keepAwake(uint32_t nowMs);

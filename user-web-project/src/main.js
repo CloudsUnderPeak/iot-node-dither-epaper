@@ -72,6 +72,7 @@
                 var shell = new app.app.AppShell();
                 shell.start();
                 // Capability discovery runs beside the visual startup gate and never blocks it.
+                app.device.features.start();
                 app.device.epaper.start();
                 app.device.epaperCalibration.start();
                 app.device.live.start();

@@ -6,7 +6,7 @@
 #include "modules/storage/StorageLifecycle.h"
 #include "modules/time/TimeSource.h"
 #include "modules/sleep/SleepFeatures.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 class SleepCoordinator;
 #endif
 
@@ -17,10 +17,11 @@ class SystemEndpoints {
                StorageLifecycle *storageLifecycle,
                RuntimeActionScheduler *runtime,
                TimeSource *timeSource = nullptr
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
                , SleepCoordinator *sleepCoordinator = nullptr
 #endif
                );
+  Api::Response updateApPassword(const Api::Request &request);
   Api::Response update(const Api::Request &request);
   Api::Response updateTime(const Api::Request &request);
   Api::Response reset(StorageResetScope scope);
@@ -30,7 +31,7 @@ class SystemEndpoints {
   StorageLifecycle *storageLifecycle_ = nullptr;
   RuntimeActionScheduler *runtime_ = nullptr;
   TimeSource *timeSource_ = nullptr;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   SleepCoordinator *sleepCoordinator_ = nullptr;
 #endif
 };

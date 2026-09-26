@@ -19,6 +19,7 @@ var passed = [];
             epaperStatus: function () { epRequests++; return Promise.resolve(epStatus); }
         } }
     } };
+    epApp.device.features = harness.fullFeatures();
     harness.execute('core/encoders/epaper-target.js', { window: { DitherApp: epApp } });
     harness.execute('device/device-epaper.js', { window: epWindow = {
         DitherApp: epApp,
@@ -268,6 +269,7 @@ var passed = [];
     var transport = harness.controlledFetch();
     var apiWindow = { DitherApp: apiApp, setTimeout: function () { return 1; }, clearTimeout: function () {} };
     harness.execute('device/device-api.js', { window: apiWindow, localStorage: { getItem: function () { return ''; }, setItem: function () {}, removeItem: function () {} }, AbortController: undefined, fetch: transport });
+    apiApp.device.features = harness.fullFeatures();
     harness.execute('device/device-auth.js', { window: apiWindow });
     var api = apiApp.device.api, auth = apiApp.device.auth, notifications = 0;
     auth.subscribe(function () { notifications++; });

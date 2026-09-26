@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include "core/ProjectFeatures.h"
+#include "modules/runtime/BasicRestartCoordinator.h"
 #include <SPI.h>
 
 #include "api/ApiRouter.h"
@@ -43,7 +45,7 @@
 #include "modules/wifi/ArduinoWifiScanDriver.h"
 #include "modules/time/SystemClockTimeSource.h"
 #include "modules/sleep/SleepFeatures.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "modules/sleep/ArduinoSleepDriver.h"
 #include "modules/sleep/SleepCoordinator.h"
 #include "modules/sleep/SleepStore.h"
@@ -73,6 +75,7 @@
 
 namespace {
 PinRegistry pinRegistry;
+#if IOT_FEATURE_EPAPER
 SpiBus spiBus;
 EpdSpiTransport epdTransport;
 Epd7In3E epdDriver;
@@ -86,9 +89,10 @@ EpaperPowerProbe epaperPowerProbe;
 EpaperRefreshProbe epaperRefreshProbe;
 EpaperPaletteFrameSource epaperPaletteFrame;
 EpaperService epaperService;
+#endif
 BootDiagnostics bootDiagnostics;
 SystemClockTimeSource systemClock;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 ArduinoSleepDriver sleepDriver;
 ArduinoPreferencesBackend sleepBackend;
 SleepStore sleepStore(sleepBackend);
@@ -97,11 +101,15 @@ SleepRtcRecord bootSleepRecord;
 SleepWakeEvidence bootSleepEvidence;
 int64_t bootSleepClock = 0;
 #endif
+#if IOT_FEATURE_EPAPER
 ArduinoPreferencesBackend epaperCalibrationBackend;
 PreferencesEpaperCalibrationStore epaperCalibrationStore(epaperCalibrationBackend);
 EpaperCalibrationService epaperCalibrationService(epaperCalibrationStore);
+#endif
+#if IOT_FEATURE_BATTERY
 ArduinoBatteryAdc batteryAdc;
 BatteryMonitor batteryMonitor;
+#endif
 ArduinoPreferencesBackend configBackend;
 PreferencesConfigStore configStore(configBackend);
 ConfigService configService(configStore);
@@ -113,30 +121,49 @@ WifiScanner wifiScanner;
 ArduinoWifiScanDriver wifiScanDriver;
 EmbeddedWebAssets embeddedWebAssets;
 FlashStorage flashStorage;
+#if IOT_FEATURE_STORAGE
 UserDataStorage userDataStorage;
+#endif
 StorageLifecycle storageLifecycle;
+#if !IOT_FEATURE_EPAPER
+BasicRestartCoordinator basicRestart{
+#if IOT_FEATURE_STORAGE
+    &userDataStorage
+#endif
+};
+#endif
+#if IOT_FEATURE_MDNS
 MdnsService mdnsService;
+#endif
 CaptivePortalDnsService captiveDnsService;
+#if IOT_FEATURE_AUTH
 AuthService authService;
+#endif
 RuntimeActionScheduler runtimeActions;
 ApiRouter apiRouter;
 ApiServer apiServer;
+#if IOT_FEATURE_CONSOLE
 ConsoleShell consoleShell;
+#endif
 
 uint32_t tick = 0;
 uint32_t lastHeartbeatMs = 0;
+#if IOT_FEATURE_EPAPER
 bool epaperPowerCycleRecovered = false;
 const char *epaperRecoveryEvidence = "none";
+#endif
 
 const char *readyLabel(bool ready) {
   return ready ? "READY" : "FAIL";
 }
 
+#if IOT_FEATURE_EPAPER
 const char *epaperBusyLabel() {
   if (!epdTransport.ready()) return "unavailable";
   return epdTransport.busyHigh() ? "high_idle" : "low_busy";
 }
 
+#endif
 bool wifiHealthy(const WifiStatus &status) {
   if (status.apState == WifiApState::Failed) return false;
   if (status.staState == WifiLinkState::Failed) {
@@ -145,6 +172,7 @@ bool wifiHealthy(const WifiStatus &status) {
   return true;
 }
 
+#if IOT_FEATURE_EPAPER
 Result startEpaperHardware() {
   Result result = EpaperHardware::claimAndQuiescePins(&pinRegistry);
   if (!result.ok()) return result;
@@ -268,6 +296,7 @@ void runEpaperPanelSelfTest() {
 #endif
 }
 
+#endif
 void printWifiStatus(const WifiStatus &status) {
   const DeviceConfig config = configService.snapshot();
   Serial.printf(
@@ -281,15 +310,22 @@ void printWifiStatus(const WifiStatus &status) {
 }
 
 Result startUserdata() {
-  return storageLifecycle.begin(&userDataStorage);
+  return storageLifecycle.begin(
+#if IOT_FEATURE_STORAGE
+      &userDataStorage
+#else
+      nullptr
+#endif
+      );
 }
 
+#if IOT_FEATURE_EPAPER
 Result startEpaperService() {
   return epaperService.begin(
       &userDataStorage, &epdDriver, &epdTransport, &epaperSafetyStore,
       &epaperCpuFrequency, &epaperShutdownCoordinator,
       bootDiagnostics.snapshot()
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
       , bootSleepEvidence
 #endif
       );
@@ -308,10 +344,16 @@ bool epaperServiceHealthy() {
          epaperService.snapshot(millis()).state != EpaperServiceState::Unavailable;
 }
 
+#endif
 bool userdataHealthy() {
+#if IOT_FEATURE_STORAGE
   return userDataStorage.mounted();
+#else
+  return storageLifecycle.ready();
+#endif
 }
 
+#if IOT_FEATURE_BATTERY
 Result startBatteryMonitor() {
   return batteryMonitor.begin(&batteryAdc, millis());
 }
@@ -330,6 +372,8 @@ void reportBatteryMonitor(const Result &) {
                     : -1);
 }
 
+#endif
+#if IOT_FEATURE_STORAGE
 void reportUserdata(const Result &) {
   const UploadCapacity capacity = userDataStorage.uploadCapacity();
   Serial.printf(
@@ -340,6 +384,7 @@ void reportUserdata(const Result &) {
       static_cast<unsigned>(capacity.maxUploadBytes));
 }
 
+#endif
 Result startConfig() {
   const Result result = configService.begin();
   if (!result.ok() || !configService.ready()) return result;
@@ -354,7 +399,7 @@ Result startConfig() {
 #endif
 }
 
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 Result startSleep() {
   return sleepCoordinator.begin(
       sleepStore, systemClock, sleepDriver, bootSleepRecord,
@@ -386,7 +431,7 @@ Result startWifi() {
   if (!result.ok()) return result;
 
   const DeviceConfig persisted = configService.snapshot();
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const DeviceConfig config = sleepCoordinator.effectiveWifiConfig(persisted);
 #else
   const DeviceConfig &config = persisted;
@@ -400,7 +445,7 @@ Result startWifi() {
   if (!configService.ready()) return invalidInput("config unavailable");
   const Result applyResult = wifiManager.apply(config, status);
   if (!applyResult.ok()) return applyResult;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   return wifiManager.applyPowerSave(sleepCoordinator.wakeCycle());
 #else
   return wifiManager.applyPowerSave(false);
@@ -443,8 +488,9 @@ void reportFlashLayout(const Result &) {
       static_cast<unsigned>(snapshot.app.availableBytes));
 }
 
+#if IOT_FEATURE_MDNS
 Result startMdns() {
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   if (sleepCoordinator.wakeCycle()) return okResult();
 #endif
   return mdnsService.begin(configService.snapshot(), wifiManager.status());
@@ -455,8 +501,9 @@ void reportMdns(const Result &) {
                 mdnsService.running() ? mdnsService.hostName() : "disabled");
 }
 
+#endif
 Result startCaptiveDns() {
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   if (sleepCoordinator.wakeCycle()) return okResult();
 #endif
   return captiveDnsService.begin(wifiManager.status());
@@ -470,10 +517,12 @@ void reportCaptiveDns(const Result &) {
           : "disabled");
 }
 
+#if IOT_FEATURE_AUTH
 Result startAuth() {
   return authService.begin(&configService);
 }
 
+#endif
 Result startWifiScanner() {
   return wifiRadio.ready()
              ? wifiScanner.begin(&wifiRadio, &wifiScanDriver, &wifiManager)
@@ -482,9 +531,20 @@ Result startWifiScanner() {
 
 Result startRuntime() {
   const Result result = runtimeActions.begin(
-      &configService, &wifiManager, &mdnsService, &captiveDnsService,
-      &epaperService);
-#if ENABLE_SLEEP_SCHEDULER
+      &configService, &wifiManager,
+#if IOT_FEATURE_MDNS
+      &mdnsService,
+#else
+      nullptr,
+#endif
+      &captiveDnsService,
+#if IOT_FEATURE_EPAPER
+      &epaperService
+#else
+      &basicRestart
+#endif
+      );
+#if IOT_FEATURE_SLEEP
   runtimeActions.setSleepCoordinator(&sleepCoordinator);
 #endif
   return result;
@@ -501,16 +561,26 @@ Result startApiRouter() {
       wifiScanner,
       embeddedWebAssets,
       flashStorage,
+#if IOT_FEATURE_STORAGE
       userDataStorage,
+#endif
       storageLifecycle,
+#if IOT_FEATURE_AUTH
       authService,
+#endif
       runtimeActions,
+#if IOT_FEATURE_EPAPER
       epaperService,
+#endif
+#if IOT_FEATURE_EPAPER
       epaperCalibrationService,
+#endif
+#if IOT_FEATURE_BATTERY
       batteryMonitor,
+#endif
       bootDiagnostics,
       &systemClock,
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
       &sleepCoordinator,
 #endif
   };
@@ -519,10 +589,25 @@ Result startApiRouter() {
 
 Result startHttp() {
   const Result result = apiServer.begin(&wifiManager, &embeddedWebAssets, &apiRouter);
-#if ENABLE_SLEEP_SCHEDULER
-  sleepCoordinator.attach(configService, epaperService, userDataStorage,
-                          wifiManager, mdnsService, captiveDnsService,
-                          runtimeActions, apiServer);
+#if IOT_FEATURE_SLEEP
+  sleepCoordinator.attach(configService,
+#if IOT_FEATURE_EPAPER
+                          &epaperService,
+#else
+                          nullptr,
+#endif
+#if IOT_FEATURE_STORAGE
+                          &userDataStorage,
+#else
+                          nullptr,
+#endif
+                          wifiManager,
+#if IOT_FEATURE_MDNS
+                          &mdnsService,
+#else
+                          nullptr,
+#endif
+                          captiveDnsService, runtimeActions, apiServer);
 #endif
   return result;
 }
@@ -531,67 +616,110 @@ bool httpHealthy() {
   return apiServer.started();
 }
 
+#if IOT_FEATURE_CONSOLE
 Result startConsole() {
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   consoleShell.setSleepCoordinator(&sleepCoordinator);
 #endif
   return consoleShell.begin(
       &configService, &wifiManager, &wifiScanner,
-      &flashStorage, &userDataStorage, &authService, &apiRouter);
+      &flashStorage,
+#if IOT_FEATURE_STORAGE
+      &userDataStorage,
+#else
+      nullptr,
+#endif
+#if IOT_FEATURE_AUTH
+      &authService,
+#else
+      nullptr,
+#endif
+      &apiRouter);
 }
 
 void reportConsole(const Result &) {
   Serial.println("console: type help");
 }
 
+#endif
 enum SubsystemIndex : size_t {
+#if IOT_FEATURE_EPAPER
   kEpaperHardwareSubsystem,
+#endif
   kUserdataSubsystem,
+#if IOT_FEATURE_EPAPER
   kEpaperServiceSubsystem,
   kEpaperCalibrationSubsystem,
+#endif
+#if IOT_FEATURE_BATTERY
   kBatterySubsystem,
+#endif
   kConfigSubsystem,
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   kSleepSubsystem,
 #endif
   kWifiSubsystem,
   kAssetsSubsystem,
   kFlashLayoutSubsystem,
+#if IOT_FEATURE_MDNS
   kMdnsSubsystem,
+#endif
   kCaptiveDnsSubsystem,
+#if IOT_FEATURE_AUTH
   kAuthSubsystem,
+#endif
   kWifiScanSubsystem,
   kRuntimeSubsystem,
   kApiSubsystem,
   kHttpSubsystem,
+#if IOT_FEATURE_CONSOLE
   kConsoleSubsystem,
+#endif
   kSubsystemCount,
 };
 
 Subsystem subsystems[] = {
+#if IOT_FEATURE_EPAPER
     {"epaper_hardware", startEpaperHardware, epaperHardwareHealthy,
      reportEpaperHardware},
-    {"userdata", startUserdata, userdataHealthy, reportUserdata},
+#endif
+    {"settings_storage", startUserdata, userdataHealthy,
+#if IOT_FEATURE_STORAGE
+     reportUserdata
+#else
+     nullptr
+#endif
+    },
+#if IOT_FEATURE_EPAPER
     {"epaper", startEpaperService, epaperServiceHealthy},
     {"epaper_calibration", startEpaperCalibration,
      epaperCalibrationHealthy},
+#endif
+#if IOT_FEATURE_BATTERY
     {"battery", startBatteryMonitor, batteryMonitorHealthy,
      reportBatteryMonitor},
+#endif
     {"config", startConfig, configHealthy, reportConfig},
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
     {"sleep", startSleep},
 #endif
     {"wifi", startWifi, wifiSubsystemHealthy, reportWifi},
     {"assets", startAssets, nullptr, reportAssets},
     {"flash_layout", startFlashLayout, nullptr, reportFlashLayout},
+#if IOT_FEATURE_MDNS
     {"mdns_service", startMdns, nullptr, reportMdns},
+#endif
     {"captive_dns_service", startCaptiveDns, nullptr, reportCaptiveDns},
+#if IOT_FEATURE_AUTH
     {"auth", startAuth},
+#endif
     {"wifi_scan", startWifiScanner},
     {"runtime", startRuntime, runtimeHealthy},
     {"api", startApiRouter},
     {"http", startHttp, httpHealthy},
+#if IOT_FEATURE_CONSOLE
     {"console", startConsole, nullptr, reportConsole},
+#endif
 };
 
 static_assert(
@@ -631,6 +759,7 @@ void printHeartbeat() {
         subsystem.name,
         readyLabel(subsystemHealthy(subsystem)));
   }
+#if IOT_FEATURE_EPAPER
   printHeartbeatField("epaper_busy", epaperBusyLabel());
   if (epaperService.ready()) {
     const auto timing = epaperService.snapshot(millis()).timings;
@@ -650,9 +779,12 @@ void printHeartbeat() {
       epaperService.ready()
           ? epaperService.snapshot(millis()).retryAfterSeconds
           : epaperCooldown.retryAfterSeconds(millis()));
+#endif
+#if IOT_FEATURE_BATTERY
   const BatterySnapshot battery = batteryMonitor.snapshot(millis());
   printHeartbeatField(
       "battery_mv", battery.sampleValid ? battery.voltageMilliVolts : 0);
+#endif
   printHeartbeatField(
       "config_state",
       configStartupStateToString(configService.startupState()));
@@ -660,11 +792,13 @@ void printHeartbeat() {
       "config_recovery",
       configRecoveryReasonToString(configService.recoveryReason()));
   printHeartbeatField("captive_dns", captiveIp.c_str());
+#if IOT_FEATURE_MDNS
   printHeartbeatField(
       "mdns",
       mdnsService.running() ? mdnsService.hostName() : "disabled");
+#endif
   printHeartbeatField("wifi_mode", wifiModeToString(status.mode));
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const SleepSnapshot sleep = sleepCoordinator.snapshot(millis());
   printHeartbeatField("sleep_mode", sleep.mode == WakeMode::WakeCycle ? "wake_cycle" : "normal");
   printHeartbeatField("sleep_idle_s", sleep.idleRemainingSeconds);
@@ -687,7 +821,7 @@ void printHeartbeat() {
 void setup() {
   bootDiagnostics.capture();
   systemClock.begin();
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   bootSleepRecord = sleepDriver.bootRecord();
   timeval bootTime{};
   if (gettimeofday(&bootTime, nullptr) == 0) bootSleepClock = bootTime.tv_sec;
@@ -700,8 +834,14 @@ void setup() {
   // delays or any network/storage subsystem. This is logical quiesce only; it
   // never sends a panel command and must not be reported as Power OFF or Deep
   // Sleep.
+#if IOT_FEATURE_EPAPER
   const Result epaperHardwareResult =
       startSubsystem(subsystems[kEpaperHardwareSubsystem]);
+#else
+  // This board profile can still have a connected HAT after a feature change.
+  // Preserve safe boot levels and release retained holds without a panel driver.
+  const Result boardSafety = EpaperHardware::claimAndQuiescePins(&pinRegistry);
+#endif
 
 #if STATUS_LED_PIN >= 0
   pinMode(STATUS_LED_PIN, OUTPUT);
@@ -709,7 +849,9 @@ void setup() {
 
   // The default USB CDC receive queue is smaller than a valid serial API
   // request. Keep the transport queue aligned with ConsoleShell's parser.
+#if IOT_FEATURE_CONSOLE
   Serial.setRxBufferSize(ConsoleShell::kInputCapacity);
+#endif
   Serial.setTxBufferSize(2048);
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);
@@ -720,6 +862,7 @@ void setup() {
   Serial.printf("Flash: %u MB, free heap: %u bytes\n",
                 ESP.getFlashChipSize() / (1024 * 1024), ESP.getFreeHeap());
 
+#if IOT_FEATURE_EPAPER
   const Subsystem &epaperHardware = subsystems[kEpaperHardwareSubsystem];
   Serial.printf("%s: start: %s (%u), state=%s\n",
                 epaperHardware.name,
@@ -734,6 +877,7 @@ void setup() {
   // isolated from Wi-Fi. A production build compiles this call to a no-op.
   runEpaperPanelSelfTest();
 
+#endif
   for (size_t index = kUserdataSubsystem; index < kSubsystemCount; ++index) {
     Subsystem &subsystem = subsystems[index];
     const Result result = startSubsystem(subsystem);
@@ -756,32 +900,34 @@ void loop() {
   const uint32_t now = millis();
   wifiScanner.poll(now, runtimeActions.snapshot().restartPending);
   apiServer.poll();
-  if (subsystemHealthy(subsystems[kConsoleSubsystem])) {
-    consoleShell.poll();
-  }
+#if IOT_FEATURE_CONSOLE
+  if (subsystemHealthy(subsystems[kConsoleSubsystem])) consoleShell.poll();
+#endif
+#if IOT_FEATURE_EPAPER
   if (epaperService.ready()) epaperService.poll(now);
-  const bool epaperDrawing =
-      epaperService.ready() &&
+  const bool epaperDrawing = epaperService.ready() &&
       epaperService.snapshot(now).state == EpaperServiceState::Drawing;
-  if (!epaperDrawing &&
-      subsystemHealthy(subsystems[kBatterySubsystem])) {
-    batteryMonitor.poll(now);
-  }
   if (!epaperService.ownsRuntime() && epaperCooldown.elapsed(now)) {
     const bool markerCleared = epaperSafetyStore.clear();
     epaperCooldown.releaseIfElapsed(now, markerCleared);
   }
+#else
+  constexpr bool epaperDrawing = false;
+#endif
+#if IOT_FEATURE_BATTERY
+  if (!epaperDrawing && subsystemHealthy(subsystems[kBatterySubsystem])) batteryMonitor.poll(now);
+#endif
 
   if (subsystemHealthy(subsystems[kRuntimeSubsystem])) {
     runtimeActions.poll();
   }
 
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   sleepCoordinator.poll(now);
 #endif
 
   const DeviceConfig persisted = configService.snapshot();
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const DeviceConfig config = sleepCoordinator.effectiveWifiConfig(persisted);
 #else
   const DeviceConfig &config = persisted;
@@ -789,13 +935,17 @@ void loop() {
   if (subsystemHealthy(subsystems[kConfigSubsystem]) &&
       wifiManager.poll(config)) {
     const WifiStatus status = wifiManager.status();
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
     if (!sleepCoordinator.wakeCycle()) {
+#if IOT_FEATURE_MDNS
       mdnsService.restart(config, status);
+#endif
       captiveDnsService.restart(status);
     }
 #else
+#if IOT_FEATURE_MDNS
     mdnsService.restart(config, status);
+#endif
     captiveDnsService.restart(status);
 #endif
   }

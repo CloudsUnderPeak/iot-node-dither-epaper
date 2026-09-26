@@ -1,4 +1,5 @@
 const resources = {
+  features: { get: (options = {}) => api('/api/features', { ...options, auth: false }) },
   device: {
     get: (options = {}) => api('/api/device', { ...options, auth: false })
   },
@@ -18,7 +19,10 @@ const resources = {
     login: (body, options = {}) => api('/api/auth/login', { ...options, method: 'POST', auth: false, body }),
     session: (options = {}) => api('/api/auth/session', options),
     logout: (options = {}) => api('/api/auth/logout', { ...options, method: 'POST' }),
-    changePassword: (password, options = {}) => api('/api/auth/password', { ...options, method: 'PUT', body: { password } })
+    changePassword: (password, options = {}) => api(
+      featureDisabled('auth') ? '/api/wifi/ap/password' : '/api/auth/password',
+      { ...options, method: 'PUT', body: { password } }
+    )
   },
   system: {
     update: (hostname, options = {}) => api('/api/system', { ...options, method: 'PUT', body: { hostname } }),

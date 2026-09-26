@@ -12,7 +12,7 @@
 #include "../wifi/WifiScanner.h"
 #include "ConsoleConfigCommand.h"
 #include "modules/sleep/SleepFeatures.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 class SleepCoordinator;
 #endif
 
@@ -28,7 +28,7 @@ class ConsoleShell {
                AuthService *authService,
                ApiRouter *router);
   void poll();
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   void setSleepCoordinator(SleepCoordinator *sleep) { sleep_ = sleep; }
 #endif
 
@@ -40,7 +40,7 @@ class ConsoleShell {
   UserDataStorage *userData_ = nullptr;
   AuthService *authService_ = nullptr;
   ApiRouter *router_ = nullptr;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   SleepCoordinator *sleep_ = nullptr;
 #endif
   ConsoleConfigCommand configCommand_;

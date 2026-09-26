@@ -193,14 +193,14 @@
             function render() {
                 if (!page.mounted) { return; }
                 app.utils.dom.clear(content);
-                if (!app.device.auth.hasToken()) {
+                if (!app.device.auth.canManage()) {
                     content.appendChild(app.device.auth.createLockedCard({ onUnlocked: render }));
                     return;
                 }
                 if (page.sleepUnsubscribe) { page.sleepUnsubscribe(); page.sleepUnsubscribe = null; }
                 createPage(content, page);
                 app.device.auth.ensureSession().then(function (valid) {
-                    if (page.mounted && !valid && !app.device.auth.hasToken()) { render(); }
+                    if (page.mounted && !valid && !app.device.auth.canManage()) { render(); }
                 });
             }
             page.authUnsubscribe = app.device.auth.subscribe(render);

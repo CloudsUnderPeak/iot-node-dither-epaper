@@ -8,11 +8,17 @@
 namespace DeviceEndpoints {
 
 Api::Response get(const ConfigService &configService,
+                  #if IOT_FEATURE_BATTERY
                   const BatteryMonitor &batteryMonitor,
+#endif
                   const BootDiagnostics &bootDiagnostics,
                   const TimeSource *timeSource) {
   const DeviceConfig config = configService.snapshot();
+#if IOT_FEATURE_BATTERY
   const BatterySnapshot batterySnapshot = batteryMonitor.snapshot(millis());
+#else
+  const BatterySnapshot batterySnapshot{};
+#endif
   const uint32_t heapTotal = ESP.getHeapSize();
   const uint32_t heapFree = ESP.getFreeHeap();
   const uint32_t heapUsedPercent = heapTotal > 0 ? ((heapTotal - heapFree) * 100U) / heapTotal : 0;
@@ -35,7 +41,7 @@ Api::Response get(const ConfigService &configService,
   data["wifi_tx_dbm"] = config.wifiTxDbm;
   data["config_state"] = configStartupStateToString(configService.startupState());
   data["config_recovery_reason"] = configRecoveryReasonToString(configService.recoveryReason());
-  data["features"]["sleep_scheduler"] = ENABLE_SLEEP_SCHEDULER != 0;
+  data["features"]["sleep_scheduler"] = IOT_FEATURE_SLEEP != 0;
   const TimeSnapshot clock = timeSource == nullptr ? TimeSnapshot{} : timeSource->snapshot();
   JsonObject time = data["time"].to<JsonObject>();
   if (clock.synced()) time["epoch"] = clock.epoch;

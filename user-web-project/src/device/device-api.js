@@ -46,6 +46,16 @@
 
     // 發送 request 並解析統一 envelope；HTTP 200 但 success !== true 也視為錯誤。
     function request(method, path, options) {
+        var feature = path.indexOf('api/epaper') === 0 ? 'epaper'
+            : path.indexOf('api/sleep') === 0 ? 'sleep'
+            : path.indexOf('api/storage/files') === 0 ? 'user_files'
+            : path.indexOf('api/auth') === 0 ? 'auth' : null;
+        if (feature && app.device.features && app.device.features.disabled(feature)) {
+            var unsupported = new Error('Feature unavailable');
+            unsupported.code = 'feature_unsupported';
+            return Promise.reject(unsupported);
+        }
+
         options = options || {};
         var headers = { Accept: 'application/json' };
         var requestEpoch = sessionEpoch;
@@ -161,6 +171,9 @@
             device: function device() {
                 return request('GET', 'api/device', { auth: false });
             },
+            features: function features() {
+                return request('GET', 'api/features', { auth: false });
+            },
             storage: function storage() {
                 return request('GET', 'api/storage', { auth: false });
             },
@@ -226,7 +239,7 @@
                 return request('POST', 'api/auth/logout', { json: {} });
             },
             changePassword: function changePassword(password) {
-                return request('PUT', 'api/auth/password', { json: { password: password } });
+                return request('PUT', app.device.features.disabled('auth') ? 'api/wifi/ap/password' : 'api/auth/password', { json: { password: password } });
             },
             systemUpdate: function systemUpdate(payload) {
                 return request('PUT', 'api/system', { json: payload });

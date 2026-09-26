@@ -161,6 +161,13 @@
                 ]
             });
 
+            function applyFeatures() {
+                powerGrid.closest('.panel-section').hidden = !app.device.features.supports('battery');
+                fileCard.node.hidden = !app.device.features.supports('storage');
+            }
+            this.featureUnsubscribe = app.device.features.subscribe(applyFeatures);
+            applyFeatures();
+
             function renderDevice(device) {
                 app.utils.dom.clear(deviceGrid);
                 var chip = device.chip_model
@@ -275,6 +282,7 @@
             load();
         },
         unmount: function unmount() {
+            if (this.featureUnsubscribe) { this.featureUnsubscribe(); this.featureUnsubscribe = null; }
             this.mounted = false;
             if (this.timerId) {
                 window.clearInterval(this.timerId);

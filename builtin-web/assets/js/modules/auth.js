@@ -70,6 +70,7 @@ function createLoginDialog() {
 }
 
 async function verifySession() {
+  if (featureDisabled('auth')) return true;
   const signal = DeviceConsole.utils.requests.signal();
   const token = state.token;
   if (!state.token) return false;

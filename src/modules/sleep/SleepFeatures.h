@@ -1,8 +1,5 @@
 #pragma once
-
-#ifndef ENABLE_SLEEP_SCHEDULER
-#define ENABLE_SLEEP_SCHEDULER 1
-#endif
+#include "core/ProjectFeatures.h"
 
 #ifndef SLEEP_IDLE_TIMEOUT_SECONDS
 #define SLEEP_IDLE_TIMEOUT_SECONDS 1800
@@ -12,8 +9,8 @@
 #define SLEEP_IGNORE_USB_HOST 0
 #endif
 
-#if ENABLE_SLEEP_SCHEDULER != 0 && ENABLE_SLEEP_SCHEDULER != 1
-#error "ENABLE_SLEEP_SCHEDULER must be 0 or 1"
+#if IOT_FEATURE_SLEEP != 0 && IOT_FEATURE_SLEEP != 1
+#error "IOT_FEATURE_SLEEP must be 0 or 1"
 #endif
 
 #if SLEEP_IDLE_TIMEOUT_SECONDS < 1 || SLEEP_IDLE_TIMEOUT_SECONDS > 86400

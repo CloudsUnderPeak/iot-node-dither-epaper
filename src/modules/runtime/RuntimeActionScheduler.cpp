@@ -1,5 +1,5 @@
 #include "RuntimeActionScheduler.h"
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "modules/sleep/SleepCoordinator.h"
 #endif
 
@@ -9,7 +9,10 @@ Result RuntimeActionScheduler::begin(ConfigService *configService,
                                      CaptivePortalDnsService *captivePortalDnsService,
                                      SystemRestartCoordinator *restartCoordinator) {
   ready_ = false;
-  if (configService == nullptr || wifiManager == nullptr || mdnsService == nullptr ||
+  if (configService == nullptr || wifiManager == nullptr ||
+#if IOT_FEATURE_MDNS
+      mdnsService == nullptr ||
+#endif
       captivePortalDnsService == nullptr || restartCoordinator == nullptr) {
     return invalidInput("missing runtime action scheduler dependencies");
   }
@@ -103,7 +106,7 @@ void RuntimeActionScheduler::applyPendingWifi() {
   }
 
   const DeviceConfig persisted = configService_->snapshot();
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const DeviceConfig config = sleepCoordinator_ != nullptr
       ? sleepCoordinator_->effectiveWifiConfig(persisted) : persisted;
 #else
@@ -115,14 +118,16 @@ void RuntimeActionScheduler::applyPendingWifi() {
     scheduleWifiApply(100);
     return;
   }
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   const bool wakeCycle = sleepCoordinator_ != nullptr && sleepCoordinator_->wakeCycle();
 #else
   constexpr bool wakeCycle = false;
 #endif
   const Result powerSaveResult = wifiManager_->applyPowerSave(wakeCycle);
+#if IOT_FEATURE_MDNS
   const Result mdnsResult = wakeCycle
       ? (mdnsService_->stop(), okResult()) : mdnsService_->restart(config, status);
+#endif
   const Result captiveDnsResult = wakeCycle
       ? (captivePortalDnsService_->stop(), okResult())
       : captivePortalDnsService_->restart(status);
@@ -133,10 +138,12 @@ void RuntimeActionScheduler::applyPendingWifi() {
   Serial.printf("api wifi power save: %s (%u)\n",
                 powerSaveResult.message,
                 static_cast<unsigned>(powerSaveResult.code));
+#if IOT_FEATURE_MDNS
   Serial.printf("api mdns: restart: %s (%u), host=%s.local\n",
                 mdnsResult.message,
                 static_cast<unsigned>(mdnsResult.code),
                 mdnsService_->running() ? mdnsService_->hostName() : "disabled");
+#endif
   Serial.printf("api captive-dns: restart: %s (%u), ip=%s\n",
                 captiveDnsResult.message,
                 static_cast<unsigned>(captiveDnsResult.code),

@@ -4,7 +4,7 @@
 #include "api/ApiRouter.h"
 #include "modules/http/UserFileHttpPreflight.h"
 
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 class RouterTime final : public TimeSource {
  public:
   TimeSnapshot value{1799996400, TimeOrigin::Client, 1};
@@ -42,7 +42,7 @@ struct RouterFixture {
   EpaperCalibrationService calibration;
   BatteryMonitor battery;
   BootDiagnostics diagnostics;
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
   RouterTime time;
   SleepCoordinator sleep;
 #endif
@@ -68,7 +68,7 @@ struct RouterFixture {
         calibration,
         battery,
         diagnostics,
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
         &time,
         &sleep,
 #endif
@@ -101,6 +101,7 @@ Api::Request requestFor(Api::Method method,
 
 void testExactRouteAuthorizationMatrix() {
   const RouteExpectation routes[] = {
+      {Api::Method::Get, "/api/features", ApiRouter::HttpBinding::Query, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Get, "/api/alive", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Get, "/api/device", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Get, "/api/web", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
@@ -132,7 +133,7 @@ void testExactRouteAuthorizationMatrix() {
       {Api::Method::Post, "/api/wifi/reconnect", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, true, 200},
       {Api::Method::Put, "/api/system", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
       {Api::Method::Put, "/api/system/time", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
       {Api::Method::Get, "/api/sleep", ApiRouter::HttpBinding::NoBody, ApiRouter::RouteMatch::Exact, false, 200},
       {Api::Method::Put, "/api/sleep", ApiRouter::HttpBinding::JsonBody, ApiRouter::RouteMatch::Exact, true, 400},
       {Api::Method::Post, "/api/sleep/keep-awake", ApiRouter::HttpBinding::OptionalJsonBody, ApiRouter::RouteMatch::Exact, false, 200},
@@ -196,7 +197,7 @@ void testExactRouteAuthorizationMatrix() {
   ApiRouter::RouteInfo missingInfo;
   expect(!ApiRouter::routeInfo(expectedRouteCount, missingInfo),
          "route metadata lookup must reject an out-of-range index");
-#if !ENABLE_SLEEP_SCHEDULER
+#if !IOT_FEATURE_SLEEP
   RouterFixture noSleep;
   expect(noSleep.router.dispatch(
              requestFor(Api::Method::Get, "/api/sleep")).statusCode == 404,

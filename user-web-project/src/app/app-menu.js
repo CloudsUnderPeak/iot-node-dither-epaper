@@ -45,10 +45,10 @@
         addItem('device-info', app.i18n.t('menuDeviceInfo'));
         addItem('device-network', app.i18n.t('menuDeviceNetwork'));
         addItem('device-system', app.i18n.t('menuDeviceSystem'));
-        if (app.device.sleep && app.device.sleep.snapshot().supported) {
+        if (app.device.features.supports('sleep') && app.device.sleep && app.device.sleep.snapshot().supported) {
             addItem('device-sleep', app.i18n.t('menuDeviceSleep'));
         }
-        if (app.device.epaper.isSupported()) {
+        if (app.device.features.supports('epaper') && app.device.epaper.isSupported()) {
             addItem('device-epaper-test', app.i18n.t('menuEpaperTest'));
         }
 
@@ -57,7 +57,7 @@
         addItem('help', app.i18n.t('menuHelp'));
         addItem('about', app.i18n.t('menuAbout'));
 
-        if (app.device.auth.hasToken()) {
+        if (app.device.features.supports('auth') && app.device.auth.hasToken()) {
             addDivider();
             var logoutButton = app.utils.dom.el('button', {
                 text: app.i18n.t('menuLogout'),

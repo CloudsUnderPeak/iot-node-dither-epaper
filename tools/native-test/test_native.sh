@@ -232,7 +232,7 @@ g++ -std=c++17 -Wall -Wextra -Werror \
 
 "$build_dir/user-file-endpoint-test"
 
-g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=0 \
+g++ -std=c++17 -Wall -Wextra -Werror -DIOT_FEATURE_SLEEP=0 \
   -I"$project_dir/tests/native/endpoint_stubs" \
   -I"$project_dir/tests/native/stubs" \
   -I"$arduinojson_include" \
@@ -254,13 +254,14 @@ g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=0 \
 
 "$build_dir/endpoint-failure-path-test"
 
-g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=0 \
+g++ -std=c++17 -Wall -Wextra -Werror -DIOT_FEATURE_SLEEP=0 \
   -I"$project_dir/tests/native/endpoint_stubs" \
   -I"$project_dir/tests/native/stubs" \
   -I"$arduinojson_include" \
   -I"$project_dir/src" \
   "$project_dir/tests/native/ApiRouterAuthTest.cpp" \
   "$project_dir/src/api/ApiRouter.cpp" \
+  "$project_dir/src/api/features/FeaturesEndpoints.cpp" \
   "$project_dir/src/api/alive/AliveEndpoints.cpp" \
   "$project_dir/src/api/auth/AuthEndpoints.cpp" \
   "$project_dir/src/api/device/DeviceEndpoints.cpp" \
@@ -286,13 +287,14 @@ g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=0 \
 
 "$build_dir/api-router-auth-test"
 
-g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=1 \
+g++ -std=c++17 -Wall -Wextra -Werror -DIOT_FEATURE_SLEEP=1 \
   -I"$project_dir/tests/native/endpoint_stubs" \
   -I"$project_dir/tests/native/stubs" \
   -I"$arduinojson_include" \
   -I"$project_dir/src" \
   "$project_dir/tests/native/ApiRouterAuthTest.cpp" \
   "$project_dir/src/api/ApiRouter.cpp" \
+  "$project_dir/src/api/features/FeaturesEndpoints.cpp" \
   "$project_dir/src/api/alive/AliveEndpoints.cpp" \
   "$project_dir/src/api/auth/AuthEndpoints.cpp" \
   "$project_dir/src/api/device/DeviceEndpoints.cpp" \
@@ -318,7 +320,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=1 \
   "$project_dir/src/modules/runtime/BootDiagnostics.cpp" \
   -o "$build_dir/api-router-auth-sleep-test"
 
-g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=1 \
+g++ -std=c++17 -Wall -Wextra -Werror -DIOT_FEATURE_SLEEP=1 \
   -I"$project_dir/tests/native/endpoint_stubs" \
   -I"$project_dir/tests/native/stubs" \
   -I"$arduinojson_include" \
@@ -335,7 +337,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -DENABLE_SLEEP_SCHEDULER=1 \
 
 "$build_dir/api-router-auth-sleep-test"
 
-g++ -std=c++17 -Wall -Wextra -Werror -pthread -DENABLE_SLEEP_SCHEDULER=0 \
+g++ -std=c++17 -Wall -Wextra -Werror -pthread -DIOT_FEATURE_SLEEP=0 \
   -I"$project_dir/tests/native/storage_router_stubs" \
   -I"$project_dir/tests/native/endpoint_stubs" \
   -I"$project_dir/tests/native/stubs" \
@@ -343,6 +345,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -pthread -DENABLE_SLEEP_SCHEDULER=0 \
   -I"$project_dir/src" \
   "$project_dir/tests/native/StreamingSessionBridgeTest.cpp" \
   "$project_dir/src/api/ApiRouter.cpp" \
+  "$project_dir/src/api/features/FeaturesEndpoints.cpp" \
   "$project_dir/src/api/alive/AliveEndpoints.cpp" \
   "$project_dir/src/api/auth/AuthEndpoints.cpp" \
   "$project_dir/src/api/device/DeviceEndpoints.cpp" \
@@ -372,3 +375,5 @@ g++ -std=c++17 -Wall -Wextra -Werror -pthread -DENABLE_SLEEP_SCHEDULER=0 \
 python3 "$project_dir/tools/native-test/contract_checks.py" "$project_dir"
 
 bash "$project_dir/tools/native-test/test_services.sh"
+
+bash "$project_dir/tools/native-test/test_features.sh"

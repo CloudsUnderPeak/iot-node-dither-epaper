@@ -91,7 +91,8 @@ class ConfigService {
     if (result.ok() && changes != nullptr) *changes = actual;
     return result;
   }
-  Result updateAdminPassword(const char *password, DeviceConfig *committed = nullptr) {
+  Result updateAdminPassword(const char *password, DeviceConfig *committed = nullptr, bool runtimeAvailable = true) {
+    if (value.apPasswordEnabled && !runtimeAvailable) return unsupported("runtime unavailable");
     DeviceConfig updated = value;
     strlcpy(updated.adminPassword, password, sizeof(updated.adminPassword));
     return commitUpdated(updated, committed);

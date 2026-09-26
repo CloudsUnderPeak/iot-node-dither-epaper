@@ -414,6 +414,9 @@
     }
 
     function handle(method, path, init) {
+        if (path === 'api/features' && method === 'GET') {
+            return ok({ features: { sleep: true, epaper: true, storage: true, auth: true, user_files: true, mdns: true, battery: true, console: true } });
+        }
         if (path === 'api/alive' && method === 'GET') {
             return ok({});
         }

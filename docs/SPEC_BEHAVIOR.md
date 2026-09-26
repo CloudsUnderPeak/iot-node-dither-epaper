@@ -177,7 +177,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 
 ## 排程深度休眠
 
-- `ENABLE_SLEEP_SCHEDULER` 由 release build 的 `SLEEP=0|1` 控制；即使編入功能，factory runtime 預設仍為停用，必須由已認證的 `PUT /api/sleep` 明確啟用。
+- `IOT_FEATURE_SLEEP` 由功能設定檔的 `sleep=0|1` 控制，可由 release build 的 `SLEEP=0|1` 覆寫；即使編入功能，factory runtime 預設仍為停用，必須由 `PUT /api/sleep` 明確啟用（auth 編入時需要認證）。
 - 排程週期只接受 12、24、48 小時，使用 client epoch 與首次喚醒延遲建立固定 UTC anchor。後續 due 從 anchor 計算，不以每次完成時間累加；沒有可信 absolute clock 時使用 RTC carried relative clock，成功 SNTP 後才回 absolute basis。
 - `normal` mode 的 idle timeout 預設 1800 秒。Protected API、公開 e-paper write、完整 serial input line 與 keep-awake 都是活動；公開 status、靜態資源、登入失敗與背景 polling 不延長 idle。HTTP streaming upload/download 持有 activity／storage lease，不能在傳輸中入睡。
 - timer 喚醒且 RTC intent、CRC、schedule generation 與 wake source 全部有效時才進 `wake_cycle`。該模式只使用 persisted STA 或 Off，不啟動 AP、fallback AP、mDNS 或 captive DNS；STA 使用 minimum modem power save。使用者活動會切回 normal 並恢復原本 persisted 網路政策。
@@ -186,7 +186,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - agenda 診斷必須先成功保存才能準備入睡。final commit 關閉 keep-awake 後成功 arm timer、套用安全 GPIO hold，再停止 SNTP、mDNS、captive DNS、HTTP 與 Wi-Fi、卸載 userdata；接近 deep sleep 時 seal/write RTC intent，最後才呼叫 deep sleep。任何可回報的失敗依逆序恢復；不得用強制睡眠繞過 panel 或 storage 安全證明。
 - `POST /api/sleep/keep-awake` 可取消 prepare 階段的 intent；final commit 後回 `sleep_entering`。USB host 從 connected 轉 disconnected 時重新開始完整 idle timeout，避免拔線後立即睡眠。
 - `POST /api/system/reset` 與 `/settings` 會清除 sleep namespaces；`/data` 保留排程。`SLEEP=0` 時不註冊 sleep routes，但仍執行 boot GPIO hold hygiene。
-- 目前完成 host code、native tests、browser tests 與 release build 驗證；實際 timer wake、GPIO 波形、USB host presence、耗電、Wi-Fi reconnect 與實體 panel cooldown evidence 必須接上裝置後驗證，文件不宣稱硬體結果。
+- 實際 timer wake、GPIO 波形、USB host presence、耗電、Wi-Fi reconnect 與實體 panel cooldown evidence 必須接上裝置驗證；host／native／browser／release build 通過不代表硬體驗收完成，實測結果保存在 ignored `tmp/verification/`。
 
 ## Serial console 行為
 
@@ -234,22 +234,15 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - Controlled restart 核准前也會等待既有 userdata 檔案操作釋放同一 operation gate；不由 restart owner 關閉 callback 的檔案。若總等待超過 150 秒則取消本次 restart，原檔案操作仍由原 owner 收尾。取得最終核准後不再接受新檔案操作；進入 restart drain 即停止接受新的電子紙下載。
 
 
-## 選擇性編譯需求（待實作）
+## 選擇性編譯
 
-本節記錄新增產品需求與待決事項，不表示現有 firmware 已支援下列所有開關。現有 `SLEEP=0|1` 與 `WEB` 選擇仍以目前 build／API 規格為準。
-
-已確認需求：
-
-- 功能是否編入應由獨立設定檔管理，透過條件編譯移除實作；sleep 與 e-paper 必須可選，不只在 runtime 停用或隱藏頁面。
-- 若提供檔案 storage 裁切，`EPAPER=1` 必須要求 `STORAGE=1`；未滿足時 build 明確失敗，不自動補開 storage。
-- 關閉檔案 storage 時，使用者要求回收上傳分區至 image 空間；具體分區配置與切換規則列於下方待決事項。設定持久化與檔案上傳須分開界定。
-- 若提供 auth 裁切，允許 API route table 保留原有 auth 宣告，但 auth 未編入時該宣告不要求登入／token；HTTP、serial 與非同步完成路徑語意必須一致。
-- Wi-Fi 進階設定、scan 及其他模組應評估獨立裁切；裁切邊界與支援組合不得僅由前端是否顯示推定。
-
-待決事項與研究建議：
-
-- 分區合併目前按「移除 `userdata`，空間歸入 firmware `app0`」研究；電子紙圖片原本也在 `userdata`，沒有另一個 image partition。建議保留 `user_nvs`、預設 NVS 與 coredump，並明訂切換 layout 時的檔案丟棄／重建規則，不將既有檔案保留保證套用到改分區。
-- Wi-Fi 進階裁切是只移除管理 API／UI、保留套用既有設定，還是連 static IP、自訂 AP 網段與功率分支一併移除？建議先採前者；scan 可獨立關閉並保留手動 SSID 連線。
-- `SLEEP=1`、`EPAPER=0` 是否合法？建議允許純定時睡眠／喚醒，不註冊面板刷新工作。
-- Auth 關閉後如何更新 SoftAP 密碼？目前 AP 與管理者共用密碼欄位，不能因移除 session 功能就改成公開 AP；建議保留 credential 並另定 Wi-Fi 更新入口。
-- E-paper 未編入但同一實體板仍接有面板時，是否保留板級安全 quiesce／hold cleanup？功能裁切不可假定外接硬體已移除。
+- `sleep`、`epaper`、`storage`、`auth`、`user_files`、`mdns`、`battery`、`console` 由獨立 feature 設定檔決定是否編入，預設全開。關閉會裁切模組實作與相應 API／adapter，不能只在 runtime 停用或前端隱藏。
+- `epaper=1` 或 `user_files=1` 必須明確搭配 `storage=1`，違反時建置失敗，不自動補開。`user_files=0` 只裁切 generic file API，仍允許 epaper 專用圖片 upload/download/refresh。
+- `storage=0` 移除 `userdata` filesystem，把上傳分區回收至 firmware `app0`；設定持久化、內嵌 Web、系統時鐘、Flash 資訊、Wi-Fi 與 captive DNS 保留。全 reset／settings reset 可用，data-only reset 不註冊。
+- 改變 storage 會改變分區用途，既有檔案不提供保留或 migration 保證。成功啟動無 storage 版本後撤銷 filesystem 初始化標記，再啟用時重建；未啟動無 storage 版本就切回者需要明確 reset／recovery。一般 mount failure 維持既有拒絕靜默格式化的行為。
+- `sleep=1, epaper=0` 合法，只執行時鐘／排程／睡眠工作，不宣稱曾執行面板刷新。睡眠與重啟仍等待存在的 filesystem owner 與 Wi-Fi cleanup，保持 timeout、admission 與取消／復原邊界。未編入的 owner 不構成 blocker。
+- `epaper=0` 仍使用已確認的板級安全 quiesce 與 retained hold cleanup，不假定外接面板已被拔除。
+- `auth=0` 不註冊 auth resource；route table 可保留原有 protected 宣告，HTTP、serial、streaming 與非同步 scan completion 的有效政策都不要求 token。此政策不改變 payload validation 或 operation gate。
+- AP 與管理者共用的 persisted 密碼不因 auth 裁切被清除。`auth=0` 使用 Wi-Fi AP credential 更新入口，保留密碼驗證、ConfigService 單一 owner、受保護 AP 的安全重啟；AP 密碼開關仍有效。
+- 公開能力 API 逐一回報八個功能是否編入。Support 與 runtime ready 分開；前端先讀能力再顯示選項與允許操作。`mdns=0` 不顯示 `.local` 存取提示，`battery=0` 不顯示電池卡片，`console=0` 不提供 serial commands，但既有診斷 log 保留。
+- Feature 設定、分區與操作方式見 [config/README.md](../config/README.md)。Wi-Fi 進階設定與 scan 的獨立開關仍未納入這八個功能；本次保留既有功能，後續裁切須再決定既有 persisted static IP 等欄位的套用政策。

@@ -3,6 +3,7 @@
 #include "api/shared/ApiResponse.h"
 
 namespace RuntimeEndpoints {
+#if IOT_FEATURE_EPAPER
 namespace {
 
 const char *activityFor(EpaperServiceState state) {
@@ -77,4 +78,27 @@ Api::Response status(const Api::Request &request,
   return Api::ok(Api::json(data));
 }
 
+#else
+Api::Response status(const Api::Request &request,
+                     const BootDiagnostics &bootDiagnostics,
+                     RuntimeActionScheduler &runtime) {
+  if (request.hasBody || request.hasJsonBody || request.queryCount || request.queryOverflow)
+    return Api::problem(400, "unsupported_field", "runtime status does not accept fields or a body");
+  const auto state = runtime.snapshot();
+  JsonDocument data;
+  data["state"] = state.restartPending ? "restarting" : "normal";
+  data["busy"] = state.restartPending;
+  data["activity"] = state.restartPending ? "system_restart" : "none";
+  if (state.restartPending) data["phase"] = "draining";
+  else data["phase"] = nullptr;
+  data["cpu_mhz"] = getCpuFrequencyMhz();
+  data["normal_cpu_mhz"] = 160;
+  data["blocked_resources"].to<JsonArray>();
+  data["last_reset_reason"] = deviceResetReasonToString(bootDiagnostics.snapshot().resetReason);
+  data["brownout_detected"] = bootDiagnostics.snapshot().resetReason == DeviceResetReason::Brownout;
+  if (state.restartFailed) data["last_error_code"] = "restart_failed";
+  else data["last_error_code"] = nullptr;
+  return Api::ok(Api::json(data));
+}
+#endif
 }  // namespace RuntimeEndpoints

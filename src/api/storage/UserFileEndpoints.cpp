@@ -1,4 +1,5 @@
 #include "UserFileEndpoints.h"
+#include "core/ProjectFeatures.h"
 
 #include <cstring>
 
@@ -6,6 +7,7 @@
 #include "modules/storage/UserFilePolicy.h"
 
 namespace UserFileEndpoints {
+#if IOT_FEATURE_USER_FILES
 namespace {
 
 struct ListContext {
@@ -116,6 +118,8 @@ Api::Response transportUnsupported() {
                       "raw file upload and download require HTTP");
 }
 
+#endif
+
 Api::Response fromStorageResult(const UserDataFileResult &result,
                                 size_t detailBytes) {
   switch (result.status) {
@@ -147,6 +151,7 @@ Api::Response fromStorageResult(const UserDataFileResult &result,
   return Api::problem(500, "storage_error", "storage error");
 }
 
+#if IOT_FEATURE_USER_FILES
 Api::Response uploadCommitted(const char *name,
                               const UserDataUploadCommit &commit) {
   if (!commit.result.ok()) return fromStorageResult(commit.result);
@@ -159,4 +164,5 @@ Api::Response uploadCommitted(const char *name,
              : Api::ok(Api::json(data), "file replaced");
 }
 
+#endif
 }  // namespace UserFileEndpoints

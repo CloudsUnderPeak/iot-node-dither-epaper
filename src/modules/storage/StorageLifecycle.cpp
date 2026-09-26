@@ -1,4 +1,5 @@
 #include "StorageLifecycle.h"
+#include "core/ProjectFeatures.h"
 
 #include <Preferences.h>
 #include <nvs_flash.h>
@@ -32,9 +33,9 @@ bool knownPendingValue(const String &value) {
 
 Result StorageLifecycle::begin(UserDataStorage *userData) {
   ready_ = false;
-  if (userData == nullptr) {
-    return invalidInput("missing user data storage");
-  }
+#if IOT_FEATURE_STORAGE
+  if (userData == nullptr) return invalidInput("missing user data storage");
+#endif
 
   bool userNvsInitialized = false;
   bool userDataInitialized = false;
@@ -64,6 +65,7 @@ Result StorageLifecycle::begin(UserDataStorage *userData) {
   }
 
   Result userDataResult = okResult();
+#if IOT_FEATURE_STORAGE
   if (initializeUserData) {
     Result result = writeInitialized(kUserDataInitializedKey, false);
     if (!result.ok()) return result;
@@ -73,14 +75,21 @@ Result StorageLifecycle::begin(UserDataStorage *userData) {
     if (!result.ok()) return result;
   }
 
+#else
+  // Persist the invalidation before this firmware can later be replaced by a
+  // smaller app with a filesystem. Do not trust the former initialization bit.
+  const Result invalidateResult = writeInitialized(kUserDataInitializedKey, false);
+  if (!invalidateResult.ok()) return invalidateResult;
+#endif
+
   if (pending != kPendingNone || !pendingStored) {
     const Result clearResult = writePending(kPendingNone);
     if (!clearResult.ok()) return clearResult;
   }
 
-  if (!initializeUserData) {
-    userDataResult = userData->begin();
-  }
+#if IOT_FEATURE_STORAGE
+  if (!initializeUserData) userDataResult = userData->begin();
+#endif
   return userDataResult;
 }
 

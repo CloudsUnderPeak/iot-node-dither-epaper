@@ -1,6 +1,6 @@
 #include "SleepFeatures.h"
 
-#if ENABLE_SLEEP_SCHEDULER
+#if IOT_FEATURE_SLEEP
 #include "SntpClient.h"
 
 #include <esp_sntp.h>

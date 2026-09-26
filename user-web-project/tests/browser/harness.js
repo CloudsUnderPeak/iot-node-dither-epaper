@@ -11,6 +11,11 @@ var harness = (function () {
     function assert(value, message) {
         if (!value) { throw new Error(message); }
     }
+    function fullFeatures() {
+        return { known: function () { return true; }, supports: function () { return true; },
+            disabled: function () { return false; }, subscribe: function () { return function () {}; },
+            refresh: function () { return Promise.resolve(); } };
+    }
     function FakeWorker() {
         this.messages = [];
         this.terminated = false;
@@ -29,5 +34,5 @@ var harness = (function () {
         fetch.requests = requests;
         return fetch;
     }
-    return { deferred: deferred, execute: execute, assert: assert, FakeWorker: FakeWorker, controlledFetch: controlledFetch };
+    return { fullFeatures: fullFeatures, deferred: deferred, execute: execute, assert: assert, FakeWorker: FakeWorker, controlledFetch: controlledFetch };
 })();

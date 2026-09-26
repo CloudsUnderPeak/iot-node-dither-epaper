@@ -48,7 +48,7 @@
     const page = app.app.router.currentPage();
     if (!page) return [];
     if (page.id !== 'settings') return page.resources || [];
-    if (state.settingsPage === 'admin') return ['auth'];
+    if (state.settingsPage === 'admin') return featureDisabled('auth') ? [] : ['auth'];
     if (state.settingsPage === 'system') return ['device'];
     return ['wifi'];
   }
@@ -56,7 +56,7 @@
   function refreshCurrentPage() {
     // refreshResources already presents a user-facing error for this explicit
     // action, so the terminal rejection is intentionally consumed here.
-    return refreshResources(resourcesForCurrentPage()).catch(() => {});
+    return refreshFeatures().then(() => refreshResources(resourcesForCurrentPage())).catch(() => {});
   }
 
   async function refreshWifiSnapshot(options = {}) {
@@ -77,9 +77,10 @@
     $('refreshButton').addEventListener('click', refreshCurrentPage);
     applyLanguage();
     app.app.router.start();
-    refreshResources(['device', 'wifi', 'storage', 'auth'], {
-      formSync: 'force'
-    }).catch((error) => reportBackgroundError('initial resource refresh', error));
+    refreshFeatures().catch(() => null).then(() => refreshResources(
+      featureDisabled('auth') ? ['device', 'wifi', 'storage'] : ['device', 'wifi', 'storage', 'auth'],
+      { formSync: 'force' }
+    )).catch((error) => reportBackgroundError('initial resource refresh', error));
   }
 
   window.refreshResources = refreshResources;
