@@ -165,14 +165,15 @@ curl -H 'Authorization: Bearer <token>' \
       "user_files": true,
       "mdns": true,
       "battery": true,
-      "console": true
+      "console": true,
+      "status_led": true
     }
   },
   "message": "ok"
 }
 ```
 
-`GET /api/features?name=epaper` 回 `data: {"feature":"epaper","supported":true}`；已知但未編入的功能仍回 HTTP 200 與 `supported:false`。名稱區分大小寫。未知名稱回 400／`invalid_field`（`fields:["name"]`）；額外 query、重複 query、query overflow 或 body 回 400／`unsupported_field`。八個欄位固定存在，使用 boolean。
+`GET /api/features?name=epaper` 回 `data: {"feature":"epaper","supported":true}`；已知但未編入的功能仍回 HTTP 200 與 `supported:false`。名稱區分大小寫。未知名稱回 400／`invalid_field`（`fields:["name"]`）；額外 query、重複 query、query overflow 或 body 回 400／`unsupported_field`。九個欄位固定存在，使用 boolean。
 
 | 功能未編入 | Contract 差異 |
 | --- | --- |
@@ -184,6 +185,7 @@ curl -H 'Authorization: Bearer <token>' \
 | `mdns` | 不宣告 `.local`／`_http._tcp`；IP URL 與 AP captive DNS 仍可用。 |
 | `battery` | `/api/device` 的 `power.voltage_mv`／`sample_age_ms`／`estimated_percent` 為 null。 |
 | `console` | 不提供 human commands／serial API；HTTP 與既有 Serial 診斷 log 不受影響。 |
+| `status_led` | 不提供板載 LED 模式指示；沒有 LED 控制 endpoint。 |
 
 被裁切的路由回 404／`not_found`，不註冊假 handler。`epaper=1`／`user_files=1` 必須搭配 `storage=1`，所以不會有編入圖片或檔案 API 卻不存在 filesystem 的合法版本。
 
@@ -952,7 +954,7 @@ Settings 與完整 reset 也會清除 `sleep_a`、`sleep_b`、`sleep_meta` 排�
       "remaining_seconds": 1432
     },
     "schedule": {
-      "period_hours": 24,
+      "period_minutes": 1440,
       "anchor_epoch": 1790096400,
       "clock_basis": "absolute",
       "next_wake_epoch": 1790182800,
@@ -990,6 +992,8 @@ Settings 與完整 reset 也會清除 `sleep_a`、`sleep_b`、`sleep_meta` 排�
 }
 ```
 
+短週期仍遵守 180 秒 panel cooldown；不能接納時記錄 `skipped_epaper_unavailable`，工作超過週期時跳過已錯過時段。舊小時格式的儲存資料不轉換：讀到它會進 `storage_state: recovery` 並停用排程，需用新的分鐘 payload 明確重新儲存。
+
 `mode` 為 `normal|wake_cycle`；`state` 為 `disabled|armed|agenda_running|entering|failed`；`storage_state` 為 `ok|recovery|error`。Nullable clock／schedule／last wake 欄位在沒有可信資料時為 null。`sleep_request.state` 為 `none|pending|entering|cancelled|failed`。
 
 `blockers` 可包含 `epaper_busy`、`epaper_unsafe`、`epaper_marker_active`、`upload_active`、`restart_pending`、`wifi_transition`、`runtime_action_pending`、`no_wake_source`、`usb_host_connected`、`sleep_storage_error`。它是診斷 snapshot；真正入睡仍會重新取得 owner reservations 並再次驗證。
@@ -1001,13 +1005,13 @@ Settings 與完整 reset 也會清除 `sleep_a`、`sleep_b`、`sleep_meta` 排�
 ```json
 {
   "enabled": true,
-  "period_hours": 24,
+  "period_minutes": 1440,
   "first_wake_delay_minutes": 60,
   "client_time": 1790092800
 }
 ```
 
-`period_hours` 只接受 12、24、48；delay 為 1 到該 period 的總分鐘數；`client_time` 範圍與 system time 相同。交易先設定 clock、建立固定 UTC anchor，再以新的 schedule generation 持久化；save 失敗會回復先前 clock，回 `500 storage_error`。clock 回復也失敗時回 `500 time_error`。成功回與 GET 相同的完整 snapshot。
+`period_minutes` 接受 1–2880 的整數，預設 1440；delay 為 1 到 `period_minutes`。舊欄位 `period_hours` 回 `400 unsupported_field`；`client_time` 範圍與 system time 相同。交易先設定 clock、建立固定 UTC anchor，再以新的 schedule generation 持久化；save 失敗會回復先前 clock，回 `500 storage_error`。clock 回復也失敗時回 `500 time_error`。成功回與 GET 相同的完整 snapshot。
 
 停用使用 `{"enabled":false}`。若停用時仍提供 schedule 欄位，三個欄位必須完整且有效。停用不會移除最近一次診斷。
 

@@ -106,7 +106,7 @@ class MemoryBackend final : public PreferencesBackend {
 SleepRecord sampleRecord() {
   SleepRecord value;
   value.enabled = true;
-  value.periodHours = 24;
+  value.periodMinutes = 1440;
   value.anchorEpoch = 1704067200LL;
   value.scheduleGeneration = 1;
   value.lastHandledSlot = 42;
@@ -143,6 +143,20 @@ void assertBaselineStillSelected(MemoryBackend &backend, int64_t anchor) {
   SleepRecord loaded;
   assert(rebooted.load(loaded) == SleepStoreState::Ready);
   assert(loaded.anchorEpoch == anchor && loaded.revision == 1);
+}
+
+void testMinuteRoundTrips() {
+  for (uint16_t minutes : {1, 720, 1440, 2880}) {
+    MemoryBackend backend;
+    SleepStore store(backend);
+    SleepRecord committed = commitBaseline(store);
+    committed.periodMinutes = minutes;
+    assert(store.save(committed, committed) == SleepStoreState::Ready);
+    SleepStore rebooted(backend);
+    SleepRecord loaded;
+    assert(rebooted.load(loaded) == SleepStoreState::Ready);
+    assert(loaded.periodMinutes == minutes);
+  }
 }
 
 void testRoundTripAndNoop() {
@@ -264,7 +278,7 @@ void testRecoveryAndSchemaValidation() {
     SleepStore store(backend);
     commitBaseline(store);
     auto &record = backend.spaces["sleep_a"]["record"];
-    record[4] = 2;
+    record[4] = 1; // Legacy hours schema must not be interpreted as minutes.
     resealRecord(record);
     SleepStore rebooted(backend);
     SleepRecord loaded;
@@ -326,6 +340,7 @@ void testInvalidValuesAndRevisionExhaustionFailClosed() {
 
 int main() {
   testRoundTripAndNoop();
+  testMinuteRoundTrips();
   testInactiveSlotFailuresKeepOldSelector();
   testSelectorOutcomesAreResolvedOrFailClosed();
   testRecoveryAndSchemaValidation();

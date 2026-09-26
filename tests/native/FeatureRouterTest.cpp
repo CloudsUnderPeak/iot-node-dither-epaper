@@ -53,11 +53,16 @@ int main() {
   JsonDocument body; assert(!deserializeJson(body,response.data.c_str()));
   assert(body["features"]["auth"].as<bool>() == bool(IOT_FEATURE_AUTH));
   assert(body["features"]["epaper"].as<bool>() == bool(IOT_FEATURE_EPAPER));
+  assert(body["features"]["status_led"].as<bool>() == bool(IOT_FEATURE_STATUS_LED));
   Api::Request query; query.path="/api/features"; query.method=Api::Method::Get;
   query.queryCount=1; query.query[0].name="name"; query.query[0].value="user_files";
   response=router.dispatch(query); assert(response.statusCode == 200);
   assert(!deserializeJson(body,response.data.c_str()));
   assert(body["supported"].as<bool>() == bool(IOT_FEATURE_USER_FILES));
+  query.query[0].value="status_led";
+  response=router.dispatch(query); assert(response.statusCode == 200);
+  assert(!deserializeJson(body,response.data.c_str()));
+  assert(body["supported"].as<bool>() == bool(IOT_FEATURE_STATUS_LED));
   query.query[0].value="unknown"; assert(router.dispatch(query).statusCode == 400);
   Api::Request write; write.method=Api::Method::Put; write.path="/api/system";
   assert(router.dispatch(write).statusCode == (IOT_FEATURE_AUTH ? 401 : 400));

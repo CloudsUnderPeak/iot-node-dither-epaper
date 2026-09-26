@@ -16,6 +16,7 @@
 #include "modules/time/TimeSource.h"
 #include "modules/config/model/DeviceConfig.h"
 
+class StatusLed;
 class ConfigService;
 class EpaperService;
 class UserDataStorage;
@@ -71,6 +72,9 @@ class SleepCoordinator {
               RuntimeActionScheduler &runtime, ApiServer &http) {
     attach(config, &epaper, &storage, wifi, &mdns, captive, runtime, http);
   }
+#if IOT_FEATURE_STATUS_LED
+  void attachStatusLed(StatusLed &led) { statusLed_ = &led; }
+#endif
   void poll(uint32_t nowMs);
   SleepSnapshot snapshot(uint32_t nowMs);
   bool keepAwake(uint32_t nowMs);
@@ -94,6 +98,9 @@ class SleepCoordinator {
   SleepStore *store_ = nullptr;
   TimeSource *time_ = nullptr;
   SleepDriver *driver_ = nullptr;
+#if IOT_FEATURE_STATUS_LED
+  StatusLed *statusLed_ = nullptr;
+#endif
   ConfigService *config_ = nullptr;
   EpaperService *epaper_ = nullptr;
   UserDataStorage *storage_ = nullptr;

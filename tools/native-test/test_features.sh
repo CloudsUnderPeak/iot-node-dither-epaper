@@ -15,7 +15,7 @@ for profile in auth-off minimal panel-only; do
   flags=(-DIOT_FEATURE_SLEEP=0 -DIOT_FEATURE_AUTH=0)
   optional=(src/api/storage/UserFileEndpoints.cpp)
   if [ "$profile" = minimal ]; then
-    flags+=(-DIOT_FEATURE_EPAPER=0 -DIOT_FEATURE_STORAGE=0 -DIOT_FEATURE_USER_FILES=0 -DIOT_FEATURE_BATTERY=0)
+    flags+=(-DIOT_FEATURE_EPAPER=0 -DIOT_FEATURE_STORAGE=0 -DIOT_FEATURE_USER_FILES=0 -DIOT_FEATURE_BATTERY=0 -DIOT_FEATURE_STATUS_LED=0)
     optional=()
   else
     optional+=(src/api/epaper/EpaperEndpoints.cpp src/modules/epaper/EpaperImageFormat.cpp
@@ -33,7 +33,7 @@ for storage in 0 1; do
   g++ -std=c++17 -Wall -Wextra -Werror -pthread "${flags[@]}" \
     -Itests/native/sleep_coordinator_stubs -Itests/native/stubs -Isrc \
     -include tests/native/stubs/freertos/task.h \
-    tests/native/SleepCoordinatorTest.cpp src/modules/sleep/SleepCoordinator.cpp \
+    tests/native/SleepCoordinatorTest.cpp src/modules/sleep/SleepCoordinator.cpp src/modules/status_led/StatusLed.cpp \
     src/modules/sleep/SleepSchedule.cpp src/modules/sleep/SleepStore.cpp \
     src/modules/sleep/SleepRtcRecord.cpp src/modules/sleep/WakeClassifier.cpp \
     -o "$build_dir/timer-only-storage-$storage"

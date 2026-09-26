@@ -9,6 +9,10 @@ g++ "${common[@]}" tests/native/EpaperGzipTest.cpp src/modules/epaper/EpaperGzip
   src/modules/epaper/EpaperImageFormat.cpp src/modules/epaper/miniz/miniz_tinfl.c \
   -lz -o "$build_dir/epaper-gzip-test"
 "$build_dir/epaper-gzip-test"
+g++ -Itests/native/status_led_stubs "${common[@]}" \
+  tests/native/StatusLedPwmTest.cpp src/modules/status_led/StatusLed.cpp \
+  src/modules/status_led/ArduinoStatusLedDriver.cpp -o "$build_dir/status-led-pwm-test"
+"$build_dir/status-led-pwm-test"
 storage=(src/modules/storage/UserDataStorage.cpp src/modules/storage/UserFilePolicy.cpp)
 g++ "${common[@]}" tests/native/UserDataStorageTest.cpp "${storage[@]}" -o "$build_dir/userdata-storage-test"
 "$build_dir/userdata-storage-test"
@@ -23,7 +27,7 @@ g++ "${common[@]}" tests/native/EpaperServiceTest.cpp "${storage[@]}" \
 "$build_dir/epaper-service-test"
 g++ -Itests/native/sleep_coordinator_stubs "${common[@]}" \
   -include tests/native/stubs/freertos/task.h \
-  tests/native/SleepCoordinatorTest.cpp src/modules/sleep/SleepCoordinator.cpp \
+  tests/native/SleepCoordinatorTest.cpp src/modules/sleep/SleepCoordinator.cpp src/modules/status_led/StatusLed.cpp \
   src/modules/sleep/SleepSchedule.cpp src/modules/sleep/SleepStore.cpp \
   src/modules/sleep/SleepRtcRecord.cpp src/modules/sleep/WakeClassifier.cpp \
   -o "$build_dir/sleep-coordinator-test"

@@ -67,7 +67,7 @@
         },
         clockEpoch: null,
         clockSetAt: 0,
-        sleep: { enabled: false, period: 24, anchor: null, due: null,
+        sleep: { enabled: false, period: 1440, anchor: null, due: null,
             idleAt: Date.now(), request: { state: 'none', error_code: null } }
     };
 
@@ -89,7 +89,7 @@
         var next = value.due;
         var basis = current === null ? 'relative' : 'absolute';
         if (value.enabled && basis === 'absolute' && next !== null) {
-            var period = value.period * 3600;
+            var period = value.period * 60;
             while (next < current) { next += period; }
         }
         if (value.request.state === 'pending' && Date.now() - value.requestAt > 3000) {
@@ -103,12 +103,12 @@
             idle: { timeout_seconds: 1800, remaining_seconds: value.enabled ? remaining : null,
                 armed: value.enabled },
             schedule: {
-                period_hours: value.enabled ? value.period : null,
+                period_minutes: value.enabled ? value.period : null,
                 anchor_epoch: value.enabled ? value.anchor : null,
                 clock_basis: value.enabled ? basis : null,
                 next_wake_epoch: value.enabled && basis === 'absolute' ? next : null,
                 next_wake_in_seconds: value.enabled ? (basis === 'absolute'
-                    ? Math.max(0, next - current) : value.period * 3600) : null
+                    ? Math.max(0, next - current) : value.period * 60) : null
             },
             time: mockTime(),
             last_wake: { cause: 'none', mode: null, clock_basis: null, epoch: null,
@@ -415,7 +415,7 @@
 
     function handle(method, path, init) {
         if (path === 'api/features' && method === 'GET') {
-            return ok({ features: { sleep: true, epaper: true, storage: true, auth: true, user_files: true, mdns: true, battery: true, console: true } });
+            return ok({ features: { sleep: true, epaper: true, storage: true, auth: true, user_files: true, mdns: true, battery: true, console: true, status_led: true } });
         }
         if (path === 'api/alive' && method === 'GET') {
             return ok({});
@@ -583,22 +583,22 @@
             if (!sleepBody || typeof sleepBody.enabled !== 'boolean') {
                 return fail(400, 'invalid_field', 'enabled is required', { fields: ['enabled'] });
             }
-            var fields = ['enabled', 'period_hours', 'first_wake_delay_minutes', 'client_time'];
+            var fields = ['enabled', 'period_minutes', 'first_wake_delay_minutes', 'client_time'];
             var unknown = Object.keys(sleepBody).filter(function (key) { return fields.indexOf(key) === -1; });
             if (unknown.length) { return fail(400, 'unsupported_field', 'unsupported field', { fields: unknown }); }
             var extras = fields.slice(1).filter(function (key) { return sleepBody[key] !== undefined; });
             if (sleepBody.enabled || extras.length) {
-                var hours = sleepBody.period_hours;
+                var periodMinutes = sleepBody.period_minutes;
                 var minutes = sleepBody.first_wake_delay_minutes;
                 var timestamp = sleepBody.client_time;
-                if ([12,24,48].indexOf(hours) === -1 || !Number.isInteger(minutes) ||
-                    minutes < 1 || minutes > hours * 60 || !Number.isInteger(timestamp) ||
+                if (!Number.isInteger(periodMinutes) || periodMinutes < 1 || periodMinutes > 2880 || !Number.isInteger(minutes) ||
+                    minutes < 1 || minutes > periodMinutes || !Number.isInteger(timestamp) ||
                     timestamp < 1704067200 || timestamp >= 4102444800) {
                     return fail(400, 'invalid_field', 'invalid schedule');
                 }
                 state.clockEpoch = timestamp;
                 state.clockSetAt = Date.now();
-                state.sleep.period = hours;
+                state.sleep.period = periodMinutes;
                 state.sleep.anchor = timestamp + minutes * 60;
                 state.sleep.due = state.sleep.anchor;
             }

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-NAMES = ('sleep', 'epaper', 'storage', 'auth', 'user_files', 'mdns', 'battery', 'console')
+NAMES = ('sleep', 'epaper', 'storage', 'auth', 'user_files', 'mdns', 'battery', 'console', 'status_led')
 DEFAULTS = {name: True for name in NAMES}
 
 
@@ -76,4 +76,5 @@ def source_filter(config):
     if not f['mdns']: excluded += ['modules/mdns/']
     if not f['battery']: excluded += ['modules/power/']
     if not f['console']: excluded += ['modules/console/']
+    if not f['status_led']: excluded += ['modules/status_led/']
     return '+<*> ' + ' '.join(f'-<{path}>' for path in excluded)

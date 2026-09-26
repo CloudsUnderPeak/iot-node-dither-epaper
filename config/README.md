@@ -1,6 +1,6 @@
 # 功能編譯設定
 
-`features.ini` 是預設設定。每個功能只接受 `0`（不編入）或 `1`（編入）；指定設定檔中省略的功能視為 `0`，與 OpenWrt 的未選取功能一致。預設提供的 `features.ini` 明確開啟全部八個功能。未知欄位、重複欄位、錯誤值及不合法相依都會使建置失敗。這些設定決定韌體能力，不能透過 runtime API 補開。
+`features.ini` 是預設設定。每個功能只接受 `0`（不編入）或 `1`（編入）；指定設定檔中省略的功能視為 `0`，與 OpenWrt 的未選取功能一致。預設提供的 `features.ini` 明確開啟全部九個功能。未知欄位、重複欄位、錯誤值及不合法相依都會使建置失敗。這些設定決定韌體能力，不能透過 runtime API 補開。
 
 | 設定 | 關閉時的結果 | 相依 |
 | --- | --- | --- |
@@ -12,15 +12,16 @@
 | `mdns` | 移除 `.local` 宣告與服務發現。 | Wi-Fi、IP 連線與 captive DNS 仍保留。 |
 | `battery` | 移除電池 ADC 取樣；device power 欄位回 `null`。 | 無。 |
 | `console` | 移除 human command 與 serial API adapter。 | 啟動／診斷 Serial log 仍保留。 |
+| `status_led` | 移除 LED 模式指示；板級 boot 關燈與舊 hold 清理仍保留。 | 無；`sleep=0` 時一般開機後恆亮；預設 10% 亮度由 board profile 設定。 |
 
 ```sh
-# 預設八個功能全開，使用專案自己的前端
+# 預設九個功能全開，使用專案自己的前端
 make build
 
 # 複製 features.ini 後依需要修改，再指定檔案
 make build FEATURES=config/features.ini WEB=user
 
-# 八個功能全關，保留 HTTP、Wi-Fi、設定與系統管理
+# 九個功能全關，保留 HTTP、Wi-Fi、設定與系統管理
 make build FEATURES=config/profiles/minimal.ini WEB=none
 
 # 相容舊指令：只覆寫所選設定檔的 sleep
@@ -29,7 +30,7 @@ make build FEATURES=config/features.ini SLEEP=0
 
 `[sleep]` 的 `idle_timeout_seconds` 接受 1–86400，預設 1800；`ignore_usb_host` 接受 0/1，預設 0。`SLEEP` 未傳入時使用設定檔，傳入時只覆寫 `sleep` 功能。直接執行 PlatformIO 時使用 `platformio.ini` 的 `custom_features`，可用 `custom_sleep` 明確覆寫 sleep；不要在 `build_flags` 重複定義功能 macro。
 
-建置工具會產生固定內容的 effective INI、C/C++ header、JSON 與分區 CSV。Sleep 統一使用 `IOT_FEATURE_SLEEP` 作為唯一的 C/C++ 開關。原始碼以 `#if IOT_FEATURE_*` 包住相依整合，並由 source filter 排除未啟用模組的 `.cpp`。Release manifest 記錄八個功能、有效設定 SHA-256 與分區 layout，驗證時會檢查實際 `partitions.bin`。
+建置工具會產生固定內容的 effective INI、C/C++ header、JSON 與分區 CSV。Sleep 統一使用 `IOT_FEATURE_SLEEP` 作為唯一的 C/C++ 開關。原始碼以 `#if IOT_FEATURE_*` 包住相依整合，並由 source filter 排除未啟用模組的 `.cpp`。Release manifest 記錄九個功能、有效設定 SHA-256 與分區 layout，驗證時會檢查實際 `partitions.bin`。
 
 | 分區 | `storage=1` | `storage=0` |
 | --- | --- | --- |
@@ -53,4 +54,4 @@ make -C user-web-project test-production
 python3 tools/feature-test/run.py --build
 ```
 
-最後一項檢查所有 256 種設定的合法性，並編譯 13 組代表性設定、檢查被裁切服務的 ELF symbol；`--all` 可編譯全部 160 組合法設定。紀錄保存於 ignored `tmp/verification/`，不代表板上 smoke test。
+最後一項檢查所有 512 種設定的合法性，並編譯 14 組代表性設定、檢查被裁切服務的 ELF symbol；`--all` 可編譯全部 320 組合法設定。紀錄保存於 ignored `tmp/verification/`，不代表板上 smoke test。

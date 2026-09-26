@@ -279,7 +279,7 @@ api POST /api/wifi/reconnect token=<token> {}
 
 ```text
 api PUT /api/system/time token=<token> {"client_time":1790092800}
-api PUT /api/sleep token=<token> {"enabled":true,"period_hours":24,"first_wake_delay_minutes":60,"client_time":1790092800}
+api PUT /api/sleep token=<token> {"enabled":true,"period_minutes":1440,"first_wake_delay_minutes":60,"client_time":1790092800}
 api GET /api/sleep
 api POST /api/sleep/keep-awake {}
 api POST /api/sleep/now token=<token> {}

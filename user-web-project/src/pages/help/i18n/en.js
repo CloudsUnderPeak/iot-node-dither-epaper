@@ -149,7 +149,7 @@
                         id: 'scheduled-sleep',
                         title: 'Power schedule on a connected device',
                         bullets: [
-                            'The optional Power Schedule page refreshes the stored image every 12, 24, or 48 hours on a UTC interval; daylight saving time does not shift the cycle.',
+                            'Select a local refresh time from the hour/minute dropdowns in Power Schedule, without selecting a date. A past time means tomorrow; choose a time within the selected 12, 24, or 48-hour interval. The UTC cycle then repeats without daylight saving adjustments.',
                             'When device time is not synchronized, the next refresh uses a relative countdown until the clock is set.',
                             'Stay awake only extends the idle timer while the device is already awake. A sleeping device cannot receive the request.',
                             'A connected USB host can block sleep; disconnect it after configuration if the device reports usb_host_connected.'

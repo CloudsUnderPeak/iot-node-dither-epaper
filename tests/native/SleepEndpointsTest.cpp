@@ -108,11 +108,17 @@ void testStrictValidationAndCommit() {
   for (const char *invalid : {
            R"({})",
            R"({"enabled":"true"})",
-           R"({"enabled":true,"period_hours":24,"first_wake_delay_minutes":60})",
-           R"({"enabled":true,"period_hours":6,"first_wake_delay_minutes":60,"client_time":1799996400})",
-           R"({"enabled":true,"period_hours":24,"first_wake_delay_minutes":0,"client_time":1799996400})",
-           R"({"enabled":true,"period_hours":24,"first_wake_delay_minutes":60,"client_time":1704067199})",
-           R"({"enabled":false,"period_hours":24})",
+           R"({"enabled":true,"period_minutes":1440,"first_wake_delay_minutes":60})",
+           R"({"enabled":true,"period_hours":24,"first_wake_delay_minutes":1,"client_time":1799996400})",
+           R"({"enabled":true,"period_minutes":0,"first_wake_delay_minutes":1,"client_time":1799996400})",
+           R"({"enabled":true,"period_minutes":-1,"first_wake_delay_minutes":1,"client_time":1799996400})",
+           R"({"enabled":true,"period_minutes":1.5,"first_wake_delay_minutes":1,"client_time":1799996400})",
+           R"({"enabled":true,"period_minutes":1,"first_wake_delay_minutes":2,"client_time":1799996400})",
+           R"({"enabled":true,"period_minutes":4294967295,"first_wake_delay_minutes":1,"client_time":1799996400})",
+           R"({"enabled":true,"period_minutes":2881,"first_wake_delay_minutes":60,"client_time":1799996400})",
+           R"({"enabled":true,"period_minutes":1440,"first_wake_delay_minutes":0,"client_time":1799996400})",
+           R"({"enabled":true,"period_minutes":1440,"first_wake_delay_minutes":60,"client_time":1704067199})",
+           R"({"enabled":false,"period_minutes":1440})",
            R"({"enabled":false,"unexpected":1})",
        }) {
     SleepCoordinator sleep;
@@ -129,11 +135,11 @@ void testStrictValidationAndCommit() {
   JsonDocument document;
   Api::Request request = jsonRequest(
       document,
-      R"({"enabled":true,"period_hours":24,"first_wake_delay_minutes":90,"client_time":1800000000})");
+      R"({"enabled":true,"period_minutes":1440,"first_wake_delay_minutes":90,"client_time":1800000000})");
   Api::Response response = SleepEndpoints::update(request, sleep, time);
   expect(response.statusCode == 200 && sleep.updateCount == 1 &&
              sleep.current.record.enabled &&
-             sleep.current.record.periodHours == 24 &&
+             sleep.current.record.periodMinutes == 1440 &&
              sleep.current.record.anchorEpoch == 1800005400 &&
              sleep.current.record.scheduleGeneration == 2 &&
              sleep.current.record.lastHandledSlot == -1 &&
@@ -149,7 +155,7 @@ void testStrictValidationAndCommit() {
   response = SleepEndpoints::update(request, disabled, unchanged);
   expect(response.statusCode == 200 && !disabled.current.record.enabled &&
              disabled.current.record.anchorEpoch == oldAnchor &&
-             disabled.current.record.periodHours == 24 &&
+             disabled.current.record.periodMinutes == 1440 &&
              disabled.current.record.scheduleGeneration == 2 &&
              unchanged.setCalls == 0,
          "minimal disable must preserve schedule values and not set the clock");
@@ -159,11 +165,11 @@ void testStrictValidationAndCommit() {
   document.clear();
   request = jsonRequest(
       document,
-      R"({"enabled":false,"period_hours":12,"first_wake_delay_minutes":30,"client_time":1800000000})");
+      R"({"enabled":false,"period_minutes":720,"first_wake_delay_minutes":30,"client_time":1800000000})");
   response = SleepEndpoints::update(request, disabledWithSchedule, replacement);
   expect(response.statusCode == 200 &&
              !disabledWithSchedule.current.record.enabled &&
-             disabledWithSchedule.current.record.periodHours == 12 &&
+             disabledWithSchedule.current.record.periodMinutes == 720 &&
              disabledWithSchedule.current.record.anchorEpoch == 1800001800 &&
              replacement.setCalls == 1,
          "complete disabled schedule fields must validate and replace saved values");
@@ -174,7 +180,7 @@ void testStrictValidationAndCommit() {
   document.clear();
   request = jsonRequest(
       document,
-      R"({"enabled":true,"period_hours":24,"first_wake_delay_minutes":60,"client_time":1800000000})");
+      R"({"enabled":true,"period_minutes":1440,"first_wake_delay_minutes":60,"client_time":1800000000})");
   response = SleepEndpoints::update(request, exhausted, untouched);
   expectCode(response, 500, "storage_error",
              "exhausted schedule generation must fail closed");
@@ -182,10 +188,26 @@ void testStrictValidationAndCommit() {
          "generation exhaustion must not touch clock or persistence");
 }
 
+void testMinuteLimits() {
+  for (unsigned minutes : {1U, 2880U}) {
+    SleepCoordinator sleep;
+    FakeTime time;
+    JsonDocument document;
+    const std::string body = "{\"enabled\":true,\"period_minutes\":" +
+        std::to_string(minutes) + ",\"first_wake_delay_minutes\":1,\"client_time\":1800000000}";
+    auto response = SleepEndpoints::update(jsonRequest(document, body.c_str()), sleep, time);
+    expect(response.statusCode == 200 && sleep.current.record.periodMinutes == minutes,
+           "minute period must accept both limits without truncation");
+    expect(std::strstr(response.data.c_str(), "period_minutes") != nullptr &&
+           std::strstr(response.data.c_str(), "period_hours") == nullptr,
+           "snapshot must expose minute units only");
+  }
+}
+
 void testClockAndStoreRollback() {
   JsonDocument document;
   const char *body =
-      R"({"enabled":true,"period_hours":24,"first_wake_delay_minutes":60,"client_time":1800000000})";
+      R"({"enabled":true,"period_minutes":1440,"first_wake_delay_minutes":60,"client_time":1800000000})";
 
   SleepCoordinator initialSetFailure;
   FakeTime partial;
@@ -240,6 +262,7 @@ int main() {
   testSnapshotShapeAndActions();
   testStrictValidationAndCommit();
   testClockAndStoreRollback();
+  testMinuteLimits();
   if (failures != 0) {
     std::cerr << failures << " sleep endpoint test(s) failed\n";
     return EXIT_FAILURE;

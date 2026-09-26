@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "modules/sleep/SleepCoordinator.h"
+#include "modules/status_led/StatusLed.h"
 #include "modules/captive/CaptivePortalDnsService.h"
 #include "modules/config/ConfigService.h"
 #include "modules/epaper/EpaperService.h"
@@ -117,12 +118,27 @@ void SntpClient::acceptSample(int64_t epoch, uint32_t generation) {
   sampleReady_ = true;
 }
 
+#if IOT_FEATURE_STATUS_LED
+class FakeLed final : public StatusLedDriver {
+ public:
+  bool on = false, held = false, holdValue = true, releaseValue = true;
+  unsigned writes = 0, holds = 0;
+  bool write(bool value) override { assert(!held); on = value; ++writes; return true; }
+  bool holdOff() override { assert(!on); held = true; ++holds; return holdValue; }
+  bool releaseHold() override { if (!releaseValue) return false; held = false; return true; }
+};
+#endif
+
 struct Fixture {
   MemoryBackend backend;
   SleepStore store{backend};
   FakeTime time;
   FakeSleepDriver driver;
   SleepCoordinator sleep;
+#if IOT_FEATURE_STATUS_LED
+  FakeLed ledDriver;
+  StatusLed led;
+#endif
   ConfigService config;
   EpaperService epaper;
   UserDataStorage storage;
@@ -139,7 +155,7 @@ struct Fixture {
     SleepRecord record;
     assert(store.load(record) == SleepStoreState::Empty);
     record.enabled = true;
-    record.periodHours = 24;
+    record.periodMinutes = 1440;
     record.anchorEpoch = now + 86400;
     record.scheduleGeneration = 1;
     assert(store.save(record, record) == SleepStoreState::Ready);
@@ -161,6 +177,17 @@ struct Fixture {
     assert(sleep.begin(store, time, driver, boot, wake,
                        wake ? WakeCause::Timer : WakeCause::None, now));
     sleep.attach(config, epaper, storage, wifi, mdns, captive, runtime, http);
+#if IOT_FEATURE_STATUS_LED
+    led.begin(ledDriver);
+    sleep.attachStatusLed(led);
+    led.setNormal(!sleep.wakeCycle());
+#endif
+  }
+  void poll(uint32_t nowMs) {
+    sleep.poll(nowMs);
+#if IOT_FEATURE_STATUS_LED
+    led.setNormal(!sleep.wakeCycle() && !sleep.entering());
+#endif
   }
 };
 
@@ -186,17 +213,17 @@ void testManualGraceAndTerminalReturn() {
   Fixture f;
   uint16_t blockers = 0;
   assert(f.sleep.requestNow(0, blockers));
-  f.sleep.poll(499);
+  f.poll(499);
   assert(f.epaper.requestSleepCalls == 0);
-  f.sleep.poll(500);
+  f.poll(500);
   assert(f.epaper.requestSleepCalls == 1);
-  f.sleep.poll(501);
+  f.poll(501);
   assert(f.driver.deepSleepCalls == 1);
   assert(f.driver.drainCalls == 1);
   assert(f.http.stopCalls == 1);
   assert(!f.storage.mounted);
   assert(!f.sleep.beginApiRequest(true, 502));
-  f.sleep.poll(1000);
+  f.poll(1000);
   assert(f.driver.deepSleepCalls == 1);
   const SleepSnapshot snapshot = f.sleep.snapshot(1000);
   assert(snapshot.state == SleepRunState::Failed);
@@ -207,16 +234,16 @@ void testManualGraceAndTerminalReturn() {
 void testUsbDisconnectRestartsFullIdle() {
   Fixture f(true);
   nativeMillis = SLEEP_IDLE_TIMEOUT_SECONDS * 1000U;
-  f.sleep.poll(nativeMillis);
+  f.poll(nativeMillis);
   assert(f.epaper.requestSleepCalls == 0);
   f.driver.usb = false;
-  f.sleep.poll(++nativeMillis);
+  f.poll(++nativeMillis);
   const uint32_t resetAt = nativeMillis;
   nativeMillis = resetAt + SLEEP_IDLE_TIMEOUT_SECONDS * 1000U - 1U;
-  f.sleep.poll(nativeMillis);
+  f.poll(nativeMillis);
   assert(f.epaper.requestSleepCalls == 0);
   ++nativeMillis;
-  f.sleep.poll(nativeMillis);
+  f.poll(nativeMillis);
   assert(f.epaper.requestSleepCalls == 1);
 }
 
@@ -226,7 +253,7 @@ void testEarlyWakeSkipsNetworkAndPersistsResult() {
   strlcpy(f.config.value.staSsid, "network", sizeof(f.config.value.staSsid));
   assert(f.sleep.wakeCycle());
   assert(f.sleep.effectiveWifiConfig(f.config.value).wifiMode == WifiMode::Off);
-  f.sleep.poll(0);
+  f.poll(0);
   const SleepSnapshot snapshot = f.sleep.snapshot(0);
   assert(snapshot.record.lastWake.result == 2);
   assert(snapshot.record.lastHandledSlot == -1);
@@ -237,7 +264,7 @@ void testEarlyWakeSkipsNetworkAndPersistsResult() {
 void testCheckpointWakeDoesNotPersistDiagnostics() {
   Fixture f(false, true, 90000, true);
   const SleepSnapshot before = f.sleep.snapshot(0);
-  f.sleep.poll(0);
+  f.poll(0);
   const SleepSnapshot after = f.sleep.snapshot(0);
   assert(after.record.revision == before.record.revision);
   assert(after.record.lastWake.result == 0);
@@ -247,7 +274,7 @@ void testCheckpointWakeDoesNotPersistDiagnostics() {
 
 void testScheduleUpdatePersistsSupersededAgenda() {
   Fixture f(false, true, -1);
-  f.sleep.poll(0);
+  f.poll(0);
   SleepRecord candidate = f.sleep.snapshot(0).record;
   ++candidate.scheduleGeneration;
   candidate.anchorEpoch = f.now + 7200;
@@ -274,11 +301,11 @@ void testKeepAwakeUsesLoopOwnerAndFinalGate() {
 
   Fixture owner;
   assert(owner.sleep.requestNow(0, blockers));
-  owner.sleep.poll(500);
+  owner.poll(500);
   assert(owner.sleep.keepAwake(501));
   assert(owner.epaper.cancelSleepCalls == 0);
   assert(owner.storage.cancelCalls == 0);
-  owner.sleep.poll(501);
+  owner.poll(501);
   assert(owner.epaper.cancelSleepCalls == 1);
   assert(owner.sleep.snapshot(501).request == SleepRequestState::Cancelled);
   assert(owner.sleep.beginApiRequest(false, 502));
@@ -287,11 +314,11 @@ void testKeepAwakeUsesLoopOwnerAndFinalGate() {
   Fixture beforeGate;
   bool acceptedBeforeGate = false;
   assert(beforeGate.sleep.requestNow(0, blockers));
-  beforeGate.sleep.poll(500);
+  beforeGate.poll(500);
   beforeGate.storage.onReserve = [&]() {
     acceptedBeforeGate = beforeGate.sleep.keepAwake(501);
   };
-  beforeGate.sleep.poll(501);
+  beforeGate.poll(501);
   assert(acceptedBeforeGate);
   assert(beforeGate.driver.deepSleepCalls == 0);
   assert(beforeGate.storage.cancelCalls == 1);
@@ -300,11 +327,11 @@ void testKeepAwakeUsesLoopOwnerAndFinalGate() {
   Fixture afterGate;
   bool acceptedAfterGate = true;
   assert(afterGate.sleep.requestNow(0, blockers));
-  afterGate.sleep.poll(500);
+  afterGate.poll(500);
   afterGate.driver.onArm = [&]() {
     acceptedAfterGate = afterGate.sleep.keepAwake(501);
   };
-  afterGate.sleep.poll(501);
+  afterGate.poll(501);
   assert(!acceptedAfterGate);
   assert(afterGate.driver.deepSleepCalls == 1);
 }
@@ -334,12 +361,12 @@ void testRuntimeBlockerAndStorageRecovery() {
   recovering.driver.armValue = false;
   recovering.storage.cancelValue = false;
   assert(recovering.sleep.requestNow(0, reasons));
-  recovering.sleep.poll(500);
-  recovering.sleep.poll(501);
+  recovering.poll(500);
+  recovering.poll(501);
   assert(recovering.storage.cancelCalls == 1);
   assert(!recovering.sleep.beginApiRequest(false, 502));
   recovering.storage.cancelValue = true;
-  recovering.sleep.poll(502);
+  recovering.poll(502);
   assert(recovering.storage.cancelCalls == 2);
   assert(recovering.http.started());
   assert(recovering.sleep.beginApiRequest(false, 503));
@@ -348,11 +375,11 @@ void testRuntimeBlockerAndStorageRecovery() {
   Fixture serviceRecovery;
   serviceRecovery.wifi.applyValue = false;
   assert(serviceRecovery.sleep.requestNow(0, reasons));
-  serviceRecovery.sleep.poll(500);
-  serviceRecovery.sleep.poll(501);
+  serviceRecovery.poll(500);
+  serviceRecovery.poll(501);
   assert(!serviceRecovery.sleep.beginApiRequest(false, 502));
   serviceRecovery.wifi.applyValue = true;
-  serviceRecovery.sleep.poll(502);
+  serviceRecovery.poll(502);
   assert(serviceRecovery.sleep.beginApiRequest(false, 503));
   serviceRecovery.sleep.endApiRequest();
 
@@ -360,13 +387,13 @@ void testRuntimeBlockerAndStorageRecovery() {
   hardwareRecovery.driver.holdValue = false;
   hardwareRecovery.driver.releaseValue = false;
   assert(hardwareRecovery.sleep.requestNow(0, reasons));
-  hardwareRecovery.sleep.poll(500);
-  hardwareRecovery.sleep.poll(501);
+  hardwareRecovery.poll(500);
+  hardwareRecovery.poll(501);
   assert(hardwareRecovery.driver.releaseCalls == 1);
   assert(!hardwareRecovery.sleep.keepAwake(502));
   assert(!hardwareRecovery.sleep.beginApiRequest(false, 502));
   hardwareRecovery.driver.releaseValue = true;
-  hardwareRecovery.sleep.poll(502);
+  hardwareRecovery.poll(502);
   assert(hardwareRecovery.driver.releaseCalls == 2);
   assert(hardwareRecovery.sleep.beginApiRequest(false, 503));
   hardwareRecovery.sleep.endApiRequest();
@@ -393,8 +420,8 @@ void testWithoutOptionalOwners() {
 #endif
   f.storage.busy = false;
   assert(f.sleep.requestNow(0, reasons));
-  f.sleep.poll(500);
-  f.sleep.poll(501);
+  f.poll(500);
+  f.poll(501);
   assert(f.driver.deepSleepCalls == 1);
   assert(f.epaper.requestSleepCalls == 0);
 #if IOT_FEATURE_STORAGE
@@ -406,15 +433,15 @@ void testWithoutOptionalOwners() {
 
   Fixture cancelled;
   assert(cancelled.sleep.requestNow(0, reasons));
-  cancelled.sleep.poll(500);
+  cancelled.poll(500);
   assert(cancelled.sleep.keepAwake(501));
-  cancelled.sleep.poll(501);
+  cancelled.poll(501);
   assert(cancelled.sleep.beginApiRequest(false, 502));
   cancelled.sleep.endApiRequest();
   assert(cancelled.driver.deepSleepCalls == 0);
 
   Fixture early(false, true);
-  early.sleep.poll(0);
+  early.poll(0);
   const auto wake = early.sleep.snapshot(0).record.lastWake;
   assert(wake.result == 2 && wake.taskCount == 1);
   assert(wake.tasks[0].name == 1 && wake.tasks[1].name == 0);
@@ -422,7 +449,54 @@ void testWithoutOptionalOwners() {
 }
 #endif
 
+#if IOT_FEATURE_STATUS_LED
+void testStatusLedLifecycle() {
+  Fixture normal;
+  assert(normal.ledDriver.on);
+  const unsigned writes = normal.ledDriver.writes;
+  normal.poll(0); normal.poll(1);
+  assert(normal.ledDriver.on && normal.ledDriver.writes == writes);
+  uint16_t reasons = 0;
+  assert(normal.sleep.requestNow(0, reasons));
+  normal.poll(500);
+  assert(!normal.ledDriver.on);
+  assert(normal.sleep.keepAwake(501));
+  normal.poll(501);
+  assert(normal.ledDriver.on && !normal.ledDriver.held);
+
+  Fixture wake(false, true);
+  assert(!wake.ledDriver.on && wake.ledDriver.writes == 0);
+  wake.poll(0); wake.poll(1);
+  assert(!wake.ledDriver.on && wake.ledDriver.held);
+
+  Fixture activity(false, true);
+  assert(activity.sleep.keepAwake(0));
+  activity.poll(0);
+  assert(!activity.sleep.wakeCycle() && activity.ledDriver.on);
+
+  Fixture failure;
+  failure.ledDriver.holdValue = false;
+  assert(failure.sleep.requestNow(0, reasons));
+  failure.poll(500); failure.poll(501);
+  assert(failure.driver.deepSleepCalls == 0);
+  assert(failure.ledDriver.on && !failure.ledDriver.held);
+
+  Fixture recovery;
+  recovery.ledDriver.holdValue = false;
+  recovery.ledDriver.releaseValue = false;
+  assert(recovery.sleep.requestNow(0, reasons));
+  recovery.poll(500); recovery.poll(501);
+  assert(!recovery.ledDriver.on && recovery.sleep.entering());
+  recovery.ledDriver.releaseValue = true;
+  recovery.poll(502);
+  assert(recovery.ledDriver.on && !recovery.ledDriver.held);
+}
+#endif
+
 int main() {
+#if IOT_FEATURE_STATUS_LED
+  testStatusLedLifecycle();
+#endif
 #if !IOT_FEATURE_EPAPER
   testWithoutOptionalOwners();
   testScheduleUpdatePersistsSupersededAgenda();

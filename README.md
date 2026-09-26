@@ -80,7 +80,7 @@ make build
 
 Sleep scheduler code is included by default while the saved schedule remains disabled until configured. Use `make build SLEEP=0` to omit its routes and implementation; release manifests record `sleep_scheduler` for the selected build.
 
-Eight compile-time features are configured in [`config/features.ini`](config/features.ini): sleep, epaper, storage, auth, user_files, mdns, battery, and console. Use `make build FEATURES=config/profiles/minimal.ini WEB=none` for a minimal firmware. Epaper and user_files require storage; disabling storage reclaims userdata for the app and changes the file layout. The frontend reads `GET /api/features` to adapt available controls. See [feature configuration](config/README.md) for dependencies, partition switching, and validation.
+Nine compile-time features are configured in [`config/features.ini`](config/features.ini): sleep, epaper, storage, auth, user_files, mdns, battery, console, and status_led. Use `make build FEATURES=config/profiles/minimal.ini WEB=none` for a minimal firmware. Epaper and user_files require storage; disabling storage reclaims userdata for the app and changes the file layout. The frontend reads `GET /api/features` to adapt available controls. See [feature configuration](config/README.md) for dependencies, partition switching, and validation. The onboard status LED uses 10% PWM brightness in normal mode, turns off before sleep, and stays off during timer wake cycles.
 
 Find your board’s serial port, then build, verify, and flash:
 

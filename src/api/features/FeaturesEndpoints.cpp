@@ -7,10 +7,10 @@ namespace FeaturesEndpoints {
 Api::Response get(const Api::Request &request) {
   if (request.hasBody || request.hasJsonBody || request.queryOverflow || request.queryCount > 1)
     return Api::problem(400, "unsupported_field", "features accepts only an optional name query");
-  const char *names[] = {"sleep", "epaper", "storage", "auth", "user_files", "mdns", "battery", "console"};
+  const char *names[] = {"sleep", "epaper", "storage", "auth", "user_files", "mdns", "battery", "console", "status_led"};
   const bool supported[] = {IOT_FEATURE_SLEEP != 0, IOT_FEATURE_EPAPER != 0,
     IOT_FEATURE_STORAGE != 0, IOT_FEATURE_AUTH != 0, IOT_FEATURE_USER_FILES != 0,
-    IOT_FEATURE_MDNS != 0, IOT_FEATURE_BATTERY != 0, IOT_FEATURE_CONSOLE != 0};
+    IOT_FEATURE_MDNS != 0, IOT_FEATURE_BATTERY != 0, IOT_FEATURE_CONSOLE != 0, IOT_FEATURE_STATUS_LED != 0};
   JsonDocument data;
   if (request.queryCount) {
     if (!(request.query[0].name == "name"))

@@ -254,6 +254,18 @@ class ReleaseBuildTest(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "identity mismatch"):
             release.verify_snapshot(snapshot, snapshot / "firmware.img")
 
+    def test_previous_schema_seven_snapshot_remains_verifiable(self):
+        snapshot = self.write_valid_snapshot()
+        manifest = json.loads((snapshot / "binary/manifest.json").read_text())
+        manifest["schema"] = 7
+        del manifest["features"]["status_led"]
+        config = {"features": manifest["features"], "sleep": {
+            "idle_timeout_seconds": manifest["sleep_idle_timeout_seconds"],
+            "ignore_usb_host": int(manifest["sleep_ignore_usb_host"])}}
+        manifest["feature_config_sha256"] = release.config_hash(config)
+        self.rewrite_manifest(snapshot, manifest)
+        release.verify_snapshot(snapshot, snapshot / "firmware.img")
+
     def test_previous_schema_six_snapshot_remains_verifiable(self):
         snapshot = self.write_valid_snapshot()
         manifest = json.loads((snapshot / "binary/manifest.json").read_text())

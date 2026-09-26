@@ -1,6 +1,7 @@
 #include "SleepFeatures.h"
 
 #if IOT_FEATURE_SLEEP
+#include "modules/status_led/StatusLed.h"
 #include "SleepCoordinator.h"
 
 #include <cstring>
@@ -110,13 +111,13 @@ void SleepCoordinator::rebuildDue(bool inclusive) {
   if (!record_.enabled) { due_ = {}; relativeDueClock_ = 0; return; }
   const TimeSnapshot time = time_->snapshot();
   if (time.synced()) {
-    SleepSchedule::nextSlot(record_.anchorEpoch, record_.periodHours,
+    SleepSchedule::nextSlot(record_.anchorEpoch, record_.periodMinutes,
                             time.epoch, record_.lastHandledSlot, inclusive, due_);
     relativeDueClock_ = 0;
   } else {
     due_ = {};
     const int64_t base = bootClock_ > 0 ? bootClock_ : clockNow();
-    relativeDueClock_ = base + static_cast<int64_t>(record_.periodHours) * 3600;
+    relativeDueClock_ = base + static_cast<int64_t>(record_.periodMinutes) * 60;
   }
 }
 
@@ -213,7 +214,7 @@ bool SleepCoordinator::update(const SleepRecord &candidate,
 #endif
   }
   merged.enabled = candidate.enabled;
-  merged.periodHours = candidate.periodHours;
+  merged.periodMinutes = candidate.periodMinutes;
   merged.anchorEpoch = candidate.anchorEpoch;
   merged.scheduleGeneration = candidate.scheduleGeneration;
   merged.lastHandledSlot = candidate.lastHandledSlot;
@@ -542,11 +543,13 @@ void SleepCoordinator::finishAgenda(uint32_t nowMs, uint8_t result) {
   } else if (result == ResultEarly) {
     // Retain the same planned slot and sleep toward it again.
   } else if (time.synced()) {
-    SleepSchedule::advancePast(record_.anchorEpoch, record_.periodHours,
+    SleepSchedule::advancePast(record_.anchorEpoch, record_.periodMinutes,
                                time.epoch, record_.lastHandledSlot, due_);
   } else {
-    relativeDueClock_ = clockNow() +
-        static_cast<int64_t>(record_.periodHours) * 3600;
+    SleepSchedule::Slot next;
+    if (SleepSchedule::advancePast(relativeDueClock_, record_.periodMinutes,
+                                   clockNow(), 0, next))
+      relativeDueClock_ = next.dueEpoch;
   }
   state_ = record_.enabled ? SleepRunState::Armed : SleepRunState::Disabled;
   if (mode_ == WakeMode::WakeCycle) beginPrepare(nowMs);
@@ -576,6 +579,12 @@ void SleepCoordinator::beginPrepare(uint32_t nowMs) {
     return;
   }
 #endif
+#if IOT_FEATURE_STATUS_LED
+  if (statusLed_ && !statusLed_->setNormal(false)) {
+    cancelPrepare("status_led_off_failed", nowMs);
+    return;
+  }
+#endif
   prepare_ = PrepareStep::Epaper;
   requestStartedMs_ = nowMs;
   request_ = SleepRequestState::Entering;
@@ -594,6 +603,9 @@ void SleepCoordinator::cancelPrepare(const char *error, uint32_t nowMs) {
     if (driver_->disarmTimer()) timerArmed_ = false;
     else hardwareRestored = false;
   }
+#if IOT_FEATURE_STATUS_LED
+  if (statusLed_ && !statusLed_->cancelSleep()) hardwareRestored = false;
+#endif
   hardwareRecoveryFailed_ = !hardwareRestored;
 #if IOT_FEATURE_STORAGE
   if (storageReserved_) {
@@ -691,7 +703,7 @@ void SleepCoordinator::pollPrepare(uint32_t nowMs) {
   const int64_t now = clockNow();
   const int64_t due = time.synced() ? due_.dueEpoch : relativeDueClock_;
   const uint32_t duration = SleepSchedule::timerSecondsUntil(now, due,
-                                                              record_.periodHours);
+                                                              record_.periodMinutes);
   if (duration <= 5) { cancelPrepare("due_imminent", nowMs); return; }
 
   const bool restartPending = runtime_ && runtime_->snapshot().restartPending;
@@ -716,6 +728,11 @@ void SleepCoordinator::pollPrepare(uint32_t nowMs) {
     return;
   }
   pinsHeld_ = true;
+#if IOT_FEATURE_STATUS_LED
+  if (statusLed_ && !statusLed_->prepareSleep()) {
+    cancelPrepare("status_led_hold_failed", nowMs); return;
+  }
+#endif
   SleepRtcRecord rtc;
   rtc.scheduleGeneration = record_.scheduleGeneration;
   rtc.basis = time.synced() ? SleepClockBasis::Absolute : SleepClockBasis::Relative;
@@ -808,7 +825,7 @@ void SleepCoordinator::poll(uint32_t nowMs) {
       else if (!time.synced() && relativeDueClock_ == 0) {
         due_ = {};
         relativeDueClock_ = clockNow() +
-            static_cast<int64_t>(record_.periodHours) * 3600;
+            static_cast<int64_t>(record_.periodMinutes) * 60;
       }
     }
   }

@@ -20,6 +20,10 @@
 #include "modules/epaper/calibration/EpaperCalibrationService.h"
 #include "modules/epaper/calibration/storage/PreferencesEpaperCalibrationStore.h"
 #include "modules/hardware/EpaperHardware.h"
+#include "modules/hardware/StatusLedHardware.h"
+#if IOT_FEATURE_STATUS_LED
+#include "modules/status_led/ArduinoStatusLedDriver.h"
+#endif
 #include "modules/hardware/PinRegistry.h"
 #include "modules/hardware/SpiBus.h"
 #include "modules/runtime/RuntimeActionScheduler.h"
@@ -53,8 +57,9 @@
 #endif
 #include "selftest/FirmwareSelfTest.h"
 
-#ifndef STATUS_LED_PIN
-#define STATUS_LED_PIN -1
+#if IOT_FEATURE_STATUS_LED
+ArduinoStatusLedDriver statusLedDriver;
+StatusLed statusLed;
 #endif
 
 #ifndef ENABLE_EPAPER_PANEL_SELF_TEST
@@ -754,6 +759,13 @@ void printHeartbeat() {
   Serial.print("alive tick=");
   Serial.print(tick++);
   printHeartbeatField("free_heap", ESP.getFreeHeap());
+#if IOT_FEATURE_STATUS_LED
+  printHeartbeatField("status_led", statusLed.on() ? "on" : "off");
+  printHeartbeatField("status_led_duty", statusLedDriver.duty());
+  printHeartbeatField("status_led_pwm_hz", statusLedDriver.frequencyHz());
+  printHeartbeatField("status_led_pwm_attached", statusLedDriver.pwmAttached() ? "yes" : "no");
+  printHeartbeatField("status_led_gpio_level", static_cast<uint32_t>(StatusLedHardware::level()));
+#endif
   for (const Subsystem &subsystem : subsystems) {
     printHeartbeatField(
         subsystem.name,
@@ -818,6 +830,10 @@ void printHeartbeat() {
 }
 }  // namespace
 
+#if IOT_FEATURE_STATUS_LED
+void updateStatusLed();
+#endif
+
 void setup() {
   bootDiagnostics.capture();
   systemClock.begin();
@@ -843,8 +859,12 @@ void setup() {
   const Result boardSafety = EpaperHardware::claimAndQuiescePins(&pinRegistry);
 #endif
 
-#if STATUS_LED_PIN >= 0
-  pinMode(STATUS_LED_PIN, OUTPUT);
+  const bool statusLedHardwareReady = StatusLedHardware::bootOff();
+#if IOT_FEATURE_STATUS_LED
+  if (statusLedHardwareReady) statusLed.begin(statusLedDriver);
+#if IOT_FEATURE_SLEEP
+  sleepCoordinator.attachStatusLed(statusLed);
+#endif
 #endif
 
   // The default USB CDC receive queue is smaller than a valid serial API
@@ -854,6 +874,9 @@ void setup() {
 #endif
   Serial.setTxBufferSize(2048);
   Serial.begin(115200);
+  Serial.printf("status-led: boot=off, enabled=%d, level=%d, verified=%s\n",
+                IOT_FEATURE_STATUS_LED, StatusLedHardware::level(),
+                statusLedHardwareReady ? "yes" : "no");
   Serial.setTxTimeoutMs(0);
   delay(2000);
   Serial.println("ESP32 Wi-Fi setup firmware");
@@ -890,13 +913,24 @@ void setup() {
       subsystem.report(result);
     }
   }
+#if IOT_FEATURE_STATUS_LED
+  updateStatusLed();
+#endif
 }
 
-void loop() {
-#if STATUS_LED_PIN >= 0
-  digitalWrite(STATUS_LED_PIN, tick & 1U);
+#if IOT_FEATURE_STATUS_LED
+void updateStatusLed() {
+#if IOT_FEATURE_SLEEP
+  const bool normal = subsystemHealthy(subsystems[kSleepSubsystem]) &&
+      !sleepCoordinator.wakeCycle() && !sleepCoordinator.entering();
+#else
+  constexpr bool normal = true;
+#endif
+  statusLed.setNormal(normal);
+}
 #endif
 
+void loop() {
   const uint32_t now = millis();
   wifiScanner.poll(now, runtimeActions.snapshot().restartPending);
   apiServer.poll();
@@ -924,6 +958,9 @@ void loop() {
 
 #if IOT_FEATURE_SLEEP
   sleepCoordinator.poll(now);
+#endif
+#if IOT_FEATURE_STATUS_LED
+  updateStatusLed();
 #endif
 
   const DeviceConfig persisted = configService.snapshot();

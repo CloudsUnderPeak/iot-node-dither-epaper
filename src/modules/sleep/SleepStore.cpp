@@ -56,7 +56,7 @@ int32_t readSigned32(const uint8_t *bytes, size_t offset) {
 }
 
 bool valid(const SleepRecord &record) {
-  if (!SleepSchedule::validPeriodHours(record.periodHours) ||
+  if (!SleepSchedule::validPeriodMinutes(record.periodMinutes) ||
       record.lastHandledSlot < -1 || record.lastWake.taskCount > 4 ||
       std::memchr(record.lastWake.lastErrorCode, '\0',
                   sizeof(record.lastWake.lastErrorCode)) == nullptr ||
@@ -78,31 +78,31 @@ bool encode(const SleepRecord &record, std::array<uint8_t, kRecordBytes> &bytes)
   if (!valid(record)) return false;
   bytes.fill(0);
   writeInt(bytes.data(), 0, 0x534c5032UL, 4);
-  writeInt(bytes.data(), 4, 1, 2);
+  writeInt(bytes.data(), 4, 2, 2);
   writeInt(bytes.data(), 6, kRecordBytes, 2);
   writeInt(bytes.data(), 8, record.revision, 8);
   bytes[16] = record.enabled ? 1 : 0;
-  bytes[17] = record.periodHours;
-  writeInt(bytes.data(), 18, static_cast<uint64_t>(record.anchorEpoch), 8);
-  writeInt(bytes.data(), 26, record.scheduleGeneration, 8);
-  writeInt(bytes.data(), 34, static_cast<uint64_t>(record.lastHandledSlot), 8);
+  writeInt(bytes.data(), 17, record.periodMinutes, 2);
+  writeInt(bytes.data(), 19, static_cast<uint64_t>(record.anchorEpoch), 8);
+  writeInt(bytes.data(), 27, record.scheduleGeneration, 8);
+  writeInt(bytes.data(), 35, static_cast<uint64_t>(record.lastHandledSlot), 8);
   const SleepLastWake &wake = record.lastWake;
-  bytes[42] = wake.cause;
-  bytes[43] = wake.mode;
-  bytes[44] = wake.basis;
-  writeInt(bytes.data(), 45, static_cast<uint64_t>(wake.epoch), 8);
-  writeInt(bytes.data(), 53, static_cast<uint64_t>(wake.plannedDue), 8);
-  writeInt(bytes.data(), 61, static_cast<uint32_t>(wake.driftSeconds), 4);
-  bytes[65] = wake.result;
-  writeInt(bytes.data(), 66, wake.consecutiveFailures, 2);
-  bytes[68] = wake.staAttempts;
-  bytes[69] = wake.timeSynced ? 1 : 0;
-  std::memcpy(bytes.data() + 70, wake.lastErrorCode, 32);
-  bytes[102] = wake.taskCount;
+  bytes[43] = wake.cause;
+  bytes[44] = wake.mode;
+  bytes[45] = wake.basis;
+  writeInt(bytes.data(), 46, static_cast<uint64_t>(wake.epoch), 8);
+  writeInt(bytes.data(), 54, static_cast<uint64_t>(wake.plannedDue), 8);
+  writeInt(bytes.data(), 62, static_cast<uint32_t>(wake.driftSeconds), 4);
+  bytes[66] = wake.result;
+  writeInt(bytes.data(), 67, wake.consecutiveFailures, 2);
+  bytes[69] = wake.staAttempts;
+  bytes[70] = wake.timeSynced ? 1 : 0;
+  std::memcpy(bytes.data() + 71, wake.lastErrorCode, 32);
+  bytes[103] = wake.taskCount;
   for (size_t i = 0; i < 4; ++i) {
-    bytes[103 + 3 * i] = wake.tasks[i].name;
-    bytes[104 + 3 * i] = wake.tasks[i].status;
-    bytes[105 + 3 * i] = wake.tasks[i].code;
+    bytes[104 + 3 * i] = wake.tasks[i].name;
+    bytes[105 + 3 * i] = wake.tasks[i].status;
+    bytes[106 + 3 * i] = wake.tasks[i].code;
   }
   writeInt(bytes.data(), 124, crc32(bytes.data(), 124), 4);
   return true;
@@ -110,32 +110,32 @@ bool encode(const SleepRecord &record, std::array<uint8_t, kRecordBytes> &bytes)
 
 bool decode(const std::array<uint8_t, kRecordBytes> &bytes, SleepRecord &record) {
   if (readInt(bytes.data(), 0, 4) != 0x534c5032UL ||
-      readInt(bytes.data(), 4, 2) != 1 ||
+      readInt(bytes.data(), 4, 2) != 2 ||
       readInt(bytes.data(), 6, 2) != kRecordBytes ||
       readInt(bytes.data(), 124, 4) != crc32(bytes.data(), 124)) return false;
   SleepRecord candidate;
   candidate.revision = readInt(bytes.data(), 8, 8);
-  if (bytes[16] > 1 || bytes[69] > 1) return false;
+  if (bytes[16] > 1 || bytes[70] > 1) return false;
   candidate.enabled = bytes[16] != 0;
-  candidate.periodHours = bytes[17];
-  candidate.anchorEpoch = readSigned64(bytes.data(), 18);
-  candidate.scheduleGeneration = readInt(bytes.data(), 26, 8);
-  candidate.lastHandledSlot = readSigned64(bytes.data(), 34);
+  candidate.periodMinutes = static_cast<uint16_t>(readInt(bytes.data(), 17, 2));
+  candidate.anchorEpoch = readSigned64(bytes.data(), 19);
+  candidate.scheduleGeneration = readInt(bytes.data(), 27, 8);
+  candidate.lastHandledSlot = readSigned64(bytes.data(), 35);
   SleepLastWake &wake = candidate.lastWake;
-  wake.cause = bytes[42];
-  wake.mode = bytes[43];
-  wake.basis = bytes[44];
-  wake.epoch = readSigned64(bytes.data(), 45);
-  wake.plannedDue = readSigned64(bytes.data(), 53);
-  wake.driftSeconds = readSigned32(bytes.data(), 61);
-  wake.result = bytes[65];
-  wake.consecutiveFailures = static_cast<uint16_t>(readInt(bytes.data(), 66, 2));
-  wake.staAttempts = bytes[68];
-  wake.timeSynced = bytes[69] != 0;
-  std::memcpy(wake.lastErrorCode, bytes.data() + 70, 32);
-  wake.taskCount = bytes[102];
+  wake.cause = bytes[43];
+  wake.mode = bytes[44];
+  wake.basis = bytes[45];
+  wake.epoch = readSigned64(bytes.data(), 46);
+  wake.plannedDue = readSigned64(bytes.data(), 54);
+  wake.driftSeconds = readSigned32(bytes.data(), 62);
+  wake.result = bytes[66];
+  wake.consecutiveFailures = static_cast<uint16_t>(readInt(bytes.data(), 67, 2));
+  wake.staAttempts = bytes[69];
+  wake.timeSynced = bytes[70] != 0;
+  std::memcpy(wake.lastErrorCode, bytes.data() + 71, 32);
+  wake.taskCount = bytes[103];
   for (size_t i = 0; i < 4; ++i) {
-    wake.tasks[i] = {bytes[103 + 3 * i], bytes[104 + 3 * i], bytes[105 + 3 * i]};
+    wake.tasks[i] = {bytes[104 + 3 * i], bytes[105 + 3 * i], bytes[106 + 3 * i]};
   }
   if (!valid(candidate)) return false;
   record = candidate;

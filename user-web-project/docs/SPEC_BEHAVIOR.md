@@ -397,14 +397,14 @@ Help 內的輸入工作圖長邊與可設定單邊輸出上限必須由 editor c
 - 離線、載入或儲存中禁止操作；離線樣式不可改變六色預覽本身的 RGB。色準 API 公開，不顯示登入鎖定卡。
 - 三個測試 action 不送 request body，並和 editor upload 共用 single-operation admission、overlay、status polling、錯誤處理與 180 秒 cooldown。
 
-### 睡眠排程頁
+### 省電排程頁
 
-- 只有 `/api/device.features.sleep_scheduler === true` 時，Menu 才顯示「睡眠排程」並允許 `#/device-sleep`；capability 缺少或 false 時不顯示入口。
+- 只有 `/api/device.features.sleep_scheduler === true` 時，Menu 才顯示「省電排程」並允許 `#/device-sleep`；capability 缺少或 false 時不顯示入口。
 - 頁面狀態由公開 `GET /api/sleep` 提供，掛載與 online 恢復時立即刷新，online 期間每 15 秒輪詢；輪詢只讀 status，不自動呼叫 keep-awake。
-- 狀態區顯示 enabled、mode、state、clock source／sync、下次喚醒、idle 剩餘、request failure 與 blockers。Nullable epoch／drift 顯示 unavailable，不自行推測。
-- 設定表單需登入；週期只提供 12／24／48 小時，首次延遲須在 1 到週期分鐘數內。啟用時以前端目前 epoch 作 `client_time`，送出 `PUT /api/sleep`；停用只送 `{"enabled":false}`。
+- 版面沿用裝置頁的卡片，先顯示「省電資訊」，再顯示「排程設定」。資訊卡集中呈現已儲存的啟用／停用狀態、下次刷新、裝置時間、瀏覽器時間、入睡阻擋與 request failure；沒有 blockers 時顯示「無」，時間只顯示時分，nullable epoch 顯示未知。設定卡只有啟用 switch、週期、刷新時間與儲存按鈕，不在右上角重複顯示啟用／停用狀態。啟用、刷新週期、刷新時間採三列對齊，名稱與控制項始終同列；共用標籤欄依最長文字決定，控制項靠同一條垂直線，保留適度欄距與列距。選單依選項內容決定寬度，不拉滿卡片。不顯示本地時間或啟用／停用說明列，也不留下空行；超過週期時使用錯誤通知。
+- 設定表單需登入；週期一般選項只提供 12／24／48 小時，送出 `period_minutes` 720／1440／2880；API 支援 1–2880 分鐘。讀到其他週期時新增「自訂：N 分鐘」選項並保留原值，不將它默認成 24 小時。使用者透過本地 24 小時制的「時／分」下拉選單選擇刷新時間；時只提供 00–23，分只提供 00–59，不需手動輸入、不選日期，也不提供「第一次刷新」模式或「幾分鐘後」欄位。時間取下一次到達該時分：今天已過或正好到達則用明天，且換算後須在 1 到週期分鐘數內；時間超過所選週期時提示並停用儲存。啟用時以前端目前 epoch 作 `client_time`，送出 `PUT /api/sleep`；停用只送 `{"enabled":false}`，並反灰週期、時間欄位；不顯示「儲存後會停用排程睡眠。」或其他停用提示行。
 - 若 device clock 未同步或相對瀏覽器時間偏差超過 5 秒，已登入且頁面在線時可先用 `PUT /api/system/time` 校時；`device-sleep` 對同一頁面生命週期限制自動校時頻率，避免每次 polling 寫 clock。
-- 「保持喚醒」是公開 `POST /api/sleep/keep-awake`；「立即休眠」需登入並先確認，再呼叫 `POST /api/sleep/now`。202 只顯示 pending 並繼續查詢，不能立即宣稱裝置已睡著。
+- Header 的「保持喚醒」仍是公開 `POST /api/sleep/keep-awake`。省電排程頁不提供「立即入睡」按鈕或確認 dialog，使用者無法從本頁發送 `POST /api/sleep/now`；裝置依原有閒置與安全條件自動入睡。
 - 裝置離線時停止輪詢、清除 sleep snapshot／倒數並由共用 gate 反灰。若 request 已進入 sleep 且 alive 轉 offline，頁面說明可能已睡眠；不能把一般 transport error 一律解讀為成功入睡。
 - Preview mock 提供 capability、clock、schedule、idle、blockers、keep-awake 與 pending/offline 模擬；Help 的裝置章節說明 schedule 預設停用、USB blocker 與睡眠後網頁不可達。
 

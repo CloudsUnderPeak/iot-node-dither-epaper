@@ -175,12 +175,21 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - Draw 在低優先序 dedicated worker 執行，BUSY wait 必須 yield，frame 每 4 KiB yield；Wi-Fi、HTTP、console、heartbeat 與 runtime scheduler 在刷新期間仍須可排程。CPU 降頻造成的 latency 與供電穩定性需以實板驗證。
 - 全部 e-paper 專用 endpoint 與 `GET /api/runtime/status` 是明確 public exception；同網路 client 可上傳、下載及觸發 draw 是已接受的可信任網路風險，180 秒 cooldown 不是 authentication 或 abuse protection。Generic user-file API 權限不變。
 
+## 板載狀態 LED
+
+- `status_led=1` 產生 `IOT_FEATURE_STATUS_LED`，不提供 runtime 開關、閃爍或 LED timer。
+- 啟動期間保持關閉；完成一般啟動且為 `normal` 模式後以預設 10% PWM 亮度恆亮，亮度為 board profile 編譯設定。Wi-Fi 尚未連線不影響亮燈；LED 表示一般使用模式，不保證所有 subsystem 都健康。
+- 排程 timer 喚醒的 `wake_cycle` 全程不亮；使用者活動切回 `normal` 後恆亮。
+- 入睡準備開始時關閉，deep sleep 期間保持關閉；取消入睡且完成復原後，依當下模式恢復一般模式恆亮或 wake cycle 關閉。
+- Feature 關閉時保留板級關燈與 retained hold 清理，不啟用模式指示。此功能控制 user LED，不控制充電指示燈。
+
 ## 排程深度休眠
 
 - `IOT_FEATURE_SLEEP` 由功能設定檔的 `sleep=0|1` 控制，可由 release build 的 `SLEEP=0|1` 覆寫；即使編入功能，factory runtime 預設仍為停用，必須由 `PUT /api/sleep` 明確啟用（auth 編入時需要認證）。
-- 排程週期只接受 12、24、48 小時，使用 client epoch 與首次喚醒延遲建立固定 UTC anchor。後續 due 從 anchor 計算，不以每次完成時間累加；沒有可信 absolute clock 時使用 RTC carried relative clock，成功 SNTP 後才回 absolute basis。
+- 排程週期以分鐘保存，API 接受 1–2880 的整數（上限 48 小時），預設 1440 分鐘；網頁一般選項仍為 12／24／48 小時，送出 720／1440／2880 分鐘，使用 client epoch 與首次喚醒延遲建立固定 UTC anchor。後續 due 從 anchor 計算，不以每次完成時間累加；沒有可信 absolute clock 時使用 RTC carried relative clock，成功 SNTP 後才回 absolute basis。
 - `normal` mode 的 idle timeout 預設 1800 秒。Protected API、公開 e-paper write、完整 serial input line 與 keep-awake 都是活動；公開 status、靜態資源、登入失敗與背景 polling 不延長 idle。HTTP streaming upload/download 持有 activity／storage lease，不能在傳輸中入睡。
 - timer 喚醒且 RTC intent、CRC、schedule generation 與 wake source 全部有效時才進 `wake_cycle`。該模式只使用 persisted STA 或 Off，不啟動 AP、fallback AP、mDNS 或 captive DNS；STA 使用 minimum modem power save。使用者活動會切回 normal 並恢復原本 persisted 網路政策。
+- 短週期不縮短電子紙的 180 秒冷卻；不能接納刷新時記錄跳過。工作超過週期時依固定 anchor 跳過錯過的時段，不連續補跑。分鐘制 sleep record 使用新版格式；舊小時格式進 recovery／disabled，保留原資料直到明確重新儲存排程。
 - wake agenda 依序執行最多三次 STA 嘗試、一次有界 NTP 同步與一次 stored-image refresh。沒有 STA、沒有圖片、panel 暫時不可接納或 NTP 失敗都有固定診斷；提早超過 60 秒的 absolute wake 保留同一 due 並重新入睡，不消耗該輪。
 - 入睡採 admission gate 與 owner ACK。E-paper 必須完成已接受工作的 protocol shutdown，userdata 必須取得 reservation 並卸載自己的 filesystem，restart／Wi-Fi transition／runtime action／USB host／active transfer／未知 marker 都會阻擋睡眠。`POST /api/sleep/now` 只回 202 pending；真正 deep sleep 後 HTTP 不可達。
 - agenda 診斷必須先成功保存才能準備入睡。final commit 關閉 keep-awake 後成功 arm timer、套用安全 GPIO hold，再停止 SNTP、mDNS、captive DNS、HTTP 與 Wi-Fi、卸載 userdata；接近 deep sleep 時 seal/write RTC intent，最後才呼叫 deep sleep。任何可回報的失敗依逆序恢復；不得用強制睡眠繞過 panel 或 storage 安全證明。
@@ -236,7 +245,7 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 
 ## 選擇性編譯
 
-- `sleep`、`epaper`、`storage`、`auth`、`user_files`、`mdns`、`battery`、`console` 由獨立 feature 設定檔決定是否編入，預設全開。關閉會裁切模組實作與相應 API／adapter，不能只在 runtime 停用或前端隱藏。
+- `sleep`、`epaper`、`storage`、`auth`、`user_files`、`mdns`、`battery`、`console`、`status_led` 由獨立 feature 設定檔決定是否編入，預設全開。關閉會裁切模組實作與相應 API／adapter，不能只在 runtime 停用或前端隱藏。
 - `epaper=1` 或 `user_files=1` 必須明確搭配 `storage=1`，違反時建置失敗，不自動補開。`user_files=0` 只裁切 generic file API，仍允許 epaper 專用圖片 upload/download/refresh。
 - `storage=0` 移除 `userdata` filesystem，把上傳分區回收至 firmware `app0`；設定持久化、內嵌 Web、系統時鐘、Flash 資訊、Wi-Fi 與 captive DNS 保留。全 reset／settings reset 可用，data-only reset 不註冊。
 - 改變 storage 會改變分區用途，既有檔案不提供保留或 migration 保證。成功啟動無 storage 版本後撤銷 filesystem 初始化標記，再啟用時重建；未啟動無 storage 版本就切回者需要明確 reset／recovery。一般 mount failure 維持既有拒絕靜默格式化的行為。
@@ -244,5 +253,5 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - `epaper=0` 仍使用已確認的板級安全 quiesce 與 retained hold cleanup，不假定外接面板已被拔除。
 - `auth=0` 不註冊 auth resource；route table 可保留原有 protected 宣告，HTTP、serial、streaming 與非同步 scan completion 的有效政策都不要求 token。此政策不改變 payload validation 或 operation gate。
 - AP 與管理者共用的 persisted 密碼不因 auth 裁切被清除。`auth=0` 使用 Wi-Fi AP credential 更新入口，保留密碼驗證、ConfigService 單一 owner、受保護 AP 的安全重啟；AP 密碼開關仍有效。
-- 公開能力 API 逐一回報八個功能是否編入。Support 與 runtime ready 分開；前端先讀能力再顯示選項與允許操作。`mdns=0` 不顯示 `.local` 存取提示，`battery=0` 不顯示電池卡片，`console=0` 不提供 serial commands，但既有診斷 log 保留。
-- Feature 設定、分區與操作方式見 [config/README.md](../config/README.md)。Wi-Fi 進階設定與 scan 的獨立開關仍未納入這八個功能；本次保留既有功能，後續裁切須再決定既有 persisted static IP 等欄位的套用政策。
+- 公開能力 API 逐一回報九個功能是否編入。Support 與 runtime ready 分開；前端先讀能力再顯示選項與允許操作。`mdns=0` 不顯示 `.local` 存取提示，`battery=0` 不顯示電池卡片，`console=0` 不提供 serial commands，但既有診斷 log 保留。
+- Feature 設定、分區與操作方式見 [config/README.md](../config/README.md)。Wi-Fi 進階設定與 scan 的獨立開關仍未納入這九個功能；本次保留既有功能，後續裁切須再決定既有 persisted static IP 等欄位的套用政策。

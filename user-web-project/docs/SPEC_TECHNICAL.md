@@ -980,7 +980,10 @@ src/device/
 
 - `src/device/device-sleep.js` 是 sleep status 的唯一 client owner，透過 `device-api.resources` 呼叫 `GET/PUT /api/sleep`、keep-awake、sleep-now 與 system-time；它保存 frozen snapshot、poll timer、request generation、busy/error 與 clock-sync cooldown。
 - `GET /api/device` 的 `features.sleep_scheduler` 是 Menu／route capability。`app-shell` 只依 capability 註冊或移除入口；page 不以 route 404 猜測功能。
-- `pages/device-sleep/` 負責 view state、登入 gate、欄位驗證、confirm 與 snapshot render，不直接 fetch。mount subscribe，unmount 必須取消 subscription／timer，late response 由 generation 丟棄。
+- `pages/device-sleep/` 負責 view state、登入 gate、欄位驗證與 snapshot render，不直接 fetch。mount subscribe，unmount 必須取消 subscription／timer，late response 由 generation 丟棄。
+- 頁面使用既有 `panel-section`、`toggle-switch`、`selectField` 與 `device-field`。資訊卡 `device-sleep-info` 置於設定卡之前，以兩欄 grid 顯示排程狀態、下次刷新、裝置／瀏覽器時間，blockers 跨整列；request failure 使用資訊卡專用 notice，儲存結果留在設定卡。狀態 epoch 以本地 24 小時制時分呈現。
+- `device-sleep-form` 使用兩欄 grid：max-content 標籤欄、剩餘控制欄，三組標籤與控制項直接放入同一個 grid。沿用裝置頁的 34px 最小列高、12px 列距，欄距 16px；窄於 360px 時標籤限寬 100px，長英文標籤可換行但仍與控制項同列。選單依內容決定寬度並靠左，不伸展。完整移除時間說明節點、sleepTimeHint 文案和相關 aria-describedby；週期驗證仍透過專用錯誤 notice 回饋，正常狀態沒有說明行或空白行。`device-sleep-time` 包裝 hour／minute 的兩個 select 與冒號，各自以翻譯後的 aria-label 標示；選項固定為 0..23／0..59，顯示兩位數，不使用時間文字 input、日期或時間 dialog。
+- 初始化時／分選單取 snapshot 的 `next_wake_epoch`，缺值時取瀏覽器 `min(period_minutes, 60)` 分鐘後；polling 不覆蓋草稿。選單直接提供有效時分，以同一次取樣的 browser now 建立本地下一次時刻（已到達則加一個日曆日），向上取整為分鐘並檢查 `1..period_minutes`。選單一般項目顯示 12／24／48 小時，value 是 720／1440／2880；讀到 API 自訂分鐘值時加入顯示用選項並維持原值。送出新的 `period_minutes` 與既有 `first_wake_delay_minutes`、`client_time`；未知 next wake 時預設 delay 不超過已選分鐘週期。頁面不呼叫 sleep-now 或建立相關確認 dialog。
 - `device-sleep.accept()` 每次接受 snapshot 都可檢查 device epoch 與 browser epoch 的 drift；自動 `PUT /api/system/time` 只在已登入、online、clock 缺失或偏差超過 5 秒且 cooldown 到期時執行。校時不能綁在每次 render 或 status poll。
 - Status polling 固定 15 秒，不送 keep-awake。keep-awake 只由使用者 action 觸發；sleep-now 的 202 進入 pending，後續 online status 決定 cancelled／failed／entering，offline 僅呈現不確定的 sleep transition。
 - `device-mock.js` 模擬 feature=true 與完整 sleep snapshot。設定 schedule 後更新 anchor／next wake，keep-awake 重置 idle，sleep-now 經 pending 後讓 mock alive 離線；重新載入 source preview 會重設 in-memory schedule。

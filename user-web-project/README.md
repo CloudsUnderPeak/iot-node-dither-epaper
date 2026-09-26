@@ -33,7 +33,7 @@ Many e-paper and embedded displays can only show a small set of colors. If you p
 - Apply dithering and preview how the image looks with limited colors.
 - Export the processed result as PNG.
 - On a detected e-paper device, export a versioned `.dither.png` image project even while the device is offline or cooling down. PC image viewers show its dithered result; re-importing it restores the original image and editor settings.
-- On firmware that advertises the sleep scheduler, use the device Sleep Schedule page to configure a 12, 24, or 48-hour cycle, inspect blockers and wake results, keep the device awake, or request safe sleep. Source preview includes mock behavior and does not put hardware to sleep.
+- On firmware that advertises the sleep scheduler, use the Power Schedule page to select a local refresh time from hour/minute dropdowns and choose a 12, 24, or 48-hour cycle. Inspect the next refresh and sleep blockers, or keep the device awake from the header. The device sleeps automatically when idle and safe. Source preview uses mock behavior and does not operate hardware.
 
 ## Help Center
 

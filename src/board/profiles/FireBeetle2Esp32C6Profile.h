@@ -18,6 +18,13 @@ struct FireBeetle2Esp32C6Profile {
   // DFRobot's DFR1075 battery example reads GPIO0 and doubles the calibrated
   // ADC pin voltage to account for the onboard divider.
   static constexpr BatterySense kBatterySense{0, 2, 1};
+  // DFR1075 onboard user LED (also GDI LCD_BL). GPIO15 remains restricted
+  // as a strapping pin; only the dedicated board LED owner drives it after boot.
+  static constexpr int8_t kStatusLedPin = 15;
+  static constexpr bool kStatusLedActiveHigh = true;
+  static constexpr uint8_t kStatusLedBrightnessPercent = 10;
+  static constexpr uint32_t kStatusLedPwmHz = 1000;
+  static constexpr uint8_t kStatusLedPwmBits = 10;
   static constexpr EpaperPins kEpaper{18, 1, 14, 21};
 
   static constexpr uint32_t kEpaperSpiHz = 4000000;

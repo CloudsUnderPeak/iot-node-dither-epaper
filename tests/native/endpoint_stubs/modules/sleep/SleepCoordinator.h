@@ -45,7 +45,7 @@ class SleepCoordinator {
   unsigned updateCount = 0;
   SleepCoordinator() {
     current.record.enabled = true;
-    current.record.periodHours = 24;
+    current.record.periodMinutes = 1440;
     current.record.anchorEpoch = 1800000000;
     current.record.scheduleGeneration = 1;
   }

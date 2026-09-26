@@ -43,7 +43,7 @@ SUPPORTED_UPLOAD_BAUD = 460800
 SUPPORTED_FLASH_MODE = "dio"
 SUPPORTED_FLASH_FREQUENCY = "80m"
 SUPPORTED_FLASH_SIZE = "detect"
-MANIFEST_SCHEMA = 7
+MANIFEST_SCHEMA = 8
 NO_STORAGE_APP_SIZE = 0x3D8000
 PRODUCT = "iot-node-bedrock"
 APP_OFFSET = 0x10000
@@ -628,11 +628,11 @@ def verify_manifest_metadata(
     web_manifest: dict,
     web_root: Path,
 ) -> None:
-    if manifest.get("schema") not in (6, MANIFEST_SCHEMA):
+    if manifest.get("schema") not in (6, 7, MANIFEST_SCHEMA):
         raise ReleaseError("unsupported release manifest schema")
-    if manifest.get("schema") == MANIFEST_SCHEMA:
+    if manifest.get("schema") >= 7:
         features = manifest.get("features")
-        if not isinstance(features, dict) or set(features) != set(NAMES) or any(type(value) is not bool for value in features.values()):
+        if not isinstance(features, dict) or set(features) != (set(NAMES) - {"status_led"} if manifest["schema"] == 7 else set(NAMES)) or any(type(value) is not bool for value in features.values()):
             raise ReleaseError("invalid release features")
         if (features["epaper"] or features["user_files"]) and not features["storage"]:
             raise ReleaseError("invalid release feature dependencies")

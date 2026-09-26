@@ -18,7 +18,7 @@ class FeatureConfigurationTest(unittest.TestCase):
 
     def test_all_combinations_and_dependencies(self):
         valid = 0
-        for bits in itertools.product((0, 1), repeat=8):
+        for bits in itertools.product((0, 1), repeat=len(features.NAMES)):
             values = dict(zip(features.NAMES,bits))
             text = '[features]\n'+''.join(f'{k}={v}\n' for k,v in values.items())
             if (values['epaper'] or values['user_files']) and not values['storage']:
@@ -26,7 +26,7 @@ class FeatureConfigurationTest(unittest.TestCase):
             else:
                 self.assertEqual(self.parse(text)['features'], {k:bool(v) for k,v in values.items()})
                 valid += 1
-        self.assertEqual(valid,160)
+        self.assertEqual(valid,320)
 
     def test_omitted_features_are_off_and_storage_must_be_selected(self):
         self.assertFalse(self.parse('[features]\nauth=1')['features']['sleep'])

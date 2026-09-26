@@ -114,7 +114,7 @@ Api::Response snapshotResponse(SleepCoordinator &sleep) {
   writeIdle(data["idle"].to<JsonObject>(), snapshot);
   JsonObject schedule = data["schedule"].to<JsonObject>();
   if (snapshot.record.enabled) {
-    schedule["period_hours"] = snapshot.record.periodHours;
+    schedule["period_minutes"] = snapshot.record.periodMinutes;
     if (snapshot.record.anchorEpoch > 0)
       schedule["anchor_epoch"] = snapshot.record.anchorEpoch;
     else schedule["anchor_epoch"] = nullptr;
@@ -125,7 +125,7 @@ Api::Response snapshotResponse(SleepCoordinator &sleep) {
     else schedule["next_wake_epoch"] = nullptr;
     schedule["next_wake_in_seconds"] = snapshot.nextWakeInSeconds;
   } else {
-    schedule["period_hours"] = nullptr;
+    schedule["period_minutes"] = nullptr;
     schedule["anchor_epoch"] = nullptr;
     schedule["clock_basis"] = nullptr;
     schedule["next_wake_epoch"] = nullptr;
@@ -207,23 +207,25 @@ Api::Response SleepEndpoints::update(const Api::Request &request,
   JsonDecodeError error;
   JsonReader reader(root, "", error);
   const bool enabled = reader.requiredBool("enabled", "enabled is required");
-  const bool periodPresent = hasKey(root, "period_hours");
+  if (hasKey(root, "period_hours"))
+    return Api::problem(400, "unsupported_field", "use period_minutes", "period_hours");
+  const bool periodPresent = hasKey(root, "period_minutes");
   const bool delayPresent = hasKey(root, "first_wake_delay_minutes");
   const bool timePresent = hasKey(root, "client_time");
   uint32_t period = 0, delay = 0, epoch = 0;
-  if (enabled || periodPresent) period = reader.requiredUint32("period_hours", "period_hours is required");
+  if (enabled || periodPresent) period = reader.requiredUint32("period_minutes", "period_minutes is required");
   if (enabled || delayPresent) delay = reader.requiredUint32("first_wake_delay_minutes", "first_wake_delay_minutes is required");
   if (enabled || timePresent) epoch = reader.requiredUint32("client_time", "client_time is required");
-  reader.finish({"enabled", "period_hours", "first_wake_delay_minutes", "client_time"});
+  reader.finish({"enabled", "period_minutes", "first_wake_delay_minutes", "client_time"});
   if (!error.ok()) return Api::decodeError(error);
   if (!enabled && (periodPresent || delayPresent || timePresent) &&
       !(periodPresent && delayPresent && timePresent)) {
     return Api::problem(400, "missing_field", "all schedule fields are required together");
   }
   if (enabled || periodPresent) {
-    if (!SleepSchedule::validPeriodHours(period))
-      return Api::problem(400, "invalid_field", "period_hours must be 12, 24, or 48", "period_hours");
-    if (!SleepSchedule::validDelayMinutes(period, delay))
+    if (period < 1 || period > 2880)
+      return Api::problem(400, "invalid_field", "period_minutes must be an integer from 1 to 2880", "period_minutes");
+    if (delay < 1 || delay > period)
       return Api::problem(400, "invalid_field", "invalid first wake delay", "first_wake_delay_minutes");
     if (!SleepSchedule::validClientEpoch(epoch))
       return Api::problem(400, "invalid_field", "client_time is outside supported range", "client_time");
@@ -265,7 +267,7 @@ Api::Response SleepEndpoints::update(const Api::Request &request,
       return Api::problem(400, "invalid_field", "invalid first wake delay",
                           "first_wake_delay_minutes");
     }
-    candidate.periodHours = period;
+    candidate.periodMinutes = period;
     candidate.anchorEpoch = anchor;
   }
   ++candidate.scheduleGeneration;

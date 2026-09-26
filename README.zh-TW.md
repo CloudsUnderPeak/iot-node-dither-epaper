@@ -80,7 +80,7 @@ make build
 
 預設建置會編入睡眠排程器，但持久化排程仍維持停用，直到使用者主動設定。若要移除相關 routes 與實作，使用 `make build SLEEP=0`；release manifest 會記錄該次建置的 `sleep_scheduler` 值。
 
-八個編譯功能由 [`config/features.ini`](config/features.ini) 設定：sleep、epaper、storage、auth、user_files、mdns、battery、console。最小版本使用 `make build FEATURES=config/profiles/minimal.ini WEB=none`。Epaper 與 user_files 必須搭配 storage；關閉 storage 會回收 userdata 給 app，並改變檔案分區用途。前端讀取 `GET /api/features` 決定顯示與操作。相依、分區切換與驗證方式見 [功能編譯設定](config/README.md)。
+九個編譯功能由 [`config/features.ini`](config/features.ini) 設定：sleep、epaper、storage、auth、user_files、mdns、battery、console、status_led。最小版本使用 `make build FEATURES=config/profiles/minimal.ini WEB=none`。Epaper 與 user_files 必須搭配 storage；關閉 storage 會回收 userdata 給 app，並改變檔案分區用途。前端讀取 `GET /api/features` 決定顯示與操作。相依、分區切換與驗證方式見 [功能編譯設定](config/README.md)。 板載狀態 LED 在一般模式以預設 10% PWM 亮度恆亮，睡前關閉，排程暫時喚醒期間保持關閉。
 
 確認開發板的序列埠，再建置、驗證並燒錄：
 

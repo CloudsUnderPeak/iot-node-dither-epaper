@@ -41,12 +41,12 @@ def profiles(all_combinations=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build', action='store_true')
-    parser.add_argument('--all', action='store_true', help='Compile every valid combination (160).')
+    parser.add_argument('--all', action='store_true', help='Compile every valid combination (320).')
     parser.add_argument('--profile', action='append')
     parser.add_argument('--output', type=Path, default=ROOT/'tmp/verification/features-matrix')
     args = parser.parse_args()
     output = args.output.resolve(); output.mkdir(parents=True, exist_ok=True)
-    # Validate all 256 inputs including hard dependency errors before any build.
+    # Validate all feature inputs including hard dependency errors before any build.
     accepted = 0
     with tempfile.TemporaryDirectory(prefix='iot-features-') as temporary:
         work = Path(temporary)
@@ -61,7 +61,7 @@ def main():
             else:
                 if not valid: raise RuntimeError('dependency validation accepted an invalid profile')
                 accepted += 1
-        print(f'Resolver: {accepted} valid / 256 combinations', flush=True)
+        print(f'Resolver: {accepted} valid / {2 ** len(NAMES)} combinations', flush=True)
         if not args.build: return
         for directory in ('src', 'config'):
             shutil.copytree(ROOT/directory, work/directory)
@@ -86,7 +86,7 @@ def main():
         symbols = {'sleep':'SleepCoordinator::', 'epaper':'EpaperService::',
                    'storage':'UserDataStorage::', 'auth':'AuthService::',
                    'user_files':'UserFileEndpoints::list(', 'mdns':'MdnsService::',
-                   'battery':'BatteryMonitor::', 'console':'ConsoleShell::'}
+                   'battery':'BatteryMonitor::', 'console':'ConsoleShell::', 'status_led':'StatusLed::'}
         for name, f in selected:
             config = work/'config/matrix.ini'
             config.write_text('[features]\n'+''.join(f'{k}={int(v)}\n' for k,v in f.items()))
