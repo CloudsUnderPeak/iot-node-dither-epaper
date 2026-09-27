@@ -945,13 +945,14 @@ Settings 與完整 reset 也會清除 `sleep_a`、`sleep_b`、`sleep_meta` 排�
   "success": true,
   "data": {
     "enabled": true,
+    "wake_network_sync_enabled": true,
     "mode": "normal",
     "state": "armed",
     "storage_state": "ok",
     "idle": {
-      "timeout_seconds": 1800,
+      "timeout_seconds": 600,
       "armed": true,
-      "remaining_seconds": 1432
+      "remaining_seconds": 432
     },
     "schedule": {
       "period_minutes": 1440,
@@ -994,26 +995,31 @@ Settings 與完整 reset 也會清除 `sleep_a`、`sleep_b`、`sleep_meta` 排�
 
 短週期仍遵守 180 秒 panel cooldown；不能接納時記錄 `skipped_epaper_unavailable`，工作超過週期時跳過已錯過時段。舊小時格式的儲存資料不轉換：讀到它會進 `storage_state: recovery` 並停用排程，需用新的分鐘 payload 明確重新儲存。
 
+`wake_network_sync_enabled` 是可持久化的喚醒連網校時偏好，預設 true，排程停用時仍回報。false 時排程喚醒不啟動 Wi-Fi／NTP，time-sync task 為 `status: "skipped"`、`code: "disabled_by_setting"`，`sta_attempts` 為 0；不因此增加失敗計數。`time.synced`／`last_wake.time_synced` 表示既有時鐘狀態，不能據此判定本輪 NTP 成功。
+
 `mode` 為 `normal|wake_cycle`；`state` 為 `disabled|armed|agenda_running|entering|failed`；`storage_state` 為 `ok|recovery|error`。Nullable clock／schedule／last wake 欄位在沒有可信資料時為 null。`sleep_request.state` 為 `none|pending|entering|cancelled|failed`。
 
 `blockers` 可包含 `epaper_busy`、`epaper_unsafe`、`epaper_marker_active`、`upload_active`、`restart_pending`、`wifi_transition`、`runtime_action_pending`、`no_wake_source`、`usb_host_connected`、`sleep_storage_error`。它是診斷 snapshot；真正入睡仍會重新取得 owner reservations 並再次驗證。
 
 ### `PUT /api/sleep`
 
-需要 Bearer token。啟用時四個欄位全部必填：
+需要 Bearer token。啟用時原有四個欄位全部必填；另可帶布林 `wake_network_sync_enabled`：
 
 ```json
 {
   "enabled": true,
   "period_minutes": 1440,
   "first_wake_delay_minutes": 60,
-  "client_time": 1790092800
+  "client_time": 1790092800,
+  "wake_network_sync_enabled": false
 }
 ```
 
 `period_minutes` 接受 1–2880 的整數，預設 1440；delay 為 1 到 `period_minutes`。舊欄位 `period_hours` 回 `400 unsupported_field`；`client_time` 範圍與 system time 相同。交易先設定 clock、建立固定 UTC anchor，再以新的 schedule generation 持久化；save 失敗會回復先前 clock，回 `500 storage_error`。clock 回復也失敗時回 `500 time_error`。成功回與 GET 相同的完整 snapshot。
 
-停用使用 `{"enabled":false}`。若停用時仍提供 schedule 欄位，三個欄位必須完整且有效。停用不會移除最近一次診斷。
+新欄位只接受 JSON boolean；null、字串、數字等回 `400 invalid_field`，fields 指向 `wake_network_sync_enabled`。省略時保留已儲存值，未建立偏好或讀取舊 schema 2 時預設 true；舊 client 不會把 false 還原成 true。成功 PUT 與 GET 皆回報此欄位。
+
+停用使用 `{"enabled":false}`，保留偏好；也可用 `{"enabled":false,"wake_network_sync_enabled":false}` 同時儲存偏好，不要求 clock 欄位。若停用時仍提供 schedule 欄位，三個欄位必須完整且有效。停用不會移除最近一次診斷。
 
 ### `POST /api/sleep/keep-awake`
 
@@ -1033,7 +1039,7 @@ Settings 與完整 reset 也會清除 `sleep_a`、`sleep_b`、`sleep_meta` 排�
 
 HTTP status 為 `202`；loop 至少保留 response grace，再完成 safety prepare。沒有有效 timer 計畫回 `409 no_wake_source`，其他 blocker 回 `409 sleep_blocked`，兩者的 `data.blockers` 都列出當下原因。若後續活動取消或 owner 收尾失敗，使用 GET 查詢 request state／error；裝置真正 deep sleep 後 API 不可達。
 
-Settings 或完整 factory reset 會清除 sleep schedule；data-only reset 保留。
+Settings 或完整 factory reset 會清除 sleep schedule 並恢復連網校時預設 true；data-only reset 保留。
 
 ## Storage
 

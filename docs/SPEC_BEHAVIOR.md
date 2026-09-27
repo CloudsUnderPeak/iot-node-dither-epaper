@@ -187,15 +187,23 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 
 - `IOT_FEATURE_SLEEP` 由功能設定檔的 `sleep=0|1` 控制，可由 release build 的 `SLEEP=0|1` 覆寫；即使編入功能，factory runtime 預設仍為停用，必須由 `PUT /api/sleep` 明確啟用（auth 編入時需要認證）。
 - 排程週期以分鐘保存，API 接受 1–2880 的整數（上限 48 小時），預設 1440 分鐘；網頁一般選項仍為 12／24／48 小時，送出 720／1440／2880 分鐘，使用 client epoch 與首次喚醒延遲建立固定 UTC anchor。後續 due 從 anchor 計算，不以每次完成時間累加；沒有可信 absolute clock 時使用 RTC carried relative clock，成功 SNTP 後才回 absolute basis。
-- `normal` mode 的 idle timeout 預設 1800 秒。Protected API、公開 e-paper write、完整 serial input line 與 keep-awake 都是活動；公開 status、靜態資源、登入失敗與背景 polling 不延長 idle。HTTP streaming upload/download 持有 activity／storage lease，不能在傳輸中入睡。
+- `normal` mode 的 idle timeout 預設 600 秒（10 分鐘）。Protected API、公開 e-paper write、完整 serial input line 與 keep-awake 都是活動；公開 status、靜態資源、登入失敗與背景 polling 不延長 idle。HTTP streaming upload/download 持有 activity／storage lease，不能在傳輸中入睡。
 - timer 喚醒且 RTC intent、CRC、schedule generation 與 wake source 全部有效時才進 `wake_cycle`。該模式只使用 persisted STA 或 Off，不啟動 AP、fallback AP、mDNS 或 captive DNS；STA 使用 minimum modem power save。使用者活動會切回 normal 並恢復原本 persisted 網路政策。
 - 短週期不縮短電子紙的 180 秒冷卻；不能接納刷新時記錄跳過。工作超過週期時依固定 anchor 跳過錯過的時段，不連續補跑。分鐘制 sleep record 使用新版格式；舊小時格式進 recovery／disabled，保留原資料直到明確重新儲存排程。
 - wake agenda 依序執行最多三次 STA 嘗試、一次有界 NTP 同步與一次 stored-image refresh。沒有 STA、沒有圖片、panel 暫時不可接納或 NTP 失敗都有固定診斷；提早超過 60 秒的 absolute wake 保留同一 due 並重新入睡，不消耗該輪。
 - 入睡採 admission gate 與 owner ACK。E-paper 必須完成已接受工作的 protocol shutdown，userdata 必須取得 reservation 並卸載自己的 filesystem，restart／Wi-Fi transition／runtime action／USB host／active transfer／未知 marker 都會阻擋睡眠。`POST /api/sleep/now` 只回 202 pending；真正 deep sleep 後 HTTP 不可達。
 - agenda 診斷必須先成功保存才能準備入睡。final commit 關閉 keep-awake 後成功 arm timer、套用安全 GPIO hold，再停止 SNTP、mDNS、captive DNS、HTTP 與 Wi-Fi、卸載 userdata；接近 deep sleep 時 seal/write RTC intent，最後才呼叫 deep sleep。任何可回報的失敗依逆序恢復；不得用強制睡眠繞過 panel 或 storage 安全證明。
-- `POST /api/sleep/keep-awake` 可取消 prepare 階段的 intent；final commit 後回 `sleep_entering`。USB host 從 connected 轉 disconnected 時重新開始完整 idle timeout，避免拔線後立即睡眠。
+- `POST /api/sleep/keep-awake` 可取消 prepare 階段的 intent；final commit 後回 `sleep_entering`。USB host 從 connected 轉 disconnected 時重新開始完整 idle timeout（預設 10 分鐘），避免拔線後立即睡眠。
 - `POST /api/system/reset` 與 `/settings` 會清除 sleep namespaces；`/data` 保留排程。`SLEEP=0` 時不註冊 sleep routes，但仍執行 boot GPIO hold hygiene。
 - 實際 timer wake、GPIO 波形、USB host presence、耗電、Wi-Fi reconnect 與實體 panel cooldown evidence 必須接上裝置驗證；host／native／browser／release build 通過不代表硬體驗收完成，實測結果保存在 ignored `tmp/verification/`。
+
+### 喚醒連網校時開關
+
+- `wake_network_sync_enabled` 是保存在裝置的單一開關，預設 true；同時控制排程 timer `wake_cycle` 的 Wi-Fi 連線與 NTP 校時。關閉時從啟動階段保持 Wi-Fi Off，跳過連線與 NTP，直接嘗試刷新已儲存圖片，再依原有安全條件入睡。
+- 開啟時仍只使用既有 STA 設定；AP-only、Off 或未設 STA 不會另建 AP。一般開機、重啟及使用者活動切回 normal 後恢復原 persisted 網路政策。
+- 關閉是主動略過：time-sync task 回報 skipped／`disabled_by_setting`、STA attempts 為 0，不因未校時增加失敗計數。`time.synced` 保留既有時鐘語意，不代表本輪做過 NTP。
+- 離線時延續既有 RTC clock、relative schedule 與固定 anchor；不定期校時可能讓刷新時間逐漸偏移。一般模式仍可由 browser／serial 設時，節電與漂移幅度須實測。
+- 舊 schema 2 sleep 設定讀取時補 true 並保留排程；不因 boot 自動重寫。設定正常寫入採 schema 3；回退至只支援 schema 2 的韌體後須重新設定排程。Settings／完整 reset 恢復 true 且排程停用，data reset 保留。
 
 ## Serial console 行為
 
@@ -230,6 +238,13 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - OTA
 - 雲端帳號或遠端管理
 - 多使用者或角色權限
+
+## 已確認需求：低電量彩色提示（待實作）
+
+- 低電量時，刷新後圖片須在觀看方向右上角顯示彩色電量不足符號，並支援直式／橫式。符號採白底、黑色電池外框與接點、紅色低電量格。
+- 圖片上傳 API 可帶方向布林值；觀看方向須隨圖片保存，供重啟後重畫使用。
+- 實作方案與來源評估見 [低電量提示計畫](PLAN_LOW_BATTERY_OVERLAY.md)。`is_portrait`、3.60 V 進入／3.75 V 解除、一次刷新合成與 unknown 處理均為計畫中的設計提案，尚未實作；不改變目前 API contract。
+- 待收斂：實板／電池型號、供電與 ADC 誤差量測、最終門檻及內部方向 metadata layout。實測紀錄只放 `tmp/verification/`。
 
 ## 待決需求
 

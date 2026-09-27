@@ -45,8 +45,8 @@
         window.setInterval = function (fn, ms) { timerCalls.push({ fn: fn, ms: ms }); return timerCalls.length; };
         window.clearInterval = function () {};
         var sample = {
-            enabled: true, mode: 'normal', state: 'armed', storage_state: 'ok',
-            idle: { armed: true, timeout_seconds: 1800, remaining_seconds: 300 },
+            enabled: true, wake_network_sync_enabled: true, mode: 'normal', state: 'armed', storage_state: 'ok',
+            idle: { armed: true, timeout_seconds: 600, remaining_seconds: 300 },
             schedule: { period_minutes: 1440, anchor_epoch: 1790071200, clock_basis: 'absolute',
                 next_wake_epoch: 1790071200, next_wake_in_seconds: 3600 },
             time: { epoch: 1790067600, synced: true, source: 'client' },
@@ -76,9 +76,9 @@
             var secondRejected = false;
             await app.device.sleep.keepAwake().catch(function () { secondRejected = true; });
             harness.assert(secondRejected && keepCalls.length === 1, 'keep-awake is single flight');
-            keepCalls.shift().resolve({ idle: { armed: true, timeout_seconds: 1800, remaining_seconds: 1800 } });
+            keepCalls.shift().resolve({ idle: { armed: true, timeout_seconds: 600, remaining_seconds: 1800 } });
             await firstKeep;
-            harness.assert(app.device.sleep.snapshot().remainingSeconds >= 1799, 'keep-awake updates countdown');
+            harness.assert(app.device.sleep.snapshot().remainingSeconds >= 599, 'keep-awake updates countdown');
             passed.push('Keep-awake single flight and authoritative idle response');
 
             var stale = app.device.sleep.refresh();
@@ -116,7 +116,14 @@
                 snapshot: function () { return { supported: true, status: pageStatus }; },
                 subscribe: function (listener) { pageListener = listener; return function () { pageListener = null; }; },
                 refresh: function () { return Promise.resolve(pageStatus); },
-                update: function (payload) { updateCalls.push(payload); return Promise.resolve(pageStatus); }
+                update: function (payload) {
+                    updateCalls.push(payload);
+                    pageStatus = Object.assign({}, pageStatus, { enabled: payload.enabled });
+                    if (typeof payload.wake_network_sync_enabled === 'boolean') {
+                        pageStatus.wake_network_sync_enabled = payload.wake_network_sync_enabled;
+                    }
+                    return Promise.resolve(pageStatus);
+                }
             };
             app.device.bindLiveGate = function () {
                 return { banner: document.createElement('div'), unbind: function () {} };
@@ -126,6 +133,10 @@
             try {
                 app.pages.deviceSleepPage.mount(root);
                 var checkbox = root.querySelector('input[type="checkbox"]');
+                var syncCheckbox = root.querySelector('#sleep-network-sync');
+                harness.assert(syncCheckbox.checked && !syncCheckbox.disabled, 'network sync initialized from device');
+                syncCheckbox.checked = false;
+                syncCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
                 var period = root.querySelector('select');
                 var hour = root.querySelector('select[name="sleep-hour"]');
                 var minute = root.querySelector('select[name="sleep-minute"]');
@@ -156,6 +167,7 @@
                     && !root.querySelector('.device-sleep-card .device-badge, .device-sleep-card .device-field-value'),
                     'information card precedes settings and owns status and blockers');
                 var payload = await saveDraft();
+                harness.assert(payload.wake_network_sync_enabled === false, 'unchecking is saved with schedule');
                 harness.assert(payload.first_wake_delay_minutes === 75 && payload.client_time === Math.floor(fixedTime / 1000)
                     && payload.period_minutes === 1440, 'HH:mm converts to existing minute-based API payload');
                 passed.push('Power schedule uses hour/minute dropdowns and a separate information card');
@@ -184,12 +196,13 @@
                     enabled: false, blockers: ['usb_host_connected']
                 }) });
                 harness.assert(hour.value === '1' && minute.value === '30', 'status polling does not overwrite the time draft');
+                harness.assert(!syncCheckbox.checked, 'polling does not overwrite network sync draft');
                 harness.assert(root.querySelector('.device-sleep-info .device-field-value').textContent === app.i18n.t('sleepDisabled')
                     && root.querySelector('.device-sleep-blockers .device-field-value').textContent === 'usb_host_connected',
                     'polling updates disabled status and blockers in the information card');
                 checkbox.checked = false;
                 checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                harness.assert(period.disabled && hour.disabled && minute.disabled && !save.disabled, 'disabling locks time and period fields');
+                harness.assert(syncCheckbox.disabled && period.disabled && hour.disabled && minute.disabled && !save.disabled, 'disabling locks time and period fields');
                 payload = await saveDraft();
                 harness.assert(JSON.stringify(payload) === '{"enabled":false}', 'disable sends only enabled=false');
                 passed.push('Power schedule preserves drafts and disables with the existing API contract');
@@ -197,6 +210,7 @@
                 root.innerHTML = '';
                 fixedTime = new Date(2026, 8, 27, 8, 15, 30).getTime();
                 pageStatus = Object.assign({}, sample, {
+                    wake_network_sync_enabled: false,
                     schedule: { period_minutes: 1, next_wake_epoch: Math.floor(fixedTime / 1000) + 60 }
                 });
                 app.pages.deviceSleepPage.mount(root);
@@ -210,10 +224,64 @@
                 harness.assert(payload.period_minutes === 1 && payload.first_wake_delay_minutes === 1,
                     'saving a custom minute schedule does not replace it with 24 hours');
                 passed.push('Custom minute schedules are displayed and preserved');
+                harness.assert(!root.querySelector('#sleep-network-sync').checked,
+                    'saved network preference restored when page is remounted');
+                var realUpdate = app.device.sleep.update;
+                app.device.sleep.update = function () { return Promise.reject(new Error('save failed')); };
+                syncCheckbox = root.querySelector('#sleep-network-sync');
+                syncCheckbox.checked = true;
+                await saveDraft();
+                await Promise.resolve();
+                harness.assert(syncCheckbox.checked && !save.disabled, 'failed save retains draft and releases busy');
+                app.device.sleep.update = realUpdate;
+                app.pages.deviceSleepPage.unmount();
+                root.innerHTML = '';
+                delete pageStatus.wake_network_sync_enabled;
+                app.pages.deviceSleepPage.mount(root);
+                syncCheckbox = root.querySelector('#sleep-network-sync');
+                harness.assert(syncCheckbox.disabled && syncCheckbox.indeterminate
+                    && root.querySelector('#sleep-network-sync-hint').getAttribute('data-tooltip') === app.i18n.t('sleepNetworkSyncUnsupported'),
+                    'legacy firmware displays unsupported control without claiming it is off');
+                save = root.querySelector('button');
+                payload = await saveDraft();
+                harness.assert(!Object.prototype.hasOwnProperty.call(payload, 'wake_network_sync_enabled'),
+                    'legacy firmware saves omit the unsupported field');
+                passed.push('Wake network preference, failed drafts and legacy firmware handling');
             } finally {
                 app.pages.deviceSleepPage.unmount();
                 Date.now = oldNow;
             }
+            var realFetch = window.fetch;
+            try {
+                harness.execute('device/device-mock.js', { window: window });
+                var loginResponse = await window.fetch('api/auth/login', {
+                    method: 'POST', body: JSON.stringify({ username: 'admin', password: 'password' })
+                });
+                var login = await loginResponse.json();
+                var headers = { Authorization: 'Bearer ' + login.data.token };
+                async function mockUpdate(body) {
+                    var response = await window.fetch('api/sleep', {
+                        method: 'PUT', headers: headers, body: JSON.stringify(body)
+                    });
+                    return response.json();
+                }
+                var stored = await mockUpdate({ enabled: false, wake_network_sync_enabled: false });
+                harness.assert(stored.success && stored.data.wake_network_sync_enabled === false,
+                    'preview saves false without requiring clock fields');
+                stored = await mockUpdate({ enabled: false });
+                harness.assert(stored.data.wake_network_sync_enabled === false, 'preview omission preserves preference');
+                for (var invalidValue of [null, 0, 'false']) {
+                    var rejected = await mockUpdate({ enabled: false, wake_network_sync_enabled: invalidValue });
+                    harness.assert(!rejected.success && rejected.data.code === 'invalid_field',
+                        'preview rejects non-boolean preferences');
+                }
+                await window.fetch('api/system/reset', { method: 'POST', headers: headers, body: '{}' });
+                var resetResponse = await window.fetch('api/sleep');
+                stored = await resetResponse.json();
+                harness.assert(!stored.data.enabled && stored.data.wake_network_sync_enabled === true
+                    && stored.data.idle.timeout_seconds === 600, 'preview reset restores defaults');
+                passed.push('Mock network preference validation, preservation and reset');
+            } finally { window.fetch = realFetch; }
             document.getElementById('result').textContent = JSON.stringify({ passed: passed });
         } finally {
             window.setInterval = originalInterval;

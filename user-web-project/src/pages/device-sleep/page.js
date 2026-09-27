@@ -30,6 +30,18 @@
         var enabled = app.utils.dom.el('input', {
             attrs: { type: 'checkbox', 'aria-labelledby': 'sleep-enable-label' }
         });
+        var networkSync = app.utils.dom.el('input', {
+            attrs: { id: 'sleep-network-sync', type: 'checkbox', role: 'switch',
+                'aria-labelledby': 'sleep-network-sync-label',
+                'aria-describedby': 'sleep-network-sync-hint' }
+        });
+        var networkTip = app.utils.dom.el('span', {
+            className: 'control-tip-icon', attrs: { id: 'sleep-network-sync-hint',
+                role: 'img', tabindex: '0', 'data-tooltip': t('sleepNetworkSyncHint'),
+                'aria-label': t('sleepNetworkSyncHint') },
+            children: [app.ui.svgIcons.create('assets/icons/editor/info-circle.svg')]
+        });
+        var networkSyncSupported = false;
         var period = app.utils.dom.el('select', { className: 'device-input', attrs: { id: 'sleep-period' } });
         [12, 24, 48].forEach(function (hours) {
             var option = app.utils.dom.el('option', { text: t('sleepPeriodOptionHours', { hours: hours }), attrs: { value: String(hours * 60) } });
@@ -81,6 +93,7 @@
             var max = Number(period.value);
             var valid = Number.isInteger(minutes) && minutes >= 1 && minutes <= max;
             enabled.disabled = busy;
+            networkSync.disabled = busy || !enabled.checked || !networkSyncSupported;
             period.disabled = busy || !enabled.checked;
             hour.disabled = busy || !enabled.checked;
             minute.disabled = busy || !enabled.checked;
@@ -88,7 +101,7 @@
             save.disabled = busy || !draftInitialized || (enabled.checked && !valid);
         }
 
-        [enabled, period, hour, minute].forEach(function (control) {
+        [enabled, networkSync, period, hour, minute].forEach(function (control) {
             control.addEventListener('input', updateDraft);
             control.addEventListener('change', updateDraft);
         });
@@ -105,7 +118,13 @@
                 summary.textContent = snapshot.error ? app.device.errorText(snapshot.error) : t('deviceLoading');
                 return;
             }
+            networkSyncSupported = typeof status.wake_network_sync_enabled === 'boolean';
+            networkSync.indeterminate = !networkSyncSupported;
+            var networkHint = t(networkSyncSupported ? 'sleepNetworkSyncHint' : 'sleepNetworkSyncUnsupported');
+            networkTip.setAttribute('data-tooltip', networkHint);
+            networkTip.setAttribute('aria-label', networkHint);
             if (!draftInitialized) {
+                networkSync.checked = networkSyncSupported && status.wake_network_sync_enabled;
                 enabled.checked = Boolean(status.enabled);
                 var savedPeriod = status.schedule && status.schedule.period_minutes || 1440;
                 if ([720, 1440, 2880].indexOf(savedPeriod) === -1) {
@@ -123,6 +142,7 @@
                 draftInitialized = true;
                 updateDraft();
             }
+            updateDraft();
             summary.textContent = status.enabled ? t('sleepEnabled') : t('sleepDisabled');
             deviceTime.textContent = status.time && status.time.synced ? formatEpoch(status.time.epoch) : t('sleepUnsynced');
             browserTime.textContent = formatEpoch(Date.now() / 1000);
@@ -142,6 +162,9 @@
         save.addEventListener('click', function () {
             if (busy) { return; }
             var payload = { enabled: enabled.checked };
+            if (enabled.checked && networkSyncSupported) {
+                payload.wake_network_sync_enabled = networkSync.checked;
+            }
             if (enabled.checked) {
                 var currentTime = Date.now();
                 var minutes = selectedDelay(currentTime);
@@ -157,7 +180,10 @@
             }
             busy = true;
             updateDraft();
-            service.update(payload).then(function () {
+            service.update(payload).then(function (saved) {
+                if (page.mounted && saved && typeof saved.wake_network_sync_enabled === 'boolean') {
+                    networkSync.checked = saved.wake_network_sync_enabled;
+                }
                 notice.set(t('sleepSaved'), { sticky: true });
             }, function (error) {
                 notice.set(app.device.errorText(error), { error: true });
@@ -195,6 +221,19 @@
                                 app.utils.dom.el('label', {
                                     className: 'toggle-switch',
                                     children: [enabled, app.utils.dom.el('span', {
+                                        className: 'toggle-switch-track', attrs: { 'aria-hidden': 'true' }
+                                    })]
+                                }),
+                                app.utils.dom.el('span', {
+                                    className: 'device-form-label control-label-content has-tip',
+                                    children: [app.utils.dom.el('label', {
+                                        className: 'control-label-text', text: t('sleepNetworkSync'),
+                                        attrs: { id: 'sleep-network-sync-label', for: 'sleep-network-sync' }
+                                    }), networkTip]
+                                }),
+                                app.utils.dom.el('label', {
+                                    className: 'toggle-switch',
+                                    children: [networkSync, app.utils.dom.el('span', {
                                         className: 'toggle-switch-track', attrs: { 'aria-hidden': 'true' }
                                     })]
                                 }),

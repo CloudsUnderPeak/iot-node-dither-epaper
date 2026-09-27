@@ -55,7 +55,7 @@ int32_t readSigned32(const uint8_t *bytes, size_t offset) {
   return value;
 }
 
-bool valid(const SleepRecord &record) {
+bool valid(const SleepRecord &record, uint16_t schema = 3) {
   if (!SleepSchedule::validPeriodMinutes(record.periodMinutes) ||
       record.lastHandledSlot < -1 || record.lastWake.taskCount > 4 ||
       std::memchr(record.lastWake.lastErrorCode, '\0',
@@ -66,7 +66,7 @@ bool valid(const SleepRecord &record) {
   for (uint8_t index = 0; index < record.lastWake.taskCount; ++index) {
     const SleepTaskRecord &task = record.lastWake.tasks[index];
     if (task.name < 1 || task.name > 2 || task.status < 1 ||
-        task.status > 4 || task.code > 12) return false;
+        task.status > 4 || task.code > (schema == 2 ? 12 : 13)) return false;
   }
   if (record.enabled &&
       (!SleepSchedule::validClientEpoch(record.anchorEpoch) ||
@@ -78,7 +78,7 @@ bool encode(const SleepRecord &record, std::array<uint8_t, kRecordBytes> &bytes)
   if (!valid(record)) return false;
   bytes.fill(0);
   writeInt(bytes.data(), 0, 0x534c5032UL, 4);
-  writeInt(bytes.data(), 4, 2, 2);
+  writeInt(bytes.data(), 4, 3, 2);
   writeInt(bytes.data(), 6, kRecordBytes, 2);
   writeInt(bytes.data(), 8, record.revision, 8);
   bytes[16] = record.enabled ? 1 : 0;
@@ -104,18 +104,21 @@ bool encode(const SleepRecord &record, std::array<uint8_t, kRecordBytes> &bytes)
     bytes[105 + 3 * i] = wake.tasks[i].status;
     bytes[106 + 3 * i] = wake.tasks[i].code;
   }
+  bytes[116] = record.wakeNetworkSyncEnabled ? 1 : 0;
   writeInt(bytes.data(), 124, crc32(bytes.data(), 124), 4);
   return true;
 }
 
 bool decode(const std::array<uint8_t, kRecordBytes> &bytes, SleepRecord &record) {
+  const uint16_t schema = static_cast<uint16_t>(readInt(bytes.data(), 4, 2));
   if (readInt(bytes.data(), 0, 4) != 0x534c5032UL ||
-      readInt(bytes.data(), 4, 2) != 2 ||
+      (schema != 2 && schema != 3) ||
       readInt(bytes.data(), 6, 2) != kRecordBytes ||
       readInt(bytes.data(), 124, 4) != crc32(bytes.data(), 124)) return false;
   SleepRecord candidate;
   candidate.revision = readInt(bytes.data(), 8, 8);
-  if (bytes[16] > 1 || bytes[70] > 1) return false;
+  if (bytes[16] > 1 || bytes[70] > 1 || (schema == 3 && bytes[116] > 1)) return false;
+  candidate.wakeNetworkSyncEnabled = schema == 2 || bytes[116] != 0;
   candidate.enabled = bytes[16] != 0;
   candidate.periodMinutes = static_cast<uint16_t>(readInt(bytes.data(), 17, 2));
   candidate.anchorEpoch = readSigned64(bytes.data(), 19);
@@ -137,7 +140,7 @@ bool decode(const std::array<uint8_t, kRecordBytes> &bytes, SleepRecord &record)
   for (size_t i = 0; i < 4; ++i) {
     wake.tasks[i] = {bytes[104 + 3 * i], bytes[105 + 3 * i], bytes[106 + 3 * i]};
   }
-  if (!valid(candidate)) return false;
+  if (!valid(candidate, schema)) return false;
   record = candidate;
   return true;
 }

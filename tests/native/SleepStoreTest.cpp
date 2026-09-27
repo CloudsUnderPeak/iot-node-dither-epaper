@@ -178,6 +178,36 @@ void testRoundTripAndNoop() {
   assert(std::strcmp(loaded.lastWake.lastErrorCode, "draw_failed") == 0);
 }
 
+void testNetworkPreferenceAndLegacySchema() {
+  MemoryBackend backend;
+  SleepStore store(backend);
+  SleepRecord committed = commitBaseline(store);
+  assert(committed.wakeNetworkSyncEnabled);
+  auto &legacy = backend.spaces["sleep_a"]["record"];
+  writeInt(legacy, 4, 2, 2);
+  legacy[116] = 0;
+  resealRecord(legacy);
+  const auto before = backend.spaces;
+  SleepStore upgraded(backend);
+  SleepRecord loaded;
+  assert(upgraded.load(loaded) == SleepStoreState::Ready);
+  assert(loaded.enabled && loaded.wakeNetworkSyncEnabled);
+  assert(loaded.anchorEpoch == committed.anchorEpoch && loaded.lastHandledSlot == 42);
+  assert(backend.spaces == before);  // Reading a legacy record must not write NVS.
+  loaded.wakeNetworkSyncEnabled = false;
+  loaded.lastWake.tasks[0] = {1, 3, 13};
+  assert(upgraded.save(loaded, committed) == SleepStoreState::Ready);
+  assert(backend.spaces["sleep_b"]["record"][4] == 3);
+  SleepStore rebooted(backend);
+  assert(rebooted.load(loaded) == SleepStoreState::Ready);
+  assert(!loaded.wakeNetworkSyncEnabled && loaded.lastWake.tasks[0].code == 13);
+  auto &record = backend.spaces["sleep_b"]["record"];
+  record[116] = 2;
+  resealRecord(record);
+  SleepStore corrupt(backend);
+  assert(corrupt.load(loaded) == SleepStoreState::Recovery && !loaded.enabled);
+}
+
 void testInactiveSlotFailuresKeepOldSelector() {
   {
     MemoryBackend backend;
@@ -341,6 +371,7 @@ void testInvalidValuesAndRevisionExhaustionFailClosed() {
 int main() {
   testRoundTripAndNoop();
   testMinuteRoundTrips();
+  testNetworkPreferenceAndLegacySchema();
   testInactiveSlotFailuresKeepOldSelector();
   testSelectorOutcomesAreResolvedOrFailClosed();
   testRecoveryAndSchemaValidation();

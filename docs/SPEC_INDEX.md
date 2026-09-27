@@ -1,6 +1,6 @@
 # SPEC Index
 
-`docs/` 只保存目前有效、預期提交版本控制的規格。規格依「行為／技術」及「firmware／前端」分開，避免產品需求、實作細節與驗證流水帳互相覆蓋。
+`docs/` 保存目前有效、預期提交版本控制的規格，以及明確標示待實作的現行開發計畫。規格依「行為／技術」及「firmware／前端」分開，避免產品需求、實作細節與驗證流水帳互相覆蓋。
 
 ## 規格文件
 
@@ -12,6 +12,12 @@
 | [SPEC_FRONTEND_TECHNICAL.md](SPEC_FRONTEND_TECHNICAL.md) | 前端開發者 | `builtin-web/`、`user-web/`、frontend build、REST client 邊界、preview、部署與資源限制。 |
 | [SPEC_API_REFERENCE.md](SPEC_API_REFERENCE.md) | API 使用者、整合開發者 | 對外提供的 REST/serial API 使用方式、auth、request、response、status code 與範例。它是外部整合 contract，不放內部架構。 |
 | [SPEC_CONSOLE_REFERENCE.md](SPEC_CONSOLE_REFERENCE.md) | 開發者、測試與維運人員 | Serial monitor 連線方式、human commands、`api ...` 語法、token 使用與操作範例。 |
+
+## 現行開發計畫
+
+| 文件 | 狀態與用途 |
+| --- | --- |
+| [PLAN_LOW_BATTERY_OVERLAY.md](PLAN_LOW_BATTERY_OVERLAY.md) | 待實作：彩色低電量圖示、上傳方向布林值、電壓門檻研究、持久化方案與驗收計畫。提案不代表現有 API 已支援；實作後將正式契約納入對應 SPEC，過時計畫移至 `tmp/`。 |
 
 ## 使用順序
 

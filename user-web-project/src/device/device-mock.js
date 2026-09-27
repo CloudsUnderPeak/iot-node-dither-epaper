@@ -67,7 +67,7 @@
         },
         clockEpoch: null,
         clockSetAt: 0,
-        sleep: { enabled: false, period: 1440, anchor: null, due: null,
+        sleep: { enabled: false, networkSyncEnabled: true, period: 1440, anchor: null, due: null,
             idleAt: Date.now(), request: { state: 'none', error_code: null } }
     };
 
@@ -84,7 +84,7 @@
     function mockSleep() {
         var value = state.sleep;
         var elapsed = Math.floor((Date.now() - value.idleAt) / 1000);
-        var remaining = Math.max(0, 1800 - elapsed);
+        var remaining = Math.max(0, 600 - elapsed);
         var current = mockEpoch();
         var next = value.due;
         var basis = current === null ? 'relative' : 'absolute';
@@ -99,8 +99,9 @@
         }
         return {
             enabled: value.enabled, mode: 'normal', state: value.enabled ? 'armed' : 'disabled',
+            wake_network_sync_enabled: value.networkSyncEnabled,
             storage_state: 'ok',
-            idle: { timeout_seconds: 1800, remaining_seconds: value.enabled ? remaining : null,
+            idle: { timeout_seconds: 600, remaining_seconds: value.enabled ? remaining : null,
                 armed: value.enabled },
             schedule: {
                 period_minutes: value.enabled ? value.period : null,
@@ -583,10 +584,14 @@
             if (!sleepBody || typeof sleepBody.enabled !== 'boolean') {
                 return fail(400, 'invalid_field', 'enabled is required', { fields: ['enabled'] });
             }
-            var fields = ['enabled', 'period_minutes', 'first_wake_delay_minutes', 'client_time'];
+            var fields = ['enabled', 'period_minutes', 'first_wake_delay_minutes', 'client_time', 'wake_network_sync_enabled'];
             var unknown = Object.keys(sleepBody).filter(function (key) { return fields.indexOf(key) === -1; });
             if (unknown.length) { return fail(400, 'unsupported_field', 'unsupported field', { fields: unknown }); }
-            var extras = fields.slice(1).filter(function (key) { return sleepBody[key] !== undefined; });
+            if (Object.prototype.hasOwnProperty.call(sleepBody, 'wake_network_sync_enabled')
+                && typeof sleepBody.wake_network_sync_enabled !== 'boolean') {
+                return fail(400, 'invalid_field', 'expected boolean', { fields: ['wake_network_sync_enabled'] });
+            }
+            var extras = fields.slice(1, 4).filter(function (key) { return sleepBody[key] !== undefined; });
             if (sleepBody.enabled || extras.length) {
                 var periodMinutes = sleepBody.period_minutes;
                 var minutes = sleepBody.first_wake_delay_minutes;
@@ -601,6 +606,9 @@
                 state.sleep.period = periodMinutes;
                 state.sleep.anchor = timestamp + minutes * 60;
                 state.sleep.due = state.sleep.anchor;
+            }
+            if (typeof sleepBody.wake_network_sync_enabled === 'boolean') {
+                state.sleep.networkSyncEnabled = sleepBody.wake_network_sync_enabled;
             }
             state.sleep.enabled = sleepBody.enabled;
             state.sleep.idleAt = Date.now();
@@ -657,6 +665,8 @@
             state.password = 'password';
             state.token = '';
             state.hostname = 'esp32-device';
+            state.sleep = { enabled: false, networkSyncEnabled: true, period: 1440,
+                anchor: null, due: null, idleAt: Date.now(), request: { state: 'none', error_code: null } };
             state.epaperCalibration.source = 'default';
             state.epaperCalibration.colors = copyCalibration(DEFAULT_EPAPER_CALIBRATION);
             state.transition = null;

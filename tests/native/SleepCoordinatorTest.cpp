@@ -105,7 +105,8 @@ class FakeSleepDriver final : public SleepDriver {
   void deepSleep() override { ++deepSleepCalls; }
 };
 
-bool SntpClient::start() { running_ = true; sampleReady_ = false; if (++generation_ == 0) ++generation_; return true; }
+unsigned sntpStartCalls = 0;
+bool SntpClient::start() { ++sntpStartCalls; running_ = true; sampleReady_ = false; if (++generation_ == 0) ++generation_; return true; }
 void SntpClient::stop() { running_ = false; sampleReady_ = false; sampleGeneration_ = 0; }
 bool SntpClient::takeSample(int64_t &epoch) {
   if (!running_ || !sampleReady_ || sampleGeneration_ != generation_) return false;
@@ -150,11 +151,13 @@ struct Fixture {
   int64_t now = static_cast<int64_t>(std::time(nullptr));
 
   explicit Fixture(bool usb = false, bool wake = false,
-                   int64_t wakeDueOffset = 3600, bool checkpoint = false) {
+                   int64_t wakeDueOffset = 3600, bool checkpoint = false,
+                   bool networkSync = true) {
     nativeMillis = 0;
     SleepRecord record;
     assert(store.load(record) == SleepStoreState::Empty);
     record.enabled = true;
+    record.wakeNetworkSyncEnabled = networkSync;
     record.periodMinutes = 1440;
     record.anchorEpoch = now + 86400;
     record.scheduleGeneration = 1;
@@ -260,6 +263,54 @@ void testEarlyWakeSkipsNetworkAndPersistsResult() {
   assert(f.wifi.applyCalls == 0);
   assert(f.epaper.requestSleepCalls == 1);
 }
+
+#if IOT_FEATURE_EPAPER
+void testOfflineWakeSkipsRadioAndNtp() {
+  Fixture f(false, true, 0, false, false);
+  f.config.value.wifiMode = WifiMode::ApSta;
+  strlcpy(f.config.value.staSsid, "network", sizeof(f.config.value.staSsid));
+  assert(f.sleep.effectiveWifiConfig(f.config.value).wifiMode == WifiMode::Off);
+  const unsigned ntpBefore = sntpStartCalls;
+  f.poll(0);  // Start directly at draw.
+  f.poll(1);  // Accept the stored refresh without connection deadlines.
+  assert(f.epaper.nextOperation == 2 && f.wifi.applyCalls == 0);
+  f.epaper.current.completedOperationId = 1;
+  f.poll(2);
+  const auto snapshot = f.sleep.snapshot(2);
+  assert(snapshot.record.lastWake.result == 1);
+  assert(snapshot.record.lastWake.staAttempts == 0);
+  assert(snapshot.record.lastWake.tasks[0].status == 3);
+  assert(snapshot.record.lastWake.tasks[0].code == 13);
+  assert(snapshot.record.lastWake.timeSynced);
+  assert(snapshot.record.lastWake.consecutiveFailures == 0);
+  assert(sntpStartCalls == ntpBefore);
+  f.sleep.keepAwake(3);
+  f.poll(3);
+  assert(!f.sleep.wakeCycle());
+  assert(f.sleep.effectiveWifiConfig(f.config.value).wifiMode == WifiMode::ApSta);
+  auto candidate = f.sleep.snapshot(3).record;
+  candidate.wakeNetworkSyncEnabled = true;
+  SleepRecord committed;
+  assert(f.sleep.update(candidate, committed));
+  assert(committed.wakeNetworkSyncEnabled);
+  SleepStore rebooted(f.backend);
+  assert(rebooted.load(committed) == SleepStoreState::Ready && committed.wakeNetworkSyncEnabled);
+}
+
+void testOnlineWakeStillStartsNtp() {
+  Fixture f(false, true, 0);
+  f.config.value.wifiMode = WifiMode::Sta;
+  strlcpy(f.config.value.staSsid, "network", sizeof(f.config.value.staSsid));
+  assert(f.sleep.effectiveWifiConfig(f.config.value).wifiMode == WifiMode::Sta);
+  f.wifi.current.staState = WifiLinkState::Connected;
+  f.wifi.current.staIp = IPAddress(192, 168, 1, 10);
+  const unsigned ntpBefore = sntpStartCalls;
+  f.poll(0);
+  f.poll(1);
+  assert(sntpStartCalls == ntpBefore + 1 && f.epaper.nextOperation == 1);
+}
+
+#endif
 
 void testCheckpointWakeDoesNotPersistDiagnostics() {
   Fixture f(false, true, 90000, true);
@@ -507,6 +558,10 @@ int main() {
   testUsbDisconnectRestartsFullIdle();
   testEarlyWakeSkipsNetworkAndPersistsResult();
   testCheckpointWakeDoesNotPersistDiagnostics();
+#if IOT_FEATURE_EPAPER
+  testOfflineWakeSkipsRadioAndNtp();
+  testOnlineWakeStillStartsNtp();
+#endif
   testScheduleUpdatePersistsSupersededAgenda();
   testKeepAwakeUsesLoopOwnerAndFinalGate();
   testRuntimeBlockerAndStorageRecovery();

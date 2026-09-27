@@ -982,7 +982,7 @@ src/device/
 - `GET /api/device` 的 `features.sleep_scheduler` 是 Menu／route capability。`app-shell` 只依 capability 註冊或移除入口；page 不以 route 404 猜測功能。
 - `pages/device-sleep/` 負責 view state、登入 gate、欄位驗證與 snapshot render，不直接 fetch。mount subscribe，unmount 必須取消 subscription／timer，late response 由 generation 丟棄。
 - 頁面使用既有 `panel-section`、`toggle-switch`、`selectField` 與 `device-field`。資訊卡 `device-sleep-info` 置於設定卡之前，以兩欄 grid 顯示排程狀態、下次刷新、裝置／瀏覽器時間，blockers 跨整列；request failure 使用資訊卡專用 notice，儲存結果留在設定卡。狀態 epoch 以本地 24 小時制時分呈現。
-- `device-sleep-form` 使用兩欄 grid：max-content 標籤欄、剩餘控制欄，三組標籤與控制項直接放入同一個 grid。沿用裝置頁的 34px 最小列高、12px 列距，欄距 16px；窄於 360px 時標籤限寬 100px，長英文標籤可換行但仍與控制項同列。選單依內容決定寬度並靠左，不伸展。完整移除時間說明節點、sleepTimeHint 文案和相關 aria-describedby；週期驗證仍透過專用錯誤 notice 回饋，正常狀態沒有說明行或空白行。`device-sleep-time` 包裝 hour／minute 的兩個 select 與冒號，各自以翻譯後的 aria-label 標示；選項固定為 0..23／0..59，顯示兩位數，不使用時間文字 input、日期或時間 dialog。
+- `device-sleep-form` 使用兩欄 grid：max-content 標籤欄、剩餘控制欄，四組標籤與控制項直接放入同一個 grid。沿用裝置頁的 34px 最小列高、12px 列距，欄距 16px；窄於 360px 時標籤限寬 100px，長英文標籤可換行但仍與控制項同列。選單依內容決定寬度並靠左，不伸展。完整移除時間說明節點、sleepTimeHint 文案和相關 aria-describedby；週期驗證仍透過專用錯誤 notice 回饋，正常狀態沒有說明行或空白行。`device-sleep-time` 包裝 hour／minute 的兩個 select 與冒號，各自以翻譯後的 aria-label 標示；選項固定為 0..23／0..59，顯示兩位數，不使用時間文字 input、日期或時間 dialog。
 - 初始化時／分選單取 snapshot 的 `next_wake_epoch`，缺值時取瀏覽器 `min(period_minutes, 60)` 分鐘後；polling 不覆蓋草稿。選單直接提供有效時分，以同一次取樣的 browser now 建立本地下一次時刻（已到達則加一個日曆日），向上取整為分鐘並檢查 `1..period_minutes`。選單一般項目顯示 12／24／48 小時，value 是 720／1440／2880；讀到 API 自訂分鐘值時加入顯示用選項並維持原值。送出新的 `period_minutes` 與既有 `first_wake_delay_minutes`、`client_time`；未知 next wake 時預設 delay 不超過已選分鐘週期。頁面不呼叫 sleep-now 或建立相關確認 dialog。
 - `device-sleep.accept()` 每次接受 snapshot 都可檢查 device epoch 與 browser epoch 的 drift；自動 `PUT /api/system/time` 只在已登入、online、clock 缺失或偏差超過 5 秒且 cooldown 到期時執行。校時不能綁在每次 render 或 status poll。
 - Status polling 固定 15 秒，不送 keep-awake。keep-awake 只由使用者 action 觸發；sleep-now 的 202 進入 pending，後續 online status 決定 cancelled／failed／entering，offline 僅呈現不確定的 sleep transition。
@@ -1905,3 +1905,9 @@ assets/
 - `epdimgEncoder.encode(imageData, target)` 顯式接收該 target；portrait source index 為 `(y, W-1-x)`，沒有 production 尺寸 magic numbers；square 視為 landscape。Controller 在 operation 開始取得 target 與 palette snapshot，同次 encoder／submitUpload 共用。
 - `submitUpload` 驗證 target logical size，gzip 成 Blob，再檢查 job/run generation 與 compressed limit 後送 resources API；compression 失敗、取消或 stale run 不送 request。CompressionStream 缺少回 `gzip_unavailable`。不提供 raw fallback 或 remote runtime dependency。
 - EPDIMG version／header layout／CRC／generation／palette codes 不變；gzip-only upload 是 transport breaking change。Metadata 同時提供 logical size 與 stored compressed size，mock 與 firmware 同步。下載仍是 raw logical EPDIMG，這與 gzip upload body 不同。
+
+## 喚醒連網校時設定串接
+
+`src/pages/device-sleep/page.js` 在啟用排程開關正下方加入 `#sleep-network-sync`，使用 native checkbox、`role="switch"` 與既有 `toggle-switch` 樣式，經 `device-sleep` 與原 API resource 送出可選布林 `wake_network_sync_enabled`。初次 snapshot 初始化草稿，後續 polling 僅更新 status／支援狀態；保存成功用 response 確認新值，失敗保留草稿。總排程停用只送 enabled=false，保留裝置偏好。舊韌體缺少布林欄位時顯示 indeterminate、disabled 與更新提示，啟用排程 request 省略未知欄位。
+
+標籤縮短為「喚醒連網校時」，旁邊使用既有 focusable `control-tip-icon` 與 info-circle SVG；說明與舊韌體更新提示寫入 `data-tooltip`／`aria-label`，由 hover／focus-visible 顯示。開關以 `aria-labelledby` 關聯標籤、`aria-describedby` 關聯 tip；不建立常駐說明列，沿用四列標籤與控制項 grid。 Tip 以標籤容器為定位基準，避免窄螢幕右側裁切。i18n、Help 與 mock 共用正式欄位語意。Mock 支援 true／false、省略保留、非法型別拒絕及 reset=true，閒置預設為 600 秒。來源只修改 `user-web-project/`，generated import 與主專案 web 產物由 build 產生。

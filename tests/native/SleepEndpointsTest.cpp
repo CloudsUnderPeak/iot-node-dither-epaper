@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 #include "api/sleep/SleepEndpoints.h"
 
@@ -188,6 +189,45 @@ void testStrictValidationAndCommit() {
          "generation exhaustion must not touch clock or persistence");
 }
 
+void testNetworkSyncPreference() {
+  SleepCoordinator sleep;
+  FakeTime time;
+  JsonDocument document;
+  Api::Response response = SleepEndpoints::get(sleep);
+  expect(std::strstr(response.data.c_str(), "\"wake_network_sync_enabled\":true"),
+         "default network preference must be exposed");
+  response = SleepEndpoints::update(jsonRequest(document,
+      R"({"enabled":false,"wake_network_sync_enabled":false})"), sleep, time);
+  expect(response.statusCode == 200 && !sleep.current.record.wakeNetworkSyncEnabled,
+         "disabled schedule can save network preference without clock fields");
+  response = SleepEndpoints::update(jsonRequest(document,
+      R"({"enabled":true,"period_minutes":1440,"first_wake_delay_minutes":60,"client_time":1800000000})"), sleep, time);
+  expect(response.statusCode == 200 && !sleep.current.record.wakeNetworkSyncEnabled,
+         "legacy client schedule update must preserve false");
+  for (const char *invalid : {"null", "0", "1", "\"false\"", "[]", "{}"}) {
+    const std::string body = std::string("{\"enabled\":false,\"wake_network_sync_enabled\":") + invalid + "}";
+    const unsigned updates = sleep.updateCount;
+    response = SleepEndpoints::update(jsonRequest(document, body.c_str()), sleep, time);
+    expectCode(response, 400, "invalid_field", "network preference must be boolean");
+    expect(sleep.updateCount == updates && !sleep.current.record.wakeNetworkSyncEnabled,
+           "invalid preference must not save");
+  }
+  sleep.updateValue = false;
+  response = SleepEndpoints::update(jsonRequest(document,
+      R"({"enabled":false,"wake_network_sync_enabled":true})"), sleep, time);
+  expectCode(response, 500, "storage_error", "preference save failure must be reported");
+  expect(!sleep.current.record.wakeNetworkSyncEnabled, "failed save must preserve preference");
+  sleep.updateValue = true;
+  response = SleepEndpoints::update(jsonRequest(document,
+      R"({"enabled":false,"wake_network_sync_enabled":true})"), sleep, time);
+  expect(response.statusCode == 200 && sleep.current.record.wakeNetworkSyncEnabled,
+         "preference can be re-enabled");
+  sleep.current.record.lastWake.taskCount = 1;
+  sleep.current.record.lastWake.tasks[0] = {1, 3, 13};
+  response = SleepEndpoints::get(sleep);
+  expect(std::strstr(response.data.c_str(), "disabled_by_setting"), "skip reason must identify setting");
+}
+
 void testMinuteLimits() {
   for (unsigned minutes : {1U, 2880U}) {
     SleepCoordinator sleep;
@@ -263,6 +303,7 @@ int main() {
   testStrictValidationAndCommit();
   testClockAndStoreRollback();
   testMinuteLimits();
+  testNetworkSyncPreference();
   if (failures != 0) {
     std::cerr << failures << " sleep endpoint test(s) failed\n";
     return EXIT_FAILURE;

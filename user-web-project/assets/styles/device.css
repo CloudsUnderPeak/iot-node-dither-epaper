@@ -411,6 +411,14 @@ body[data-theme="dark"] .capacity-color-4 { background: #30a981; }
     align-items: center;
 }
 
+.device-sleep-form > .has-tip {
+    position: relative;
+}
+
+.device-sleep-form .control-tip-icon {
+    position: static;
+}
+
 .device-sleep-form > .device-notice,
 .device-sleep-form > .device-actions {
     grid-column: 1 / -1;

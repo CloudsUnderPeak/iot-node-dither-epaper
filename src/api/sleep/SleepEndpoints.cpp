@@ -72,6 +72,7 @@ const char *taskCode(uint8_t value) {
   if (value == 10) return "skipped_no_sta";
   if (value == 11) return "skipped_normal_mode";
   if (value == 12) return "interrupted_by_activity";
+  if (value == 13) return "disabled_by_setting";
   return resultName(value);
 }
 
@@ -108,6 +109,7 @@ Api::Response snapshotResponse(SleepCoordinator &sleep) {
   }
   JsonDocument data;
   data["enabled"] = snapshot.record.enabled;
+  data["wake_network_sync_enabled"] = snapshot.record.wakeNetworkSyncEnabled;
   data["mode"] = snapshot.mode == WakeMode::WakeCycle ? "wake_cycle" : "normal";
   data["state"] = stateName(snapshot.state);
   data["storage_state"] = storageName(snapshot.storage);
@@ -207,6 +209,13 @@ Api::Response SleepEndpoints::update(const Api::Request &request,
   JsonDecodeError error;
   JsonReader reader(root, "", error);
   const bool enabled = reader.requiredBool("enabled", "enabled is required");
+  const bool syncPresent = hasKey(root, "wake_network_sync_enabled");
+  if (syncPresent && !root["wake_network_sync_enabled"].is<bool>())
+    return Api::problem(400, "invalid_field", "wake_network_sync_enabled must be a boolean",
+                        "wake_network_sync_enabled");
+  const bool syncEnabled = syncPresent
+      ? reader.requiredBool("wake_network_sync_enabled", "wake_network_sync_enabled must be a boolean")
+      : true;
   if (hasKey(root, "period_hours"))
     return Api::problem(400, "unsupported_field", "use period_minutes", "period_hours");
   const bool periodPresent = hasKey(root, "period_minutes");
@@ -216,7 +225,8 @@ Api::Response SleepEndpoints::update(const Api::Request &request,
   if (enabled || periodPresent) period = reader.requiredUint32("period_minutes", "period_minutes is required");
   if (enabled || delayPresent) delay = reader.requiredUint32("first_wake_delay_minutes", "first_wake_delay_minutes is required");
   if (enabled || timePresent) epoch = reader.requiredUint32("client_time", "client_time is required");
-  reader.finish({"enabled", "period_minutes", "first_wake_delay_minutes", "client_time"});
+  reader.finish({"enabled", "period_minutes", "first_wake_delay_minutes", "client_time",
+                 "wake_network_sync_enabled"});
   if (!error.ok()) return Api::decodeError(error);
   if (!enabled && (periodPresent || delayPresent || timePresent) &&
       !(periodPresent && delayPresent && timePresent)) {
@@ -241,6 +251,7 @@ Api::Response SleepEndpoints::update(const Api::Request &request,
   if (!current.available) return Api::problem(503, "runtime_unavailable", "sleep service unavailable");
   SleepRecord candidate = current.record;
   candidate.enabled = enabled;
+  if (syncPresent) candidate.wakeNetworkSyncEnabled = syncEnabled;
   if (candidate.scheduleGeneration == UINT64_MAX) {
     return Api::problem(500, "storage_error", "schedule generation exhausted");
   }

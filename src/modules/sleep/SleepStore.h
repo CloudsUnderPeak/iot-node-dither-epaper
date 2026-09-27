@@ -31,6 +31,7 @@ struct SleepLastWake {
 struct SleepRecord {
   uint64_t revision = 0;
   bool enabled = false;
+  bool wakeNetworkSyncEnabled = true;
   uint16_t periodMinutes = 1440;
   int64_t anchorEpoch = 0;
   uint64_t scheduleGeneration = 0;

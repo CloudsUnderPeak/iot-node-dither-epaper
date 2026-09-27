@@ -130,7 +130,7 @@ DeviceConfig SleepCoordinator::effectiveWifiConfig(const DeviceConfig &persisted
     const TimeSnapshot time = time_ ? time_->snapshot() : TimeSnapshot{};
     const bool early = time.synced() && due_.dueEpoch > 0 &&
         SleepSchedule::earlyFor(clockNow(), due_.dueEpoch);
-    effective.wifiMode = !early &&
+    effective.wifiMode = record_.wakeNetworkSyncEnabled && !early &&
         (persisted.wifiMode == WifiMode::Sta || persisted.wifiMode == WifiMode::ApSta) &&
                 persisted.staSsid[0] != '\0'
             ? WifiMode::Sta : WifiMode::Off;
@@ -214,6 +214,7 @@ bool SleepCoordinator::update(const SleepRecord &candidate,
 #endif
   }
   merged.enabled = candidate.enabled;
+  merged.wakeNetworkSyncEnabled = candidate.wakeNetworkSyncEnabled;
   merged.periodMinutes = candidate.periodMinutes;
   merged.anchorEpoch = candidate.anchorEpoch;
   merged.scheduleGeneration = candidate.scheduleGeneration;
@@ -355,7 +356,7 @@ void SleepCoordinator::startAgenda(uint32_t nowMs) {
   activityInterrupted_ = false;
   driftSeconds_ = INT32_MIN;
   drawOperationId_ = 0;
-  if (mode_ == WakeMode::WakeCycle && wifi_ &&
+  if (mode_ == WakeMode::WakeCycle && record_.wakeNetworkSyncEnabled && wifi_ &&
       effectiveWifiConfig(config_->snapshot()).wifiMode == WifiMode::Sta) {
     agenda_ = AgendaStep::Sta;
     staAttempts_ = 1;  // startWifi already performed the first apply.
@@ -497,6 +498,9 @@ void SleepCoordinator::finishAgenda(uint32_t nowMs, uint8_t result) {
   } else if (!agendaWasWakeCycle_) {
     timeStatus = 3;
     timeCode = 11;
+  } else if (!record_.wakeNetworkSyncEnabled) {
+    timeStatus = 3;
+    timeCode = 13;
   } else if (staAttempts_ == 0) {
     timeStatus = 3;
     timeCode = 10;

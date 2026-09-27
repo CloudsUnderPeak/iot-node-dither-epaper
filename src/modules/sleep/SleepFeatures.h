@@ -2,7 +2,7 @@
 #include "core/ProjectFeatures.h"
 
 #ifndef SLEEP_IDLE_TIMEOUT_SECONDS
-#define SLEEP_IDLE_TIMEOUT_SECONDS 1800
+#define SLEEP_IDLE_TIMEOUT_SECONDS 600
 #endif
 
 #ifndef SLEEP_IGNORE_USB_HOST

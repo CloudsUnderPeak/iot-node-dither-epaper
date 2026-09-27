@@ -11,7 +11,7 @@ DEFAULTS = {name: True for name in NAMES}
 
 def resolve(path=None, sleep=None):
     values = dict(DEFAULTS)
-    settings = {'idle_timeout_seconds': 1800, 'ignore_usb_host': 0}
+    settings = {'idle_timeout_seconds': 600, 'ignore_usb_host': 0}
     if path:
         values = {name: False for name in NAMES}
         parser = configparser.ConfigParser(interpolation=None)

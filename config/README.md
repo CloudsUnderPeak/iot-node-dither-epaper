@@ -28,7 +28,7 @@ make build FEATURES=config/profiles/minimal.ini WEB=none
 make build FEATURES=config/features.ini SLEEP=0
 ```
 
-`[sleep]` 的 `idle_timeout_seconds` 接受 1–86400，預設 1800；`ignore_usb_host` 接受 0/1，預設 0。`SLEEP` 未傳入時使用設定檔，傳入時只覆寫 `sleep` 功能。直接執行 PlatformIO 時使用 `platformio.ini` 的 `custom_features`，可用 `custom_sleep` 明確覆寫 sleep；不要在 `build_flags` 重複定義功能 macro。
+`[sleep]` 的 `idle_timeout_seconds` 接受 1–86400，預設 600；`ignore_usb_host` 接受 0/1，預設 0。`SLEEP` 未傳入時使用設定檔，傳入時只覆寫 `sleep` 功能。直接執行 PlatformIO 時使用 `platformio.ini` 的 `custom_features`，可用 `custom_sleep` 明確覆寫 sleep；不要在 `build_flags` 重複定義功能 macro。
 
 建置工具會產生固定內容的 effective INI、C/C++ header、JSON 與分區 CSV。Sleep 統一使用 `IOT_FEATURE_SLEEP` 作為唯一的 C/C++ 開關。原始碼以 `#if IOT_FEATURE_*` 包住相依整合，並由 source filter 排除未啟用模組的 `.cpp`。Release manifest 記錄九個功能、有效設定 SHA-256 與分區 layout，驗證時會檢查實際 `partitions.bin`。
 
