@@ -10,6 +10,8 @@ Getting a picture onto e-paper brings together image processing, device connecti
 
 The current hardware pairing is the **DFRobot FireBeetle 2 ESP32-C6** and **Waveshare 7.3inch e-Paper HAT (E), 800 × 480, six colors**.
 
+![Six-color e-paper display in a photo frame](resources/pictures/display_image.jpg)
+
 Panel model, width, height and horizontal/vertical mounting flips are configured in [`EpaperPanelProfile.h`](src/modules/epaper/EpaperPanelProfile.h). The editor and Python tool use the device capability; EPDIMG uploads and storage use gzip, while downloads remain logical raw EPDIMG. Changing geometry assumes the same controller protocol and needs hardware verification.
 
 ## Try it online
@@ -72,6 +74,23 @@ Open the same local address to explore the built-in management console.
 
 You need the target board and panel, a suitable power supply and USB data connection, plus **GNU Make, Python 3, and the PlatformIO CLI** on your computer. Confirm wiring and power requirements against the official hardware documentation before powering the panel; other boards and panel variants require a reviewed port.
 
+### Connect the e-paper HAT
+
+For the **DFRobot FireBeetle 2 ESP32-C6 (DFR1075)** and **Waveshare 7.3inch e-Paper HAT (E)**, connect the HAT's 8-pin SPI header as follows. The last column gives the **ESP32-C6 chip GPIO number** used by the [active board profile](src/board/profiles/FireBeetle2Esp32C6Profile.h); the middle column shows the labels on the FireBeetle board.
+
+| E-paper HAT (E) | FireBeetle board label | ESP32-C6 GPIO |
+| --- | --- | --- |
+| VCC | 3V3 | — |
+| GND | GND | — |
+| DIN | MOSI | GPIO22 |
+| CLK | SCK | GPIO23 |
+| CS | D7 | GPIO18 |
+| DC | D6 | GPIO1 |
+| RST | D3 | GPIO14 |
+| BUSY | MISO | GPIO21 |
+
+Use the HAT's **3.3 V supply option** so its I/O level matches the ESP32-C6. The e-paper SPI link is write-only: GPIO21, labeled MISO on the FireBeetle, is used for BUSY; do not connect the HAT to a separate SPI MISO signal. Wire the 8-pin header individually; the board's GDI FPC connector has a different DC/CS route and no BUSY connection, so it does not match this firmware pin map. For another development board, match each signal to that board's actual GPIO numbering and update the firmware board profile after checking power, exposed pins, and boot-sensitive pins. Disconnect power before wiring. Check the [DFRobot board pinout](https://wiki.dfrobot.com/dfr1075/) and [Waveshare HAT (E) manual](https://www.waveshare.com/wiki/7.3inch_e-Paper_HAT_%28E%29_Manual) for connector orientation and power requirements.
+
 Build the firmware with the e-paper product frontend:
 
 ```bash
@@ -99,6 +118,10 @@ On a fresh device:
 4. Draw your picture when the panel reports it is ready.
 
 The default build rebuilds `user-web-project/` and bundles it into the firmware; no separate web filesystem upload is needed.
+
+## Project resources
+
+The [frame files](resources/frame/) are cutting files for the photo frame (`.ai` format).
 
 ## Build on it
 

@@ -10,6 +10,8 @@
 
 目前搭配 **DFRobot FireBeetle 2 ESP32-C6** 與 **Waveshare 7.3inch e-Paper HAT (E)，800 × 480 六色電子紙**。
 
+![相框中的六色電子紙顯示畫面](resources/pictures/display_image.jpg)
+
 面板 model、width、height 與水平／垂直安裝翻轉集中在 [`EpaperPanelProfile.h`](src/modules/epaper/EpaperPanelProfile.h)。編輯器與 Python 工具依裝置 capability 使用尺寸；EPDIMG 上傳與儲存採 gzip，下載維持 logical raw EPDIMG。更換尺寸限相同控制器協定，仍需實板驗證。
 
 ## 線上體驗
@@ -72,6 +74,23 @@ python3 -m http.server 8000 --directory build/latest/web
 
 準備目標開發板、面板、合適的電源與可傳輸資料的 USB 連線，並在電腦安裝 **GNU Make、Python 3 與 PlatformIO CLI**。面板通電前，請依官方硬體文件確認接線與供電需求；其他開發板或面板型號需要另行確認移植設定。
 
+### 連接電子紙 HAT
+
+**DFRobot FireBeetle 2 ESP32-C6（DFR1075）** 與 **Waveshare 7.3inch e-Paper HAT (E)** 請依下表連接 HAT 的 8-pin SPI 排針。最右欄是[目前的開發板設定](src/board/profiles/FireBeetle2Esp32C6Profile.h)使用的 **ESP32-C6 晶片 GPIO 編號**；中間欄是 FireBeetle 開發板上的標示。
+
+| 電子紙 HAT (E) | FireBeetle 板上標示 | ESP32-C6 GPIO |
+| --- | --- | --- |
+| VCC | 3V3 | — |
+| GND | GND | — |
+| DIN | MOSI | GPIO22 |
+| CLK | SCK | GPIO23 |
+| CS | D7 | GPIO18 |
+| DC | D6 | GPIO1 |
+| RST | D3 | GPIO14 |
+| BUSY | MISO | GPIO21 |
+
+HAT 使用 **3.3 V 供電**，讓 I/O 電位與 ESP32-C6 一致。電子紙的 SPI 只寫入：FireBeetle 上標示為 MISO 的 GPIO21 在此接到 BUSY；HAT 不需另接 SPI MISO 訊號。請逐線連接 8-pin 排針；開發板的 GDI FPC 介面有不同的 DC／CS 腳位配置，也沒有 BUSY 連線，不符合此韌體的腳位設定。若使用其他開發板，請依該板實際的 GPIO 編號對應訊號，核對電源、引出腳位和開機敏感腳位後，修改韌體的開發板設定。接線前先斷電，並參照 [DFRobot 開發板腳位圖](https://wiki.dfrobot.com/dfr1075/)與 [Waveshare HAT (E) 手冊](https://www.waveshare.com/wiki/7.3inch_e-Paper_HAT_%28E%29_Manual)確認接頭方向及供電要求。
+
 建置包含電子紙產品前端的韌體：
 
 ```bash
@@ -99,6 +118,10 @@ make deploy PORT=/dev/ttyACM0
 4. 面板顯示可用時，將圖片繪製到電子紙。
 
 預設建置會重新編譯 `user-web-project/` 並包入韌體，不需要另外上傳網頁檔案系統。
+
+## 專案資源
+
+[相框檔案](resources/frame/) 內為相框的切割檔（`.ai` 格式）。
 
 ## 延伸成你的作品
 
