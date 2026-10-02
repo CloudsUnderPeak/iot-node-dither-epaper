@@ -154,9 +154,6 @@ class ReleaseBuildTest(unittest.TestCase):
             "flash_mode": release.SUPPORTED_FLASH_MODE,
             "flash_frequency": release.SUPPORTED_FLASH_FREQUENCY,
             "flash_size": release.SUPPORTED_FLASH_SIZE,
-            "sleep_scheduler": True,
-            "sleep_idle_timeout_seconds": 1800,
-            "sleep_ignore_usb_host": False,
             "app_partition": "app0",
             "app_offset": release.APP_OFFSET,
             "app_size": release.APP_SIZE,
@@ -180,7 +177,8 @@ class ReleaseBuildTest(unittest.TestCase):
         if not storage:
             manifest["features"].update(storage=False, epaper=False, user_files=False)
             config = {"features": manifest["features"], "sleep": {
-                "idle_timeout_seconds": 1800, "ignore_usb_host": 0}}
+                "idle_timeout_seconds": manifest["sleep_idle_timeout_seconds"],
+                "ignore_usb_host": int(manifest["sleep_ignore_usb_host"])}}
             manifest.update(feature_config_sha256=release.config_hash(config),
                             partition_layout_id="app-only-v1",
                             app_size=release.NO_STORAGE_APP_SIZE,
