@@ -129,8 +129,12 @@
         if (!show) { return; }
         var remaining = snapshot.remainingSeconds;
         if (status.mode === 'wake_cycle') {
-            this.sleepChip.textContent = app.i18n.t('sleepChipWakeCycle');
+            this.sleepChip.textContent = app.i18n.t('sleepChipWakeCycle') +
+                (snapshot.usbBlocked ? ' · ' + app.i18n.t('sleepUsbConnected') : '');
             this.sleepChip.disabled = snapshot.keepBusy;
+        } else if (snapshot.usbBlocked) {
+            this.sleepChip.textContent = app.i18n.t('sleepUsbConnected');
+            this.sleepChip.disabled = true;
         } else if (remaining === 0) {
             this.sleepChip.textContent = app.i18n.t('sleepChipWaiting');
             this.sleepChip.disabled = true;
@@ -146,7 +150,8 @@
         }
         this.sleepChip.classList.toggle('is-warning', remaining !== null && remaining < 300);
         this.sleepChip.title = status.mode === 'wake_cycle'
-            ? app.i18n.t('sleepKeepAwake') : app.i18n.t('sleepChipHint');
+            ? app.i18n.t('sleepKeepAwake')
+            : app.i18n.t(snapshot.usbBlocked ? 'sleepUsbHint' : 'sleepChipHint');
     };
 
     // index.html 內的 header 文字只是 JS 啟動前的 placeholder；

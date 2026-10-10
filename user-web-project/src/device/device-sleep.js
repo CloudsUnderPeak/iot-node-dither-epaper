@@ -31,12 +31,15 @@
     }
 
     function snapshot() {
+        var usbBlocked = !!(status && Array.isArray(status.blockers)
+            && status.blockers.indexOf('usb_host_connected') !== -1);
         return {
             known: known,
             supported: supported,
             status: status,
             error: error,
-            remainingSeconds: countdown(),
+            usbBlocked: usbBlocked,
+            remainingSeconds: usbBlocked ? null : countdown(),
             keepBusy: keepBusy
         };
     }

@@ -874,10 +874,21 @@ void setup() {
 #endif
   Serial.setTxBufferSize(2048);
   Serial.begin(115200);
+  Serial.setTxTimeoutMs(0);
   Serial.printf("status-led: boot=off, enabled=%d, level=%d, verified=%s\n",
                 IOT_FEATURE_STATUS_LED, StatusLedHardware::level(),
                 statusLedHardwareReady ? "yes" : "no");
-  Serial.setTxTimeoutMs(0);
+#if IOT_FEATURE_STATUS_LED
+#if IOT_FEATURE_SLEEP
+  // Power-on/software resets are normal boots even if RTC intent remains.
+  // Keep a possible scheduled wake dark until persisted settings are loaded.
+  const bool possibleWakeCycle = bootSleepEvidence.valid &&
+      sleepDriver.wakeupCause() == WakeCause::Timer;
+  statusLed.setNormal(!possibleWakeCycle);
+#else
+  statusLed.setNormal(true);
+#endif
+#endif
   delay(2000);
   Serial.println("ESP32 Wi-Fi setup firmware");
   Serial.printf("Chip model: %s, revision: %u, cores: %u\n",
@@ -904,6 +915,10 @@ void setup() {
   for (size_t index = kUserdataSubsystem; index < kSubsystemCount; ++index) {
     Subsystem &subsystem = subsystems[index];
     const Result result = startSubsystem(subsystem);
+#if IOT_FEATURE_STATUS_LED && IOT_FEATURE_SLEEP
+    // Resolve the provisional boot indication before network startup.
+    if (index == kSleepSubsystem) updateStatusLed();
+#endif
     Serial.printf("%s: start: %s (%u), state=%s\n",
                   subsystem.name,
                   result.message,

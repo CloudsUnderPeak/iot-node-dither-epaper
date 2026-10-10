@@ -81,6 +81,59 @@
             harness.assert(app.device.sleep.snapshot().remainingSeconds >= 599, 'keep-awake updates countdown');
             passed.push('Keep-awake single flight and authoritative idle response');
 
+            harness.execute('app/app-shell.js', { window: window });
+            var shell = Object.create(app.app.AppShell.prototype);
+            shell.sleepChip = document.createElement('button');
+            shell.renderSleepChip();
+            harness.assert(shell.sleepChip.textContent.indexOf(app.i18n.t('sleepChipCountdown')) === 0,
+                'normal header shows the sleep countdown');
+            var usbStatus = Object.assign({}, sample, {
+                idle: { armed: true, timeout_seconds: 600, remaining_seconds: 0 },
+                blockers: ['usb_host_connected', 'upload_active']
+            });
+            var usbRefresh = app.device.sleep.refresh();
+            statusCalls.shift().resolve(usbStatus);
+            await usbRefresh;
+            harness.assert(app.device.sleep.snapshot().remainingSeconds === null,
+                'USB blocks the countdown even when the armed idle timer has expired');
+            shell.renderSleepChip();
+            ['en', 'zh-TW'].forEach(function (language) {
+                app.i18n.setLanguagePreference(language);
+                shell.renderSleepChip();
+                var expected = language === 'en' ? 'USB connected' : 'USB 連接中';
+                harness.assert(!shell.sleepChip.hidden && shell.sleepChip.disabled
+                    && shell.sleepChip.textContent === expected
+                    && shell.sleepChip.title === app.i18n.t('sleepUsbHint')
+                    && !shell.sleepChip.classList.contains('is-warning'),
+                    'USB header is localized and does not show an expired countdown');
+            });
+            app.i18n.setLanguagePreference('auto');
+            var usbKeep = app.device.sleep.keepAwake();
+            keepCalls.shift().resolve({ idle: { armed: true, timeout_seconds: 600, remaining_seconds: 600 } });
+            await usbKeep;
+            shell.renderSleepChip();
+            harness.assert(app.device.sleep.snapshot().remainingSeconds === null
+                && shell.sleepChip.textContent === app.i18n.t('sleepUsbConnected'),
+                'keep-awake response cannot discard the USB blocker');
+            var usbWake = app.device.sleep.refresh();
+            statusCalls.shift().resolve(Object.assign({}, usbStatus, { mode: 'wake_cycle' }));
+            await usbWake;
+            shell.renderSleepChip();
+            harness.assert(!shell.sleepChip.disabled
+                && shell.sleepChip.textContent.includes(app.i18n.t('sleepChipWakeCycle'))
+                && shell.sleepChip.textContent.includes(app.i18n.t('sleepUsbConnected')),
+                'USB state is visible during scheduled work and keep-awake remains available');
+            var unplugRefresh = app.device.sleep.refresh();
+            statusCalls.shift().resolve(Object.assign({}, sample, {
+                idle: { armed: true, timeout_seconds: 600, remaining_seconds: 600 }
+            }));
+            await unplugRefresh;
+            shell.renderSleepChip();
+            harness.assert(app.device.sleep.snapshot().remainingSeconds >= 599
+                && shell.sleepChip.textContent === app.i18n.t('sleepChipCountdown') + ' 10:00',
+                'unplugging restores the full firmware-reported idle countdown');
+            passed.push('USB host blocks countdown, localizes header, and resumes idle after unplugging');
+
             var stale = app.device.sleep.refresh();
             harness.assert(statusCalls.length === 1, 'status refresh uses one request');
             liveState = 'offline'; liveListener('offline');
@@ -110,6 +163,7 @@
             });
             var updateCalls = [], pageListener;
             var pageStatus = Object.assign({}, sample, { schedule: Object.assign({}, sample.schedule, {
+                anchor_epoch: new Date(2026, 8, 25, 9, 30).getTime() / 1000,
                 next_wake_epoch: new Date(2026, 8, 27, 9, 30).getTime() / 1000
             }) });
             app.device.sleep = {
@@ -198,7 +252,7 @@
                 harness.assert(hour.value === '1' && minute.value === '30', 'status polling does not overwrite the time draft');
                 harness.assert(!syncCheckbox.checked, 'polling does not overwrite network sync draft');
                 harness.assert(root.querySelector('.device-sleep-info .device-field-value').textContent === app.i18n.t('sleepDisabled')
-                    && root.querySelector('.device-sleep-blockers .device-field-value').textContent === 'usb_host_connected',
+                    && root.querySelector('.device-sleep-blockers .device-field-value').textContent === app.i18n.t('sleepUsbConnected'),
                     'polling updates disabled status and blockers in the information card');
                 checkbox.checked = false;
                 checkbox.dispatchEvent(new Event('change', { bubbles: true }));
@@ -247,6 +301,57 @@
                 harness.assert(!Object.prototype.hasOwnProperty.call(payload, 'wake_network_sync_enabled'),
                     'legacy firmware saves omit the unsupported field');
                 passed.push('Wake network preference, failed drafts and legacy firmware handling');
+
+                app.pages.deviceSleepPage.unmount();
+                root.innerHTML = '';
+                fixedTime = new Date(2026, 8, 30, 8, 15, 30).getTime();
+                var savedAnchor = new Date(2026, 8, 23, 3, 0).getTime() / 1000;
+                pageStatus = Object.assign({}, sample, {
+                    time: { epoch: null, synced: false, source: 'none' },
+                    schedule: { period_minutes: 1440, anchor_epoch: savedAnchor,
+                        clock_basis: 'relative', next_wake_epoch: null, next_wake_in_seconds: 3600 }
+                });
+                app.pages.deviceSleepPage.mount(root);
+                hour = root.querySelector('select[name="sleep-hour"]');
+                minute = root.querySelector('select[name="sleep-minute"]');
+                harness.assert(hour.value === '3' && minute.value === '0',
+                    'saved 03:00 is restored days later while device clock and next wake are unknown');
+                var syncedStatus = Object.assign({}, pageStatus, {
+                    time: { epoch: Math.floor(fixedTime / 1000), synced: true, source: 'client' },
+                    schedule: Object.assign({}, pageStatus.schedule, {
+                        clock_basis: 'absolute', next_wake_epoch: new Date(2026, 9, 1, 3, 0).getTime() / 1000
+                    })
+                });
+                pageListener({ supported: true, status: syncedStatus });
+                harness.assert(hour.value === '3' && minute.value === '0',
+                    'clock synchronization leaves the restored configured time intact');
+                hour.value = '4';
+                minute.value = '45';
+                minute.dispatchEvent(new Event('change', { bubbles: true }));
+                pageListener({ supported: true, status: syncedStatus });
+                harness.assert(hour.value === '4' && minute.value === '45',
+                    'polling after clock synchronization preserves a newly edited time draft');
+                passed.push('Saved time survives restart without a clock and later clock synchronization');
+
+                app.pages.deviceSleepPage.unmount();
+                root.innerHTML = '';
+                pageStatus = Object.assign({}, syncedStatus, {
+                    schedule: Object.assign({}, syncedStatus.schedule, {
+                        period_minutes: 720, next_wake_epoch: new Date(2026, 8, 30, 15, 0).getTime() / 1000
+                    })
+                });
+                app.pages.deviceSleepPage.mount(root);
+                harness.assert(root.querySelector('select[name="sleep-hour"]').value === '3'
+                    && root.querySelector('select[name="sleep-minute"]').value === '0',
+                    '12-hour schedule shows saved 03:00 even when the next execution is 15:00');
+                app.pages.deviceSleepPage.unmount();
+                root.innerHTML = '';
+                fixedTime = new Date(2026, 9, 3, 18, 22, 30).getTime();
+                app.pages.deviceSleepPage.mount(root);
+                harness.assert(root.querySelector('select[name="sleep-hour"]').value === '3'
+                    && root.querySelector('select[name="sleep-minute"]').value === '0',
+                    'remounting days later still restores the same saved schedule time');
+                passed.push('Settings retain the anchor time across changing next wake and page remounts');
             } finally {
                 app.pages.deviceSleepPage.unmount();
                 Date.now = oldNow;

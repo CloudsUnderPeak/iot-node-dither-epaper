@@ -134,7 +134,9 @@
                     }));
                 }
                 period.value = String(savedPeriod);
-                var wakeEpoch = status.schedule && status.schedule.next_wake_epoch;
+                var anchorEpoch = status.schedule && status.schedule.anchor_epoch;
+                var wakeEpoch = typeof anchorEpoch === 'number' && Number.isFinite(anchorEpoch) && anchorEpoch > 0
+                    ? anchorEpoch : status.schedule && status.schedule.next_wake_epoch;
                 var wakeTime = new Date(typeof wakeEpoch === 'number' && Number.isFinite(wakeEpoch)
                     ? wakeEpoch * 1000 : Date.now() + Math.min(savedPeriod, 60) * 60000);
                 hour.value = String(wakeTime.getHours());
@@ -151,7 +153,9 @@
                 ? t('sleepRelativeNext', { seconds: schedule.next_wake_in_seconds || 0 })
                 : formatEpoch(schedule.next_wake_epoch);
             blockers.textContent = Array.isArray(status.blockers) && status.blockers.length
-                ? status.blockers.join(', ') : t('sleepNoBlockers');
+                ? status.blockers.map(function (blocker) {
+                    return blocker === 'usb_host_connected' ? t('sleepUsbConnected') : blocker;
+                }).join(', ') : t('sleepNoBlockers');
             if (status.sleep_request && status.sleep_request.state === 'failed') {
                 statusNotice.set(t('sleepRequestFailed', { code: status.sleep_request.error_code || '' }), { error: true });
             } else {

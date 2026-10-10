@@ -137,6 +137,8 @@
         sleepChipWakeCycle: 'Scheduled work · Stay awake',
         sleepChipWaiting: 'Waiting to sleep',
         sleepChipCountdown: 'Sleep in',
+        sleepUsbConnected: 'USB connected',
+        sleepUsbHint: 'USB host connection prevents sleep. Unplugging restarts the full idle countdown.',
         sleepChipHint: 'The device may sleep when the countdown reaches zero.',
         sleepKeepAwake: 'Stay awake',
         sleepUnsupported: 'This device does not support scheduled sleep.',

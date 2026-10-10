@@ -178,8 +178,8 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 ## 板載狀態 LED
 
 - `status_led=1` 產生 `IOT_FEATURE_STATUS_LED`，不提供 runtime 開關、閃爍或 LED timer。
-- 啟動期間保持關閉；完成一般啟動且為 `normal` 模式後以預設 10% PWM 亮度恆亮，亮度為 board profile 編譯設定。Wi-Fi 尚未連線不影響亮燈；LED 表示一般使用模式，不保證所有 subsystem 都健康。
-- 排程 timer 喚醒的 `wake_cycle` 全程不亮；使用者活動切回 `normal` 後恆亮。
+- 一般上電或重啟在板級安全 GPIO 與 Serial 初始化後、固定開機等待及其他服務初始化前，以預設 10% PWM 亮度恆亮，亮度為 board profile 編譯設定。睡眠中手動斷電再上電也視為一般開機，不因殘留 RTC 睡眠 intent 延後亮燈。Wi-Fi 尚未連線不影響亮燈；LED 表示一般使用模式，不保證所有 subsystem 都健康。
+- 排程 timer 喚醒的 `wake_cycle` 全程不亮；啟動時只有 deep-sleep reset、timer wake source 與有效 RTC 睡眠／時鐘證據同時成立才先保持關閉，待持久化排程確認模式後更新。若確認為一般模式，立即亮燈，不再等待網路與其餘服務；睡眠模組初始化失敗時關閉 LED。使用者活動切回 `normal` 後恆亮。
 - 入睡準備開始時關閉，deep sleep 期間保持關閉；取消入睡且完成復原後，依當下模式恢復一般模式恆亮或 wake cycle 關閉。
 - Feature 關閉時保留板級關燈與 retained hold 清理，不啟用模式指示。此功能控制 user LED，不控制充電指示燈。
 

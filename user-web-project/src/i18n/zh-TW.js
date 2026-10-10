@@ -135,6 +135,8 @@
         sleepChipWakeCycle: '排程工作中 · 保持喚醒',
         sleepChipWaiting: '等待入睡',
         sleepChipCountdown: '距離入睡',
+        sleepUsbConnected: 'USB 連接中',
+        sleepUsbHint: 'USB 主機連線期間不會入睡；拔除後重新開始完整的閒置倒數。',
         sleepChipHint: '倒數歸零後，裝置會在安全時入睡。',
         sleepKeepAwake: '保持喚醒',
         sleepUnsupported: '此裝置不支援排程睡眠。',
