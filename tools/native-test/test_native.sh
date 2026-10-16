@@ -16,6 +16,14 @@ mkdir -p "$build_dir"
 
 g++ -std=c++17 -Wall -Wextra -Werror \
   -I"$project_dir/src" \
+  "$project_dir/tests/native/HttpAssetCacheTest.cpp" \
+  "$project_dir/src/modules/http/HttpAssetCache.cpp" \
+  -o "$build_dir/http-asset-cache-test"
+
+"$build_dir/http-asset-cache-test"
+
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"$project_dir/src" \
   "$project_dir/tests/native/SleepScheduleTest.cpp" \
   "$project_dir/src/modules/sleep/SleepSchedule.cpp" \
   -o "$build_dir/sleep-schedule-test"

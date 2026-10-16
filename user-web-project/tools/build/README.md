@@ -2,7 +2,7 @@
 
 Internal release tool for producing timestamped static app output under `build/`.
 
-The build output is meant for HTTP server or device storage. It is not a `file://` standalone package.
+The build output is meant for HTTP server or device storage. Gzip-only output needs an HTTP server; non-gzip output (`--no-gzip`, `--demo`) also opens with `file://`, except Load Demo, whose `file://` fallback data is excluded from builds.
 
 ## Requirements
 
@@ -36,11 +36,23 @@ The tool copies:
 
 Generated `file://` demo fallback data is excluded from release output. The demo source image and `assets/demo/demo-manifest.js` stay in the build so server/device runtime can still load the built-in demo.
 
+## Bundling
+
+Every build bundles the output so startup needs only a few requests, reducing cold-load overhead independently of the HTTP server cache policy:
+
+- `bundle/app.css`: the stylesheets `index.html` links, in order.
+- `bundle/app.js`: the deferred scripts `index.html` loads, in order, plus a `DitherApp.bundle` registry holding every other `src/` module (wrapped in a function) and the `assets/icons/` SVGs as data URLs. `script-loader.js` runs registry modules in the same order the page `entry.js` files request them.
+- `bundle/help.js`: the Help page modules, loaded the first time Help is opened or preloaded.
+- The worker keeps its path with its `importScripts(...)` dependencies inlined.
+
+Merged source files are removed from the output. The build fails if an `index.html` script is not deferred, a bundled module is not a single IIFE, or a merged file is still referenced directly. Source files are never changed; opening the source `index.html` still loads one classic script per module.
+
 ## Defaults
 
 By default, the tool:
 
 - minifies HTML, CSS, JS, and SVG files
+- bundles startup scripts, styles, and icons
 - replaces copied files with gzip-only `.gz` files
 
 The default output is suitable for servers or devices configured to serve pre-compressed gzip files.
@@ -102,5 +114,5 @@ Expected demo release output includes the source image and `demo-manifest.js` on
 ## Notes
 
 - Do not use the project root as `--output`; the tool rejects it.
-- The tool does not transform the app into a different runtime architecture.
+- Bundling only changes the output; the source keeps its classic-script architecture.
 - The original project remains runnable without this build step.

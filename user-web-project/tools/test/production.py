@@ -39,16 +39,15 @@ def run(browser, timeout):
             return gzip.decompress(data) if compressed else data
 
         index = read('index.html').decode()
-        assert ('device-mock.js' in index) == (mode == 'demo'), 'mock script mode mismatch'
-        assert (artifact / 'src/device/device-mock.js').exists() == (mode == 'demo')
-        assert not (artifact / 'src/device/device-mock.js.gz').exists()
+        bundle = read('bundle/app.js').decode()
+        assert ('"src/device/device-mock.js":true' in bundle) == (mode == 'demo'), 'mock bundle mode mismatch'
+        assert 'device-mock.js' not in index and not list(artifact.rglob('device-mock.js*')), 'mock must only exist inside the demo bundle'
         assert not list(artifact.rglob('*.gz')) if mode == 'demo' else all(p.suffix == '.gz' for p in artifact.rglob('*') if p.is_file())
-        entries = re.findall(r'<script[^>]+src="([^"]+)"', index)
-        entries = entries[:entries.index('src/pages/dither-editor/entry.js') + 1]
-        # The probe imports real release scripts, not source or a mock algorithm.
+        assert re.findall(r'<script[^>]+src="([^"]+)"', index) == ['bundle/app.js'], 'index must load only the app bundle'
+        # The probe imports the real release bundle, not source or a mock algorithm; ?mock=0 keeps demo API requests real.
         probe = '<!doctype html><meta charset="utf-8"><base href="/"><pre id="probe-result">WAIT</pre>'
         probe += ''.join('<link rel="stylesheet" href="' + path + '">' for path in re.findall(r'<link[^>]+href="([^"]+[.]css)"', index))
-        probe += ''.join('<script defer src="' + path + '"></script>' for path in entries if path != 'src/device/device-mock.js')
+        probe += '<script defer src="bundle/app.js"></script>'
         probe += '<script defer src="/__probe.js"></script>'
         probe_js = (ROOT / 'tests/browser/production.js').read_bytes()
         seen = []
@@ -103,7 +102,15 @@ def run(browser, timeout):
             loading = re.search(r'<div\s+id="app-loading"[^>]*>', dom)
             if not loading or 'data-state="ready"' not in loading.group(0):
                 raise RuntimeError(mode + ' app did not reach ready state; see ignored startup DOM.')
-            dom = helper.run_ready_browser(browser, base + '/__probe.html', timeout)
+            unbundled = [path for path in seen if path.startswith(('/src/', '/assets/styles/')) or path.endswith('.svg')]
+            assert not unbundled, mode + ' startup requested unbundled files: ' + str(unbundled)
+            if mode == 'demo':
+                dom = helper.run_ready_browser(browser, helper.file_url(artifact / 'index.html', browser), timeout)
+                (logs / (mode + '-file-startup.html')).write_text(dom)
+                loading = re.search(r'<div\s+id="app-loading"[^>]*>', dom)
+                if not loading or 'data-state="ready"' not in loading.group(0):
+                    raise RuntimeError(mode + ' file:// app did not reach ready state; see ignored startup DOM.')
+            dom = helper.run_ready_browser(browser, base + '/__probe.html?mock=0', timeout)
             (logs / (mode + '-probe.html')).write_text(dom)
             match = re.search(r'<pre id="probe-result">(.*?)</pre>', dom, re.S)
             if not match or html.unescape(match.group(1)) == 'WAIT':

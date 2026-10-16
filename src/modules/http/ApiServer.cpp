@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 
+#include "HttpAssetCache.h"
 #include "HttpJsonBody.h"
 #include "HttpResponse.h"
 #include "UserFileHttpPreflight.h"
@@ -694,13 +695,26 @@ bool ApiServer::sendEmbeddedAsset(AsyncWebServerRequest *request,
   const EmbeddedWebAsset *asset = assets_->find(path);
   if (asset == nullptr) return false;
 
-  AsyncWebServerResponse *response = request->beginResponse(
-      200, asset->contentType, asset->bytes, asset->size);
-  if (asset->contentEncoding != nullptr && asset->contentEncoding[0] != '\0') {
-    response->addHeader("Content-Encoding", asset->contentEncoding);
+  const bool encoded = asset->contentEncoding != nullptr && asset->contentEncoding[0] != '\0';
+  String etag("\"");
+  etag += assets_->sha256();
+  etag += '-';
+  etag += encoded ? asset->contentEncoding : "identity";
+  etag += '\"';
+  const AsyncWebHeader *condition = request->getHeader("If-None-Match");
+  const bool notModified = condition != nullptr &&
+                           HttpAssetCache::matches(condition->value().c_str(), etag.c_str());
+  AsyncWebServerResponse *response = notModified
+      ? request->beginResponse(304)
+      : request->beginResponse(200, asset->contentType, asset->bytes, asset->size);
+  // A 304 has no body; its optional length describes the corresponding 200.
+  if (notModified) response->addHeader("Content-Length", String(asset->size));
+  response->addHeader("ETag", etag);
+  response->addHeader("Cache-Control", HttpAssetCache::kCacheControl);
+  if (encoded) {
+    if (!notModified) response->addHeader("Content-Encoding", asset->contentEncoding);
     response->addHeader("Vary", "Accept-Encoding");
   }
-  response->addHeader("Cache-Control", "no-store");
   request->send(response);
   return true;
 }

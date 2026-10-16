@@ -57,7 +57,8 @@ def main():
             assert not (output / 'src/device/device-mock.js.gz').exists(), 'Production contains mock'
             index = gzip.decompress((output / 'index.html.gz').read_bytes()).decode()
             assert 'device-mock.js' not in index and 'PREVIEW START' not in index
-            asset_css = [(ROOT / 'assets/styles/components.css').read_text(), gzip.decompress((output / 'assets/styles/components.css.gz').read_bytes()).decode()]
+            styles = re.findall(r'<link rel="stylesheet" href="([^"]+)"', (ROOT / 'index.html').read_text(encoding='utf-8'))
+            asset_css = ['\n'.join((ROOT / path).read_text(encoding='utf-8') for path in styles), gzip.decompress((output / 'bundle/app.css.gz').read_bytes()).decode()]
         scripts += 'var testAssetCss=' + json.dumps(asset_css) + ';'
         scripts += 'var testEntryPaths=' + json.dumps(entry_paths) + ';'
         scripts += 'var testStyleCss=' + json.dumps({

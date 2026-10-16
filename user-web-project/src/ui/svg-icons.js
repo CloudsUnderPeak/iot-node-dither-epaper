@@ -1,6 +1,11 @@
 (function (app) {
     function iconUrl(path) {
         var url = String(path || '').split('#')[0].trim();
+        // 發佈 build 會把本地 SVG 內嵌成 data URL；source 直接開啟時仍使用外部檔案路徑。
+        var embedded = app.bundle && app.bundle.icons[url];
+        if (embedded) {
+            return embedded;
+        }
         return url ? new URL(url, document.baseURI).href : '';
     }
 

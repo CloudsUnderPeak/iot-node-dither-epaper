@@ -13,7 +13,7 @@ Split From: SPEC_INDEX.md
 
 最初以 standalone 編輯器起步，目前已包含同源 ESP32 裝置管理、電子紙輸出與可攜式 PNG 專案。下列章節描述現行契約；早期逐日變更由 git history 保留。
 
-- Classic scripts 與本地資產保留 `file://` 直接使用；Python/Make 發佈建置是選用的 HTTP 資產處理流程。
+- Classic scripts 與本地資產保留 `file://` 直接使用；Python/Make 發佈建置是選用的 HTTP 資產處理流程，只在輸出端打包。
 - 圖片與 workspace 不自動寫入 browser storage；切頁使用記憶體狀態，跨 session 由使用者明確匯出／匯入 `.dither.png`。
 - 顯示色盤與 EPDIMG 協定色盤分離，校色不改變既有六色 code 或檔案格式。
 
@@ -54,7 +54,7 @@ HTML + CSS + classic JavaScript scripts + Canvas API
 - demo 圖片、圖示、字型、樣式都必須保留在專案內；demo 不可由 runtime 程式臨時產生。
 - 使用者必須能直接雙擊 `index.html` 使用，不可要求另外執行 `python -m http.server` 或其他本機指令。
 - 開發時可用 VS Code Live Server 預覽，但正式使用方式不能依賴 Live Server。
-- 原始專案必須不依賴 build step；不可要求 npm install、npm run build 或 bundler 才能使用。可提供選用的 Python/Make 發佈 build，輸出到 ignored `build/` 底下的時間戳子資料夾，只做 server/device 靜態檔案複製、minify 與 gzip-only 輸出，不改變 runtime 載入架構。minify 與 gzip 預設都必須啟用，且必須能用 CLI 參數分別關閉；啟用 gzip 時，輸出資料夾內只保留 gzip 後的 `.gz` 檔，不保留同名未壓縮檔。同一秒內多次 build 不可覆蓋既有輸出。
+- 原始專案必須不依賴 build step；不可要求 npm install、npm run build 或 bundler 才能使用。可提供選用的 Python/Make 發佈 build，輸出到 ignored `build/` 底下的時間戳子資料夾，只做 server/device 靜態檔案複製、minify、輸出端打包與 gzip-only 輸出；打包只改變 build 輸出，source 仍維持一支 classic script 一個模組的載入架構（見「發佈 build 打包」）。minify 與 gzip 預設都必須啟用，且必須能用 CLI 參數分別關閉；啟用 gzip 時，輸出資料夾內只保留 gzip 後的 `.gz` 檔，不保留同名未壓縮檔。同一秒內多次 build 不可覆蓋既有輸出。
 - Standalone 與 capability 驅動的 E-paper Device Mode 均為現行功能。
 
 因為要支援直接雙擊 `index.html`，不要使用 JavaScript ES Modules 的 `import` / `export`。多檔案仍然可以拆分，但要用 classic `<script>` 依序載入，並透過單一 namespace 暴露模組。
@@ -382,7 +382,7 @@ embedded-web-dithering/
 - `gpu/` 放可選硬體加速 processor，例如 WebGL adjust processor 與 threshold dither processor。GPU processor 必須有 CPU fallback，且不應直接操作 tool panel 或 editor mode。
 - `viewport/` 放 canvas render、overlay render、座標轉換與 preview viewport 相關邏輯；page 仍負責 DOM mount 與工具列組合。Crop overlay 尺寸/定位必須由 `viewport/overlay-renderer.js` 管理，overlay pointer / wheel 到 crop pan/zoom 的換算必須由 `viewport/pointer-mapper.js` 管理。
 - `viewport/pointer-mapper.js` 必須把單一 pointer 拖曳轉成 crop pan、wheel 轉成 crop zoom、兩個 active pointers 的距離變化轉成 crop zoom。進入雙指縮放時應暫停單指 drag；縮放結束且仍剩一個 pointer 時可回到拖曳 pan。
-- `src/ui/svg-icons.js` 是唯一 SVG icon loading helper；它只把本地 SVG path 設為外部 `<img src>`，不可保存完整 SVG path data、不可 runtime `fetch()` SVG。`index.html` 不應直接保存完整 SVG symbol/path 資料。
+- `src/ui/svg-icons.js` 是唯一 SVG icon loading helper；它只把本地 SVG path 設為外部 `<img src>`，不可保存完整 SVG path data、不可 runtime `fetch()` SVG。`index.html` 不應直接保存完整 SVG symbol/path 資料。發佈 build 會把 `assets/icons/` 的 SVG 轉成 data URL 登記在 `DitherApp.bundle.icons`，`iconUrl()` 優先使用；source 仍只使用外部 SVG 檔，所有 icon 必須經由 `svgIcons` 取得 URL。
 - `assets/icons/editor/` 放 Dither Editor 專用本地 SVG icon；feature dock 可用 `iconPath` 指向此目錄的 SVG 檔，page 透過 `src/ui/svg-icons.js` 顯示圖示並保留 `icon` 文字作為 fallback。SVG 應使用 24x24 viewBox，不硬寫顯示尺寸。
 - `assets/icons/app/` 放 app shell 或全站設定使用的本地 SVG icon；執行時透過外部 SVG image 顯示，不從檔案 fetch。
 - `src/vendor/` 只放第三方程式碼與對應授權檔。Feature 不應直接依賴 vendor 全域物件，必須透過頁面 adapter 或 core wrapper 存取。
@@ -494,7 +494,7 @@ const defaultDitherOptions = {
 
 ### Script 載入順序
 
-因為原始專案必須支援直接雙擊 `index.html`，`index.html` 必須用 deferred classic scripts 載入共用基礎檔與 page entries，讓瀏覽器可並行下載並仍依 HTML 順序執行。單一頁面內部需要的 scripts 不應攤平在 `index.html`，必須交給該頁的 `entry.js` 管理。選用的發佈 build 不可 bundling 或改寫此載入模型。
+因為原始專案必須支援直接雙擊 `index.html`，`index.html` 必須用 deferred classic scripts 載入共用基礎檔與 page entries，讓瀏覽器可並行下載並仍依 HTML 順序執行。單一頁面內部需要的 scripts 不應攤平在 `index.html`，必須交給該頁的 `entry.js` 管理。Source 不可為了發佈 build 改寫此載入模型；選用的發佈 build 只在輸出端打包（見「發佈 build 打包」）。
 
 示意：
 
@@ -530,15 +530,28 @@ const defaultDitherOptions = {
 
 `entry.js` 可以透過動態插入 classic `<script>` 的方式載入該頁檔案；同批 scripts 可一次插入以便瀏覽器並行下載，但每支 script 必須設為 `async = false`，維持 classic script 依插入順序執行。Dither Editor 應先載入可解析 feature manifest 的 bootstrap scripts，再把 feature scripts 與後續 page scripts 併入同一批載入，避免 GitHub Pages 上出現不必要的序列化網路波次。不得使用 ES Modules `import` / `export`，也不得用會被 `file://` CORS 擋住的 template/script `fetch()` 作為唯一載入方式。
 
+### 發佈 build 打包
+
+ESP32 對每個靜態檔回 `Cache-Control: no-store` 且逐一處理 request，因此發佈 build 以減少 request 數為主要加速手段；source 不合併檔案。`tools/build/run.py` 在 minify 後、gzip 前執行打包：
+
+- `index.html` 的 stylesheets 依原順序合併為 `bundle/app.css`；deferred scripts 依原順序原樣串接進 `bundle/app.js`，並改為只載入這兩個檔。非 deferred script 會讓 build 失敗。
+- 其餘 `src/**/*.js`（Help 內部檔與 worker 除外）以 function 包裝登記在 `bundle/app.js` 開頭的 `DitherApp.bundle.scripts` registry；`index.html` 已串接的 scripts 登記為 `true`。被包裝的模組必須是單一 IIFE（不可有 top-level 宣告），否則 build 失敗。
+- `script-loader.js` 遇到 registry 內的 path 不插入 `<script>`，改在 microtask 依呼叫順序執行對應 function，等同 `async = false` 的插入順序且晚於目前執行中的 script；因此執行順序仍由各頁 `entry.js` 與 `feature-manifest.js` 在 runtime 決定，build 不另存一份載入清單。已執行的 path 再次載入時直接 resolve。
+- `src/pages/help/` 內部 scripts 另外打包為 `bundle/help.js`，registry 的 `files` 對應表讓 loader 第一次需要時載入該檔再執行。
+- Worker 的 `importScripts(...)` 依原順序內嵌到同一路徑的 worker 檔，第一次建立 worker 只需一個 request；worker 檔必須只有一個列出字面路徑的 `importScripts` 呼叫。
+- `assets/icons/` SVG 轉為 data URL 登記在 `DitherApp.bundle.icons`。
+- 已併入 bundle 的原始檔會從輸出移除；若 `index.html` 或 CSS 仍直接引用被合併的檔案，build 失敗。
+- Source 直接開啟時沒有 `DitherApp.bundle`，loader 與 `svgIcons` 維持逐檔載入。Gzip-only 輸出需要 HTTP；未 gzip 的輸出（`--no-gzip`、`make demo`）可用 `file://` 開啟，但 build 本來就排除 Load Demo 的 `file://` fallback data，Chrome `file://` 下 worker 仍回退主執行緒。
+
 `index.html` 必須在外部 scripts 執行前建立 `DitherApp.startupGate`、loading overlay，並讓 `#app` 帶有 `inert` 與 `aria-hidden="true"`。Overlay 使用 `inset: 64px 0 0` 保留 header 與 App title，Light / Dark theme 分別由 `--color-loading-overlay` 提供半透明背景，讓已建立 UI 可辨識但不可操作。startup gate 同時以 `body.is-app-loading #app { pointer-events: none; }` 作為 pointer fallback；ready 前不可只靠 overlay 遮擋視覺而讓鍵盤仍能聚焦下層 controls。
 
-`main.js` 先本地化 startup gate，並透過 `app.app.applyShellCopy()` 同步 header App title 與 Menu placeholder。其後 startup ready 順序固定為：`whenPageEntriesReady()` resolve → `AppShell.start()` 完成預設頁 mount → `#app` 內當下所有 `<img>` load/decode settled → 兩次 `requestAnimationFrame` → `startupGate.complete()`。Image decode failure 必須視為 settled，避免單一 icon 404 永久鎖住 App；Demo source、worker 與互動後才建立的資源不可加入 startup wait。
+`main.js` 先本地化 startup gate，並透過 `app.app.applyShellCopy()` 同步 header App title 與 Menu placeholder。其後 startup ready 順序固定為：`whenPageEntriesReady()` resolve → `AppShell.start()` 完成預設頁 mount → `#app` 內當下所有 `<img>` load/decode settled → 兩次 `requestAnimationFrame` → `startupGate.complete()`。Image decode failure 必須視為 settled，避免單一 icon 404 永久鎖住 App；Demo source、worker 與互動後才建立的資源不可加入 startup wait。Help 是唯一延後載入的頁面，預設不加入 startup wait；初始 route 為 Help 時，Help entry 把 Help 載入登記為 page entry，讓 ready 前 Help 已渲染。`startupGate.complete()` 後，`main.js` 在 idle 時呼叫各 page 選用的 `preload()`。
 
-`startupGate.setProgress()` 只接受單調遞增的整數百分比。`script-loader.js` 對新建的動態 script 登記 total，並在每支 script `load` 後讓啟動前段增加一個百分點（上限 60%）；後續由 `main.js` 在 page entries ready、AppShell mount、initial image settle 與 paint 階段推進至 100%。此百分比代表啟動階段完成度，不代表下載 bytes。
+`startupGate.setProgress()` 只接受單調遞增的整數百分比。`script-loader.js` 對新建的動態 script（含 bundle registry 內執行的模組）登記 total，並在每支 script `load` 後讓啟動前段增加一個百分點（上限 60%）；後續由 `main.js` 在 page entries ready、AppShell mount、initial image settle 與 paint 階段推進至 100%。此百分比代表啟動階段完成度，不代表下載 bytes。
 
 Startup 期間的 direct script、stylesheet、unhandled runtime error 或 60 秒 timeout 必須呼叫 `startupGate.fail()`。Error state 保留 `#app` inert、停止 spinner、隱藏 progressbar、以 i18n 顯示通用載入失敗文字與 Reload button；startup ready 後的 runtime error 不可重新開啟 gate。
 
-每個檔案使用 IIFE 或清楚的 namespace assignment：
+每個檔案使用 IIFE 或清楚的 namespace assignment；由 `entry.js` 動態載入的模組必須是單一 IIFE，發佈 build 才能安全包裝：
 
 ```js
 (function (app) {
@@ -1053,7 +1066,7 @@ pages/help/
 - Help route 固定由 `#/help` 開始；未知 Help 子 route 顯示 Help 首頁，不可造成 startup failure。
 - Help 文件連結必須保留實際 `href` 供複製與另開分頁；一般左鍵點擊則交給 app context `navigate()`，確保 history state 完整。
 - 桌面 Help layout 由 `assets/styles/layout.css` 提供文件樹、文章與頁內目錄欄位；Help article/navigation/visual components 由 `assets/styles/components.css` 提供，顏色必須使用既有 theme tokens。
-- Help i18n、manifest、visuals 與 page scripts 由 `pages/help/entry.js` 依序載入；`index.html` 不可展開列出內部檔案。
+- Help i18n、manifest、visuals 與 page scripts 由 `pages/help/entry.js` 依序載入；`index.html` 不可展開列出內部檔案。Help entry 啟動時只註冊 `id: 'help'` 的輕量 page，內容在第一次 mount 或 `preload()` 時才載入；未載入完成前的子 route 由 router 寫入 `context.route`，完成後渲染最新 route。已載入時 mount 必須同步完成；載入失敗時頁面顯示 `helpLoadFailed` notice。
 - `assets/help/*.png` 必須由 `tools/dither-render/run.py` 使用專案實際 dither scripts 產生，不手動畫假結果。比較圖使用固定 480x288 synthetic gradient、E6 palette 與畫面標示的 Algorithm / Mapping / Color Distance / Strength；輸出變更時必須重新產生對應資產並人工確認。
 - `tools/help-validate/run.py` 必須透過 headless browser 載入實際 classic scripts，驗證 capability、雙語內容、限制模板與重複 placeholder；缺少任何已註冊演算法的雙語 detail 時以非零 exit code 結束，已移除演算法殘留的不可見 detail 只報 cleanup warning。
 
@@ -1428,7 +1441,7 @@ Workspace 管理 feature set／版本、pipeline stage／member／enabled 與候
 Browser regression runner 以獨立 HTML/profile 執行 legacy、Crop disabled/removed、Wi-Fi、e-paper、history 與共用樣式案例，各自回報 passed／failed 與已完成 assertion；單例失敗繼續執行後續案例，任一失敗或逾時仍使 runner 非零退出。主 en／zh-TW 字典的頂層鍵集合必須一致；缺鍵回報語言與 key。
 
 - `make test`：build/helper Python tests、雙語 Help、PNG container／來源 startup、core／persistence／lifecycle regression、file demo／本地 PNG。
-- `make test-production`：在 ignored tmp/verification 下建立新 production gzip 與 demo，臨時 loopback HTTP 驗證 startup、真實 Worker／CPU pixels、PNG、relative API、tooltip／Help styles 與 mock boundary；不部署，也不操作硬體。
+- `make test-production`：在 ignored tmp/verification 下建立新 production gzip 與 demo，臨時 loopback HTTP 驗證 startup、真實 Worker／CPU pixels、PNG、relative API、tooltip／Help styles 與 mock boundary；同時確認 `index.html` 只載入 `bundle/app.js`、startup 不再 request 個別 `src/`、樣式與 SVG 檔，且 demo 輸出可用 `file://` 啟動。不部署，也不操作硬體。
 - `tools/shared/browser.py` 共用 browser discovery、WSL path conversion、獨立 profile、DOM completion、bounded execution 與 cleanup。Native 使用標準庫 DevTools transport；WSL 的 Windows Chrome 使用內建 PowerShell／.NET bridge。一般 suite 預設 90 秒，可用 `--timeout` 調整；benchmark/render 預設 180 秒。錯誤／逾時未完成必須非零退出，不自動 retry。
 - Browser 可用 `--chrome`、共用 `DITHER_BROWSER` 或既有 DITHER_RENDER_BROWSER／DITHER_BENCHMARK_BROWSER 指定。來源／純模組工具不用 server；只有 production integration 自動啟停 loopback server。
 - CSS minifier 保留必要空白、字串、escape 與註解 token 邊界；minify／gzip 預設維持啟用。Tests／profiles／log 不進入 release copier。
@@ -1691,7 +1704,7 @@ accept="image/png,image/jpeg,image/webp"
 
 內建 demo 的來源圖片由 `tools/generate-demo-data/run.py` 掃描 `assets/demo/` 決定。該目錄根層必須剛好有一張支援格式圖片作為 demo source；支援 `.png`、`.jpg`、`.jpeg`、`.webp`，副檔名大小寫不敏感，且不要求固定檔名或 16:9 比例。若找不到候選圖或找到多張候選圖，工具必須報錯並要求使用者保留剛好一張 demo source，避免靜默選錯圖。
 
-`tools/generate-demo-data/run.py` 必須產生固定入口 `assets/demo/demo-manifest.js` 與 `assets/demo/demo-data.js`。Manifest 記錄實際 demo 檔名、同源 URL 與 fallback data script；runtime Load Demo 必須先載入 manifest，再於 Server/GitHub Pages 情境以 `fetch()` 取得同源圖片 blob，轉成 `Blob -> createImageBitmap -> ImageData`。Standalone `file://` 模式若因瀏覽器 origin 規則無法讀取 source image pixels，才 fallback 到 `assets/demo/demo-data.js` 的 data URL。Generated manifest/data 不應手動編輯；替換、重新命名或改變 demo source 後，應重新執行 `python3 tools/generate-demo-data/run.py`。Server/device build 產物不支援 `file://`，必須排除 generated demo data fallback，但保留 manifest 與 source image，讓 server/device runtime 仍可讀取 demo。
+`tools/generate-demo-data/run.py` 必須產生固定入口 `assets/demo/demo-manifest.js` 與 `assets/demo/demo-data.js`。Manifest 記錄實際 demo 檔名、同源 URL 與 fallback data script；runtime Load Demo 必須先載入 manifest，再於 Server/GitHub Pages 情境以 `fetch()` 取得同源圖片 blob，轉成 `Blob -> createImageBitmap -> ImageData`。Standalone `file://` 模式若因瀏覽器 origin 規則無法讀取 source image pixels，才 fallback 到 `assets/demo/demo-data.js` 的 data URL。Generated manifest/data 不應手動編輯；替換、重新命名或改變 demo source 後，應重新執行 `python3 tools/generate-demo-data/run.py`。Server/device build 產物以 HTTP 為主，必須排除 generated demo data fallback，但保留 manifest 與 source image，讓 server/device runtime 仍可讀取 demo；未 gzip 的 build 輸出雖可用 `file://` 開啟，Load Demo 在該情境不保證可用。
 
 ## 圖片尺寸與效能策略
 

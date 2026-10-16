@@ -126,6 +126,7 @@
         errorGeneric: 'Something went wrong. Please try again.',
         errorImageMemory: 'This image needs more free memory. Your project is still available; close other tabs or use a smaller image.',
         helpTitle: 'Help',
+        helpLoadFailed: 'Help could not be loaded. Reload the page and try again.',
         aboutTitle: 'About',
         placeholderAbout: 'A static browser-based dither image editor MVP.',
         menuDeviceGroup: 'Device',

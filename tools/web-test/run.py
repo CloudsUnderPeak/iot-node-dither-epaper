@@ -206,6 +206,10 @@ def run_page(
     window_size: tuple[int, int] = (1280, 900),
 ) -> str:
     window_width, window_height = window_size
+    # Windows Chrome can hand a new invocation to a still-exiting process using
+    # the same profile, returning success without any --dump-dom output.
+    page_profile = profile / re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    page_profile.mkdir()
     command = [
         str(browser),
         "--headless=new",
@@ -216,7 +220,7 @@ def run_page(
         "--disable-sync",
         "--no-first-run",
         f"--window-size={window_width},{window_height}",
-        f"--user-data-dir={browser_argument_path(profile, browser)}",
+        f"--user-data-dir={browser_argument_path(page_profile, browser)}",
         "--virtual-time-budget=30000",
         "--dump-dom",
         url,

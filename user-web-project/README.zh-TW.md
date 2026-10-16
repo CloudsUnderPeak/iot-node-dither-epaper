@@ -51,7 +51,7 @@ python3 tools/help-validate/run.py
 
 ## 開發檢查與發佈
 
-來源 `index.html` 可用 `file://` 直接開啟，不需要 npm 或建置。選用 `make build` 產生 minify、gzip-only 的 HTTP 資產並移除裝置 mock；`make demo` 保留 preview mock，使用一般未 gzip 檔案。
+來源 `index.html` 可用 `file://` 直接開啟，不需要 npm 或建置。選用 `make build` 產生打包（一支樣式、一支啟動 script，Help 需要時才載入）、minify、gzip-only 的 HTTP 資產並移除裝置 mock；`make demo` 保留 preview mock，使用一般未 gzip 檔案，也可用 `file://` 開啟。
 
 ```bash
 make test

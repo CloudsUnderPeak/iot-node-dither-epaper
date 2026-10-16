@@ -36,6 +36,11 @@
             app.startupGate.registerResource();
         }
 
+        if (isBundled(path)) {
+            loadedScripts[path] = runBundled(path);
+            return loadedScripts[path];
+        }
+
         // 使用 classic <script>，不使用 module / fetch template，
         // 是為了維持 file:// 直接開啟時也能運作。
         loadedScripts[path] = new Promise(function (resolve, reject) {
@@ -55,5 +60,31 @@
         });
 
         return loadedScripts[path];
+    }
+
+    // 發佈 build 會把 scripts 打包並登記在 app.bundle；source 直接開啟時沒有 bundle，維持逐支插入 <script>。
+    function isBundled(path) {
+        var bundle = app.bundle;
+        return Boolean(bundle && (bundle.scripts[path] || bundle.files[path]));
+    }
+
+    // 打包的 script 一律延到 microtask 依呼叫順序執行，等同 async=false 的插入順序且晚於目前執行中的 script；
+    // 放在其他 bundle 檔（例如 Help）的 script 先載入該檔再執行。
+    function runBundled(path) {
+        var bundle = app.bundle;
+        var container = bundle.files[path] ? loadScript(bundle.files[path]) : Promise.resolve();
+        return container.then(function () {
+            var run = bundle.scripts[path];
+            if (typeof run !== 'function' && run !== true) {
+                throw new Error('Bundled script missing: ' + path);
+            }
+            bundle.scripts[path] = true;
+            if (typeof run === 'function') {
+                run.call(window);
+            }
+            if (app.startupGate) {
+                app.startupGate.settleResource();
+            }
+        });
     }
 })(window.DitherApp);

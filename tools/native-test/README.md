@@ -9,6 +9,7 @@ from `contract_checks.py`.
 - IPv4, configuration field, and cross-field validation
 - API enums, JSON payloads, response serialization, and error field paths
 - HTTP JSON content type, empty/malformed body, and payload-size error contract
+- Bounded HTTP asset If-None-Match parsing: weak/list/wildcard validators, changed tags, malformed and oversized fields
 - User-file filename, MIME, strict size, byte Range, cursor, and console path policies
 - EPDIMG header/CRC/palette streaming validation across arbitrary chunk boundaries
 - Strict gzip decoding, compressed atomic storage, logical downloads and bounded image mirroring

@@ -2,6 +2,7 @@ import gzip
 import hashlib
 import importlib.util
 import json
+import os
 import tarfile
 import struct
 import tempfile
@@ -313,6 +314,30 @@ class ReleaseBuildTest(unittest.TestCase):
         (web_root / "app.js").write_text("collision", encoding="utf-8")
         with self.assertRaisesRegex(release.ReleaseError, "collision"):
             release.embedded_web_records(web_root)
+
+    def test_web_validator_tracks_content_not_size_or_timestamp(self):
+        web_root = self.latest / "web"
+        web_root.mkdir(parents=True)
+        (web_root / "index.html").write_text("<html></html>", encoding="utf-8")
+        asset = web_root / "app.js.gz"
+        asset.write_bytes(gzip.compress(b"var v=1;", mtime=0))
+        original_size = asset.stat().st_size
+        original_hash = release.tree_sha256(web_root)
+        os.utime(asset, (1, 1))
+        self.assertEqual(release.tree_sha256(web_root), original_hash)
+        release.generate_embedded_web_header({"web": "user", "web_sha256": original_hash})
+        first_header = release.EMBEDDED_WEB_HEADER.read_text(encoding="utf-8")
+        release.generate_embedded_web_header({"web": "user", "web_sha256": original_hash})
+        self.assertEqual(release.EMBEDDED_WEB_HEADER.read_text(encoding="utf-8"), first_header)
+
+        asset.write_bytes(gzip.compress(b"var v=2;", mtime=0))
+        self.assertEqual(asset.stat().st_size, original_size)
+        updated_hash = release.tree_sha256(web_root)
+        self.assertNotEqual(updated_hash, original_hash)
+        release.generate_embedded_web_header({"web": "user", "web_sha256": updated_hash})
+        generated = release.EMBEDDED_WEB_HEADER.read_text(encoding="utf-8")
+        self.assertIn(f'constexpr char kWebSha256[] = "{updated_hash}";', generated)
+        self.assertNotIn(original_hash, generated)
 
     def test_generated_header_embeds_validated_web_identity(self):
         web_root = self.latest / "web"

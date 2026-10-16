@@ -47,7 +47,7 @@ Arduino loop <──────────────────────
 | `modules/wifi/WifiManager.*` | non-blocking STA/AP runtime state machine、單一 RAM STA connection transaction 與同步 status snapshot。 |
 | `modules/wifi/WifiScanner.*` | scan busy/cooldown、RSSI 門檻、排序、top 20 與 encryption mapping 的唯一 owner。 |
 | `modules/wifi/WifiRadio.*` | HTTP/loop task 對 Arduino Wi-Fi driver 的共用 mutex。 |
-| `modules/http/*` | HTTP transport、static assets 與 response send adapter。 |
+| `modules/http/*` | HTTP transport、static assets 與 response send adapter；`HttpAssetCache` 以有界 parser 處理 GET 的 If-None-Match weak comparison，靜態資產 ETag 使用 build-time web SHA-256 及 encoding，不在 request path 掃描／hash bytes 或配置整份資產副本。 |
 | `modules/storage/EmbeddedWebAssets.*` | 查找 release build 編譯進 app image 的 raw／gzip 前端資產，並公開 build-time Web source 與輸出樹 SHA-256；也接受 `none`／null hash 的合法空資產狀態。 |
 | `modules/storage/FlashStorage.*` | 讀取實際 flash partition table、running app image 大小與 app 剩餘容量。 |
 | `modules/storage/UserDataStorage.*` | 獨立 user-data LittleFS、stable capacity、single-operation gate，以及 upload／download／list／delete／inspection sessions。 |

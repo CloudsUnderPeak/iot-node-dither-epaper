@@ -51,7 +51,7 @@ You can upload PNG, JPEG/JPG, WebP, and this app's `.dither.png` image projects.
 
 ## Development Checks and Releases
 
-Source `index.html` works with `file://` without npm or a build. Optional `make build` produces minified, gzip-only HTTP assets without the device mock; `make demo` keeps the preview mock and uses normal files.
+Source `index.html` works with `file://` without npm or a build. Optional `make build` produces bundled (one stylesheet, one startup script, Help loaded on demand), minified, gzip-only HTTP assets without the device mock; `make demo` keeps the preview mock and uses normal files that also open with `file://`.
 
 ```bash
 make test

@@ -5,6 +5,17 @@ The native streaming bridge and weak-slot suites do not run the ESPAsyncWebServe
 explicitly authorized device or a transport environment running that library.
 Do not substitute source checks or fake request objects for these results.
 
+For static asset cache acceptance, use a freshly built frontend and the pinned
+device server. Confirm each asset's 200 body matches the build, has a quoted
+web-content/encoding ETag and `Cache-Control: private, no-cache`, and returns a
+bodyless 304 for a matching strong/weak/list/wildcard If-None-Match. A 304 must
+retain ETag, Cache-Control and gzip Vary; any Content-Length describes the
+corresponding 200, not a nonexistent 304 body. Stale tags (including the previous
+web build), a different encoding, and malformed/oversized fields must return
+the full current representation. Unknown assets and JSON APIs must never enter
+asset 304 handling. Compare real browser cold/warm loads and HTTP wire statuses;
+after a restart the same web content must retain its validator.
+
 With the exact firmware/source revision, library versions and client captured
 under `tmp/verification/`, exercise:
 

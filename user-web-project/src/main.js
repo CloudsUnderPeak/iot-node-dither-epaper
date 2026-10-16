@@ -43,6 +43,22 @@
         });
     }
 
+    // Gate 解除後利用 idle 時間預載延後載入的頁面（目前只有 Help），讓第一次進入不必等待網路。
+    function preloadDeferredPages() {
+        function preload() {
+            app.app.pageRegistry.all().forEach(function (page) {
+                if (page.preload) {
+                    page.preload();
+                }
+            });
+        }
+        if (window.requestIdleCallback) {
+            window.requestIdleCallback(preload);
+        } else {
+            window.setTimeout(preload, 0);
+        }
+    }
+
     function localizeStartupGate() {
         if (!app.startupGate) {
             return;
@@ -92,6 +108,7 @@
                 if (app.startupGate) {
                     app.startupGate.complete();
                 }
+                preloadDeferredPages();
             })
             .catch(function (error) {
                 if (app.startupGate) {

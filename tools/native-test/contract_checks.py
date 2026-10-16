@@ -223,9 +223,8 @@ embedded_assets = server[
     server.index("bool ApiServer::sendEmbeddedAsset") :
     server.index("void ApiServer::handleCaptivePortal")
 ]
-if 'response->addHeader("Cache-Control", "no-store")' not in embedded_assets or "max-age" in embedded_assets:
-    print("Embedded frontend assets must not reuse stale CSS or JavaScript across firmware updates", file=sys.stderr)
-    raise SystemExit(1)
+# Cache freshness is covered by HttpAssetCacheTest and pinned HTTP acceptance;
+# requiring no-store here would prohibit conditional browser cache validation.
 for required in (
     "asset->contentEncoding != nullptr",
     'response->addHeader("Content-Encoding", asset->contentEncoding)',

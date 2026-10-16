@@ -3,6 +3,7 @@ import contextlib
 import io
 import importlib.util
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -52,6 +53,64 @@ class BuildTests(unittest.TestCase):
                 path = root / 'output/latest/assets' / ('style.css.gz' if compressed else 'style.css')
                 actual = gzip.decompress(path.read_bytes()).decode() if compressed else path.read_text()
                 self.assertEqual(actual, build.minify_css(source) if minified else source)
+
+    def bundle_fixture(self, root, overrides=None):
+        files = {
+            'index.html': '<head>\n    <link rel="icon" href="assets/icons/app/favicon.ico">\n'
+                          '    <link rel="stylesheet" href="assets/styles/a.css">\n'
+                          '    <link rel="stylesheet" href="assets/styles/b.css">\n</head><body>\n'
+                          '    <span data-svg-icon="assets/icons/x.svg"></span>\n'
+                          '    <script defer src="src/namespace.js"></script>\n'
+                          '    <script defer src="src/pages/help/entry.js"></script>\n</body>',
+            'assets/styles/a.css': 'a{}',
+            'assets/styles/b.css': 'b{}',
+            'assets/icons/x.svg': '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>',
+            'assets/icons/app/favicon.ico': 'ico',
+            'src/namespace.js': '(function () { window.DitherApp = {}; })(window);',
+            'src/pages/help/entry.js': '(function (app) { app.entry = 1; })(window.DitherApp);',
+            'src/pages/help/page.js': '(function (app) { app.help = 1; })(window.DitherApp);',
+            'src/pages/a/page.js': '(function (app) { app.a = 1; })(window.DitherApp);',
+            'src/vendor/lib.js': '(function () { this.Lib = 1; }).call(this);',
+            build.WORKER_SCRIPT: "self.window = self;\nimportScripts(\n    '../../../namespace.js'\n);\nself.onmessage = null;\n",
+        }
+        files.update(overrides or {})
+        for relative, text in files.items():
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_text(text, encoding='utf-8')
+
+    def test_bundle_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.bundle_fixture(root)
+            self.assertEqual(build.bundle_output(root), 8)
+            index = (root / 'index.html').read_text(encoding='utf-8')
+            self.assertEqual(re.findall(r'<link rel="stylesheet" href="([^"]+)"', index), ['bundle/app.css'])
+            self.assertEqual(re.findall(r'<script[^>]+src="([^"]+)"', index), ['bundle/app.js'])
+            self.assertIn('assets/icons/app/favicon.ico', index)
+            app_script = (root / 'bundle/app.js').read_text(encoding='utf-8')
+            for fragment in ['"src/namespace.js":true', '"src/pages/a/page.js":function(){', '"src/vendor/lib.js":function(){',
+                             '"src/pages/help/page.js": "bundle/help.js"', '"assets/icons/x.svg": "data:image/svg+xml;charset=utf-8,%3Csvg']:
+                self.assertIn(fragment, app_script)
+            # Registry is defined before entry scripts run; entries keep index.html order.
+            self.assertLess(app_script.index('app.a = 1'), app_script.index('window.DitherApp = {}'))
+            self.assertLess(app_script.index('window.DitherApp = {}'), app_script.index('app.entry = 1'))
+            self.assertIn('scripts["src/pages/help/page.js"]=function(){', (root / 'bundle/help.js').read_text(encoding='utf-8'))
+            self.assertEqual((root / 'bundle/app.css').read_text(encoding='utf-8'), 'a{}\nb{}')
+            worker = (root / build.WORKER_SCRIPT).read_text(encoding='utf-8')
+            self.assertIn('window.DitherApp = {}', worker)
+            self.assertNotIn('importScripts', worker)
+            for removed in ['src/namespace.js', 'src/pages/a', 'src/pages/help', 'src/vendor', 'assets/styles', 'assets/icons/x.svg']:
+                self.assertFalse((root / removed).exists(), removed)
+            self.assertTrue((root / 'assets/icons/app/favicon.ico').exists())
+
+    def test_bundle_rejects_unsafe_modules(self):
+        for overrides in [{'src/pages/a/page.js': 'var leaked = 1;'},
+                          {'index.html': '<script src="src/namespace.js"></script>'}]:
+            with self.subTest(overrides=list(overrides)), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.bundle_fixture(root, overrides)
+                with self.assertRaises(SystemExit):
+                    build.bundle_output(root)
 
     def test_native_file_url(self):
         path = ROOT / 'index.html'

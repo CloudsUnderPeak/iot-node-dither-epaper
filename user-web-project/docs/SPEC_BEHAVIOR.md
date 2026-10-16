@@ -13,7 +13,7 @@ Split From: SPEC_INDEX.md
 
 最初以 standalone 編輯器起步，目前已包含同源 ESP32 裝置管理、電子紙輸出與可攜式 PNG 專案。下列章節描述現行契約；早期逐日變更由 git history 保留。
 
-- Classic scripts 與本地資產保留 `file://` 直接使用；Python/Make 發佈建置是選用的 HTTP 資產處理流程。
+- Classic scripts 與本地資產保留 `file://` 直接使用；Python/Make 發佈建置是選用的 HTTP 資產處理流程，會把啟動所需檔案打包成少數幾個檔以加快 HTTP／裝置載入，未 gzip 的輸出（例如 `make demo`）同樣可用 `file://` 開啟。
 - 圖片與 workspace 不自動寫入 browser storage；切頁使用記憶體狀態，跨 session 由使用者明確匯出／匯入 `.dither.png`。
 - 顯示色盤與 EPDIMG 協定色盤分離，校色不改變既有六色 code 或檔案格式。
 
@@ -272,6 +272,7 @@ Acceptance:
 - Visual comparisons identify their synthetic source size, palette, algorithm, mapping, distance, and strength settings.
 - The comparison slider, algorithm/mapping/distance tabs, and Color Distance palette explorer remain keyboard accessible.
 - Opening Help and returning to Dither Editor preserves the current editor session.
+- Help content is not part of startup loading; it is preloaded after the editor is ready, and a direct `#/help/...` link shows the requested document when loading finishes.
 
 ### US-16 Draw To A Detected E-paper Device
 
@@ -712,6 +713,7 @@ MVP 不要求：
 - i18n 可用並本地化 loading 文案時，header 的 App 標題與 Menu placeholder 必須同步切換語言，不得等待預設頁 mount 才更新。
 - loading 必須持續到所有 page entry scripts 完成、預設 Dither Editor 掛載、初始頁面的 SVG images settled，且掛載內容完成一次畫面繪製。
 - 初始 SVG image 單獨載入失敗不應讓 App 永久停在 loading；Demo 圖、Web Worker 與使用者操作後才需要的資源不屬於啟動等待範圍。
+- Help 內容不屬於啟動等待範圍：啟動完成後於瀏覽器空閒時預先載入，第一次開啟 Help 通常不需等待；若網址直接開在 `#/help/...`，loading 會等 Help 內容顯示後才解除。Help 內容載入失敗時，只在 Help 頁顯示可重新整理的錯誤提示，不影響其他頁面。
 - 啟動成功後移除 loading 畫面並一次解除操作鎖定，不設定額外最低顯示時間。
 - 啟動 script、stylesheet 或初始化流程失敗時，停止 spinner、隱藏進度條、保持 App 鎖定，並顯示可重新整理頁面的錯誤狀態。
 
@@ -876,7 +878,7 @@ MVP 驗收重點：
 
 Reviewer 應確認：
 
-- 來源沒有遠端 runtime 依賴或必要 build／後端需求；正式 HTTP 資產保留 minify／gzip。
+- 來源沒有遠端 runtime 依賴或必要 build／後端需求；正式 HTTP 資產保留 minify／打包／gzip。
 - 使用者可直接打開 `index.html`。
 - 頁面切換、上一頁、下一頁行為符合預期。
 - Crop、Resize、Adjust、Palette、Dither、Export 行為符合本 spec。

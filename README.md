@@ -40,7 +40,7 @@ This e-paper edition builds on two projects, bringing device management and imag
 
 ## Why this project
 
-- **The editor lives on the device.** The web interface ships inside the firmware. Image preparation runs in your browser, and device operation works over a local connection without internet access.
+- **The editor lives on the device.** The web interface ships inside the firmware. Release builds bundle startup assets; browser caching validates their content with ETags to avoid downloading unchanged files. Image preparation runs in your browser, and device operation works over a local connection without internet access.
 - **Made for six-color e-paper.** Device mode matches the panel’s dimensions and palette, with landscape and portrait cropping, dithering previews, and direct drawing.
 - **A palette you can tune.** Adjust and save the six display RGB values on the panel test page. The editor uses that calibration for both color selection and preview.
 - **Projects you can revisit.** A `.dither.png` project opens as an image in ordinary viewers and restores your editing session when imported back into the editor. Project downloads remain available while the device is offline or cooling down.

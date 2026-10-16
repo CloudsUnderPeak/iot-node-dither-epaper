@@ -5,7 +5,7 @@
 ## Source of truth 與產物邊界
 
 - 本專案內建前端的功能、結構、樣式、文案與修正一律實作在 `builtin-web/`；它是內建 console 的唯一 source of truth。
-- `user-web-project/` 是產品 frontend source，並以 `--squash` Git subtree 追蹤 `embedded-web-dithering` remote 的 `six-color-epaper` branch；它不是 submodule，目錄內不應有獨立 `.git`。其 `make build` 產生已 minify、deterministic gzip-only 的 `build/latest/`。`user-web/` 是主專案原子匯入該產物的 generated input，只保留 tracked `.gitignore`，內容預設不納入 Git且不得人工編輯或混放檔案。
+- `user-web-project/` 是產品 frontend source，並以 `--squash` Git subtree 追蹤 `embedded-web-dithering` remote 的 `six-color-epaper` branch；它不是 submodule，目錄內不應有獨立 `.git`。其 `make build` 在輸出階段合併啟動 JS／CSS、內嵌 SVG icons、分離 lazy Help bundle 與內嵌 Worker dependencies，再產生 minify、deterministic gzip-only 的 `build/latest/`；source 仍維持 classic scripts 與免 build 使用方式。`user-web/` 是主專案原子匯入該產物的 generated input，只保留 tracked `.gitignore`，內容預設不納入 Git且不得人工編輯或混放檔案。
 - `build/latest/web/` 與各時間戳快照內的 `web/` 都是 generated output，不是實作位置，也不得手動修改。每次只建立 web 或 demo 時會用 web-only 結構替換 `build/latest/`，因此既有 `binary/` 與 `firmware.img` 必須一併失效。
 - 處理內建前端需求時，必須先在 `builtin-web/` 完成並確認 source change；產生 `build/`、檢查產物及執行 build verification 是其後獨立階段。`build/` 仍是舊內容只代表尚未重建，source preview 以 `builtin-web/index.html` 及其 `assets/` 為準。
 
@@ -143,7 +143,7 @@ builtin-web/
 - `WEB_PROCESS=auto|minify-gzip|none` 控制主專案處理；`auto` 對 builtin 使用 `minify-gzip`，對 user／none使用 `none`。Imported user frontend 已 precompressed，只接受 `auto` 或 `none`；明確指定 `minify-gzip` 必須拒絕。Builtin 可明確覆寫，none 只接受 `auto`／`none`。
 - `tools/web-build/` 是唯一 frontend output tool，負責原子匯入／清空 `user-web/` 及建立／驗證 `build/latest/web/`。Production builtin 不論 processing mode 都移除 PREVIEW block 與 preview directory；demo 只接受 builtin 並保留 preview；none 只接受 production，並發布空的 `build/latest/web/`。完成驗證後以 private staging 原子替換對應 generated directory。
 - `tools/release-build/` 只消費 `build/latest/` 內既有、已驗證且 target 為 production 的 web。Builtin／user 產生 generated C++ asset table並編入 `firmware.bin`；none 產生 count／payload 為零的安全 sentinel 及 null runtime hash。Demo 不得成為 embedded input。
-- `ApiServer` 依 logical URL 查找 raw 或 `.gz` storage entry並依 logical 副檔名回 MIME type。只有 gzip entry 回 `Content-Encoding: gzip` 與 `Vary: Accept-Encoding`；raw entry不加 encoding。兩者都回 `Cache-Control: no-store`，`/` 對應 `/index.html`。
+- `ApiServer` 依 logical URL 查找 raw 或 `.gz` storage entry並依 logical 副檔名回 MIME type。只有 gzip entry 回 `Content-Encoding: gzip` 與 `Vary: Accept-Encoding`；raw entry不加 encoding。兩者都回 `Cache-Control: private, no-cache` 與帶雙引號的 ETag（實際輸出樹 SHA-256 加 representation encoding），`/` 對應 `/index.html`。瀏覽器可保存資產但每次使用前必須驗證；GET 的 `If-None-Match` 相符時回無 body 的 `304`，並維持 ETag／Cache-Control／Vary。比對支援 weak tag、tag list 與 `*`；malformed 或超過 1024 bytes 的 field 視為 cache miss。任一 web 檔改變會使整包資產 ETag 改變，單純重開機不改變；固定資產 URL 不使用長效 max-age。靜態快取不套用到 API、使用者檔案或 captive redirect。
 - Builtin 所有 asset 使用相對 URL且不得依賴 CDN、remote font、remote icon、analytics 或其他外部資源。User frontend 允許外部資源；本地 asset 仍須存在，hash routing 可用但不提供 history fallback。
 - 動態 mDNS URL 是連回本機裝置的功能連結，不視為外部 dependency。
 - `make prepare-user-web` 只執行 nested build 與匯入；`make web WEB=user` 只消費最近一次成功 import，不重建 `user-web-project/`。`make clean` 完整清空 `user-web/` 產物但保留 `.gitignore`，且不刪除 `user-web-project/build/` 的時間戳歷史。

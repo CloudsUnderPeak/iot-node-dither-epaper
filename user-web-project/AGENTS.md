@@ -43,8 +43,9 @@ These tools are for local agent workflows. They should help future changes produ
 
 - `tools/build/`
   - Use this when producing the optional static release output.
-  - Primary purpose: copy server/device static app files to a timestamped folder under ignored `build/`, optionally minify HTML/CSS/JS/SVG, and optionally replace output files with gzip-only `.gz` versions.
-  - Build output is for HTTP server/device serving, not `file://`; exclude generated demo data fallback files such as `assets/demo/demo-data.js` from build output.
+  - Primary purpose: copy server/device static app files to a timestamped folder under ignored `build/`, optionally minify HTML/CSS/JS/SVG, bundle startup scripts/styles/icons into `bundle/` (Help in its own lazy bundle, worker with inlined `importScripts`), and optionally replace output files with gzip-only `.gz` versions.
+  - Build output is mainly for HTTP server/device serving; non-gzip output must still open with `file://`. Exclude generated demo data fallback files such as `assets/demo/demo-data.js` from build output.
+  - Modules loaded through a page `entry.js` must stay a single IIFE; the build wraps them in functions and fails otherwise. Icons must go through `src/ui/svg-icons.js` so the build can embed them.
   - Release builds strip the `<!-- PREVIEW START/END -->` block from `index.html` and exclude `src/device/device-mock.js`, so device output never contains the mock device API. `--demo` (or `make demo`) keeps both for static demo hosting and never gzips.
   - Every run clears and rebuilds `build/latest` as a mirror of that run's timestamped output; treat `build/latest` as "the newest build" regardless of mode.
   - Minify and gzip replacement are enabled by default. Use `--no-minify` or `--no-gzip` only when the task explicitly needs raw output or normal files.

@@ -39,6 +39,12 @@ Wi-Fi 設定以 REST API 為核心，內建網頁只是 REST client。同一套�
 - 純 STA LAN mode 不得啟用 DNS wildcard captive portal。
 - mDNS 只在 STA connected 時啟用。
 
+## 網頁載入與更新
+
+- 正式 user frontend 在發佈 build 合併啟動資產，減少第一次開頁的 HTTP 請求；Help 內容在需要時或初始畫面 ready 後預載。
+- 公開靜態網頁資產允許瀏覽器快取，但每次載入前必須向裝置確認版本。未變動時回 304 並使用本機快取；更新並部署 web 後，下次載入取得新版，即使檔名及大小未變亦須辨識。已開啟的頁面不主動推送更新。
+- 重開機而 web 內容未變時保留相同 validator；只改 firmware 而 web 內容未變亦不必重新下載靜態資產。動態 API、登入及使用者資料不套用靜態資產快取。
+
 ## 狀態查詢與 REST-first 操作
 
 - `GET /api/device`、`GET /api/web`、`GET /api/storage`、`GET /api/wifi`、`GET /api/auth`、全部 e-paper 專用 endpoint 與 `GET /api/runtime/status` 公開；Wi-Fi scan／connect、auth session 與 generic user-file endpoint（包含 list／download）需要有效 Bearer token。
